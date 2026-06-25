@@ -383,7 +383,7 @@ def daily_canicule_risk(path, sig, seuil, grid_hours=(0, 6, 12, 18)):
 
 
 def _canicule_label(prob):
-    """Étiquette grand public du niveau de risque canicule (pour le survol)."""
+    """Niveau de risque canicule (pour le survol)."""
     if prob >= 0.50:
         return "🔴 Canicule quasi-certaine"
     if prob >= 0.25:
@@ -977,7 +977,7 @@ def calendrier_risques(jours, seuil):
 
 
 def page_grand_public(runs, sig):
-    st.title("🌞 Indicateur Grand Public")
+    st.title("🌞 Indicateur de canicule")
     if runs.empty:
         st.warning("Aucun fichier de prévision trouvé dans le dossier `Forecasts/`.")
         return
@@ -1089,7 +1089,7 @@ def main():
     st.sidebar.title("🌦️ Navigation")
     page = st.sidebar.radio(
         "Aller à",
-        ["Vue d'ensemble", "Indicateur Grand Public", "Explorer un run",
+        ["Vue d'ensemble", "Indicateur de canicule", "Explorer un run",
          "Convergence des runs", "Lancer un run"],
     )
     st.sidebar.markdown("---")
@@ -1105,7 +1105,7 @@ def main():
 
     if page == "Vue d'ensemble":
         page_overview(runs, sig)
-    elif page == "Indicateur Grand Public":
+    elif page == "Indicateur de canicule":
         page_grand_public(runs, sig)
     elif page == "Explorer un run":
         page_explore(runs, sig)

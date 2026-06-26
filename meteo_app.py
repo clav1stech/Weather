@@ -38,9 +38,23 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FORECASTS_DIR = os.path.join(BASE_DIR, "Forecasts")
 FORECAST_SCRIPT = os.path.join(BASE_DIR, "Forecast.py")
 
-# Lancer un run n'a de sens qu'en local (sur le Cloud le conteneur est éphémère).
-# On n'expose l'option que si WEATHER_LOCAL=1 est défini dans l'environnement.
-IS_LOCAL = os.environ.get("WEATHER_LOCAL") == "1"
+# Lancer un run n'a de sens qu'en local (sur le Cloud le conteneur est éphémère,
+# le .xlsx produit serait perdu). On masque donc l'option sur Streamlit Cloud.
+def _detect_local():
+    """True si l'app tourne en local (PC), False sur Streamlit Community Cloud.
+
+    Forçage explicite possible via WEATHER_LOCAL=1 / =0. Sinon heuristique : le Cloud
+    tourne sous Linux et monte le dépôt dans /mount/src ; en local on autorise le run."""
+    forced = os.environ.get("WEATHER_LOCAL")
+    if forced in ("0", "1"):
+        return forced == "1"
+    base = BASE_DIR.replace("\\", "/")
+    on_cloud = base.startswith("/mount/src") or \
+        os.environ.get("HOSTNAME", "").startswith("streamlit")
+    return not on_cloud
+
+
+IS_LOCAL = _detect_local()
 
 # Palette alignée sur les couleurs du fichier Excel généré par Forecast.py
 MODEL_COLORS = {"ECMWF": "#1F618D", "AIFS": "#1E8449", "GEFS": "#B9770E"}
@@ -646,11 +660,20 @@ def page_explore(runs, sig):
                        format_func=lambda i: runs.loc[i, "label"])
     run = runs.loc[idx]
     path = run["path"]
-    st.caption(f"Fichier : `{os.path.basename(path)}`")
+    if IS_LOCAL:
+        st.caption(f"Fichier : `{os.path.basename(path)}`")
 
     syn = super_ensemble(path, sig)
     models = available_models(path)
     cutoff = multimodel_cutoff(path, sig)
+
+    # Signale les modèles absents de ce run (super-ensemble appauvri → moins fiable)
+    manquants = [m for m in MODEL_COLORS if m not in models]
+    if manquants:
+        st.warning(
+            f"⚠️ Modèle(s) absent(s) de ce run : **{', '.join(manquants)}**. "
+            "Le super-ensemble repose donc sur moins de modèles : "
+            "la prévision est **moins fiable** (dispersion possiblement sous-estimée).")
 
     tab_fan, tab_spag, tab_cmp, tab_unc, tab_tbl = st.tabs(
         ["📈 Panache", "🍝 Spaghetti", "⚖️ Modèles", "📉 Incertitude", "🧾 Tableaux"]
@@ -743,6 +766,20 @@ def page_convergence(runs, sig):
     if len(runs) < 2:
         st.warning("Il faut au moins 2 runs pour analyser la convergence.")
         return
+
+    # Runs avec un super-ensemble appauvri (≥ 1 modèle absent) → comparaisons moins fiables
+    runs_incomplets = [
+        (r["label"], [m for m in MODEL_COLORS if m not in available_models(r["path"])])
+        for _, r in runs.iterrows()
+    ]
+    runs_incomplets = [(lbl, miss) for lbl, miss in runs_incomplets if miss]
+    if runs_incomplets:
+        detail = " · ".join(f"{lbl} (manque {', '.join(miss)})"
+                            for lbl, miss in runs_incomplets)
+        st.warning(
+            "⚠️ Certains runs n'ont pas tous les modèles, leur super-ensemble est "
+            "appauvri : les révisions qui les concernent sont **moins fiables**.\n\n"
+            f"{detail}")
 
     # --- Historique commun : médiane/P10/P90 journalières de CHAQUE run (recalcul brut) ---
     records = []

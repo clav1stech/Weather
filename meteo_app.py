@@ -32,7 +32,7 @@ from plotly.subplots import make_subplots
 #  Configuration générale
 # --------------------------------------------------------------------------- #
 # Version de l'app — à incrémenter manuellement à chaque évolution notable.
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FORECASTS_DIR = os.path.join(BASE_DIR, "Forecasts")
@@ -281,23 +281,46 @@ def _pooled_members(path, _sig, grid_hours=(0, 6, 12, 18), truncate=True):
       • det_series : {« MODELE DET » : Series indexée valid_time}.
     Insensible au bug historique du déterministe GEFS (« GFS » exclu par load_model).
     """
-    models = available_models(path)
     member_frames, presence, det_series = [], [], {}
-    for model in models:
-        loaded = load_model(path, model, _sig)
-        if not loaded:
+    for model in available_models(path):
+        loaded = _model_member_frame(path, model, _sig)
+        if loaded is None:
             continue
-        stats, members, det = loaded  # members : index = valid_time, déterministe exclu
-        m = members.apply(pd.to_numeric, errors="coerce")
-        m.columns = [f"{model}_{c}" for c in m.columns]
+        m, det_s = loaded
         member_frames.append(m)
         presence.append(m.notna().any(axis=1).rename(model))
-        if det is not None:
-            det_series[f"{model} DET"] = pd.Series(
-                pd.to_numeric(det, errors="coerce").values, index=stats["valid_time"])
+        if det_s is not None:
+            det_series[f"{model} DET"] = det_s
+    return _assemble_pooled(member_frames, presence, det_series, grid_hours, truncate)
+
+
+def _model_member_frame(path, model, _sig):
+    """Membres bruts d'UN modèle pour un run, colonnes préfixées « MODELE_x ».
+
+    Retourne (members_df, det_series) ou None ; déterministe exclu des membres
+    (cf. load_model), renvoyé à part en Series indexée valid_time.
+    """
+    loaded = load_model(path, model, _sig)
+    if not loaded:
+        return None
+    stats, members, det = loaded  # members : index = valid_time, déterministe exclu
+    m = members.apply(pd.to_numeric, errors="coerce")
+    m.columns = [f"{model}_{c}" for c in m.columns]
+    det_s = None
+    if det is not None:
+        det_s = pd.Series(pd.to_numeric(det, errors="coerce").values,
+                          index=stats["valid_time"])
+    return m, det_s
+
+
+def _assemble_pooled(member_frames, presence, det_series, grid_hours, truncate):
+    """Concatène des matrices de membres en (allm, n_models, det_series) sur la grille.
+
+    Restreint à `grid_hours` et, si `truncate`, coupe la queue où il ne reste qu'un
+    seul modèle (GEFS au long terme).
+    """
     if not member_frames:
         return None
-
     allm = pd.concat(member_frames, axis=1).sort_index()
     pres = pd.concat(presence, axis=1).reindex(allm.index)
     n_models = (pres == True).sum(axis=1)  # NaN (modèle absent) compte comme False
@@ -312,17 +335,12 @@ def _pooled_members(path, _sig, grid_hours=(0, 6, 12, 18), truncate=True):
     return allm, n_models, det_series
 
 
-@st.cache_data(show_spinner=False)
-def super_ensemble(path, _sig, grid_hours=(0, 6, 12, 18), truncate=True):
-    """SOURCE UNIQUE de l'interface : super-ensemble recalculé depuis les membres bruts.
+def _super_ensemble_stats(pooled):
+    """Statistiques par échéance à partir d'un (allm, n_models, det_series) pooled.
 
-    Recalcule TOUTES les statistiques par échéance (au lieu de relire la feuille
-    Synthèse précalculée 12Z). Voir _pooled_members pour la base de calcul.
-
-    Retourne un DataFrame : valid_time, Min/P10/P25/Médiane/P75/P90/Max, Spread,
-    Ecart-type, Proba > 20°, n_membres, n_models, et une colonne « <MODELE> DET ».
+    Base de calcul commune à `super_ensemble` (membres d'un seul run) et au super-
+    ensemble « complété » de la page convergence (membres backfillés inter-runs).
     """
-    pooled = _pooled_members(path, _sig, grid_hours, truncate)
     if pooled is None:
         return None
     allm, n_models, det_series = pooled
@@ -346,13 +364,25 @@ def super_ensemble(path, _sig, grid_hours=(0, 6, 12, 18), truncate=True):
     return out.reset_index(drop=True)
 
 
-def super_ensemble_daily(path, sig, **kw):
-    """Super-ensemble agrégé à 1 ligne/jour (MOYENNE des échéances du jour).
+@st.cache_data(show_spinner=False)
+def super_ensemble(path, _sig, grid_hours=(0, 6, 12, 18), truncate=True):
+    """SOURCE UNIQUE de l'interface : super-ensemble recalculé depuis les membres bruts.
+
+    Recalcule TOUTES les statistiques par échéance (au lieu de relire la feuille
+    Synthèse précalculée 12Z). Voir _pooled_members pour la base de calcul.
+
+    Retourne un DataFrame : valid_time, Min/P10/P25/Médiane/P75/P90/Max, Spread,
+    Ecart-type, Proba > 20°, n_membres, n_models, et une colonne « <MODELE> DET ».
+    """
+    return _super_ensemble_stats(_pooled_members(path, _sig, grid_hours, truncate))
+
+
+def _daily_aggregate(se):
+    """Agrège un super-ensemble infra-journalier en 1 ligne/jour (MOYENNE du jour).
 
     À 850 hPa le cycle diurne est négligeable : la moyenne journalière est
     l'estimateur le plus robuste et sans biais. `valid_time` est repositionné à 12Z.
     """
-    se = super_ensemble(path, sig, **kw)
     if se is None or se.empty:
         return se
     se = se.copy()
@@ -362,6 +392,61 @@ def super_ensemble_daily(path, sig, **kw):
     out["valid_time"] = out["date"] + pd.Timedelta(hours=12)
     out[_PCT_COLS] = out[_PCT_COLS].round(2)
     return out
+
+
+def super_ensemble_daily(path, sig, **kw):
+    """Super-ensemble d'un run agrégé à 1 ligne/jour."""
+    return _daily_aggregate(super_ensemble(path, sig, **kw))
+
+
+# Backfill inter-runs : un modèle absent d'un run est remplacé par ses membres du
+# run antérieur le plus récent où il est présent. On remonte au maximum jusqu'à n-3
+# (soit 2 runs sautés ≈ 1 jour) pour ne pas comparer un super-ensemble à 3 modèles
+# avec un super-ensemble réduit à un seul.
+BACKFILL_MAX_LOOKBACK = 3
+
+
+def _completed_pooled_members(runs, pos, sig, grid_hours=(0, 6, 12, 18),
+                              truncate=True, max_lookback=BACKFILL_MAX_LOOKBACK):
+    """Membres pooled du run `pos`, en complétant les modèles absents.
+
+    `runs` est trié du plus récent au plus ancien (cf. list_runs) : le run n-1 est
+    donc à l'index pos+1. Pour chaque modèle absent du run courant, on prend ses
+    membres du run antérieur le plus proche qui le contient (pos+1 → pos+max_lookback).
+
+    Retourne (pooled, sources) où `sources` mappe chaque modèle vers le datetime du
+    run réellement utilisé (= run courant si présent, run antérieur si backfillé,
+    None si introuvable dans la fenêtre).
+    """
+    n = len(runs)
+    member_frames, presence, det_series, sources = [], [], {}, {}
+    for model in MODEL_COLORS:
+        sources[model] = None
+        for j in range(pos, min(pos + max_lookback + 1, n)):
+            cand = runs.iloc[j]
+            if model not in available_models(cand["path"]):
+                continue
+            loaded = _model_member_frame(cand["path"], model, sig)
+            if loaded is None:
+                continue
+            m, det_s = loaded
+            member_frames.append(m)
+            presence.append(m.notna().any(axis=1).rename(model))
+            if det_s is not None:
+                det_series[f"{model} DET"] = det_s
+            sources[model] = cand["datetime"]
+            break
+    pooled = _assemble_pooled(member_frames, presence, det_series, grid_hours, truncate)
+    return pooled, sources
+
+
+def completed_super_ensemble_daily(runs, pos, sig, **kw):
+    """Super-ensemble journalier du run `pos`, modèles manquants backfillés.
+
+    Retourne (df_daily, sources) — voir _completed_pooled_members pour `sources`.
+    """
+    pooled, sources = _completed_pooled_members(runs, pos, sig, **kw)
+    return _daily_aggregate(_super_ensemble_stats(pooled)), sources
 
 
 def multimodel_cutoff(path, sig):
@@ -780,9 +865,15 @@ def page_convergence(runs, sig):
         return
 
     # --- Historique commun : médiane/P10/P90 journalières de CHAQUE run (recalcul brut) ---
+    # Un modèle absent d'un run est backfillé depuis le run antérieur le plus proche qui
+    # le contient (jusqu'à n-3) : on compare ainsi des super-ensembles à modèles
+    # comparables, pas « 3 modèles vs 1 ». backfill_src : {run_dt -> {modèle -> run source}}.
     records = []
-    for _, r in runs.iterrows():
-        syn = super_ensemble_daily(r["path"], sig)
+    backfill_src = {}
+    for pos in range(len(runs)):
+        r = runs.iloc[pos]
+        syn, sources = completed_super_ensemble_daily(runs, pos, sig)
+        backfill_src[r["datetime"]] = sources
         if syn is None or syn.empty:
             continue
         for _, row in syn.iterrows():
@@ -807,29 +898,43 @@ def page_convergence(runs, sig):
         st.warning("Données insuffisantes (aucune feuille modèle exploitable).")
         return
 
-    # Runs réellement présents dans les graphiques et privés d'au moins un modèle.
-    # incomplets : {datetime du run -> liste des modèles manquants}
+    # Runs affichés dont au moins un modèle a été backfillé (repris d'un run antérieur)
+    # ou reste introuvable dans la fenêtre n-3. backfilled / manquants : {run_dt -> ...}.
     runs_affiches = set(long["run_dt"].unique())
-    incomplets = {
-        r["datetime"]: [m for m in MODEL_COLORS if m not in available_models(r["path"])]
-        for _, r in runs.iterrows() if r["datetime"] in runs_affiches
-    }
-    incomplets = {dt: miss for dt, miss in incomplets.items() if miss}
     label_par_dt = {r["datetime"]: r["label"] for _, r in runs.iterrows()}
+    backfilled, manquants = {}, {}
+    for dt, sources in backfill_src.items():
+        if dt not in runs_affiches:
+            continue
+        bf = {m: src for m, src in sources.items() if src is not None and src != dt}
+        miss = [m for m in MODEL_COLORS if sources.get(m) is None]
+        if bf:
+            backfilled[dt] = bf
+        if miss:
+            manquants[dt] = miss
+    imparfaits = set(backfilled) | set(manquants)
 
     def _run_tick(dt):
-        """Libellé d'un run pour les graphiques ; italique + astérisque si modèle manquant."""
+        """Libellé d'un run ; italique + astérisque si modèle backfillé ou manquant."""
         s = pd.Timestamp(dt).strftime("%d %b %Hh")
-        return f"<i>{s}*</i>" if dt in incomplets else s
+        return f"<i>{s}*</i>" if dt in imparfaits else s
 
-    if incomplets:
-        detail = " · ".join(f"{label_par_dt[dt]} (manque {', '.join(incomplets[dt])})"
-                            for dt in sorted(incomplets, reverse=True))
+    if imparfaits:
+        parts = []
+        for dt in sorted(imparfaits, reverse=True):
+            notes = []
+            for m, src in backfilled.get(dt, {}).items():
+                notes.append(f"{m} repris du {pd.Timestamp(src).strftime('%d %b %Hh')}")
+            if dt in manquants:
+                notes.append(f"manque {', '.join(manquants[dt])}")
+            parts.append(f"{label_par_dt[dt]} ({' ; '.join(notes)})")
         st.warning(
-            "⚠️ Certains runs affichés n'ont pas tous les modèles, leur super-ensemble est "
-            "appauvri : les révisions qui les concernent sont **moins fiables**. "
-            "Dans les graphiques, ces runs sont notés en *italique* avec un astérisque (\\*).\n\n"
-            f"{detail}")
+            "⚠️ Certains runs affichés n'avaient pas tous les modèles. Les modèles absents "
+            "sont **repris du run antérieur le plus proche** qui les contient (jusqu'à n-3, "
+            "soit ~1 jour) afin de comparer des super-ensembles équivalents. Quand aucun run "
+            "récent ne fournit le modèle, il reste manquant et le super-ensemble est appauvri. "
+            "Ces runs sont notés en *italique* avec un astérisque (\\*).\n\n"
+            + " · ".join(parts))
 
     # --- Sélection du run de référence pour les révisions ---
     idx = st.selectbox(

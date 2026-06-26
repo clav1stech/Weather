@@ -32,7 +32,7 @@ from plotly.subplots import make_subplots
 #  Configuration générale
 # --------------------------------------------------------------------------- #
 # Version de l'app — à incrémenter manuellement à chaque évolution notable.
-APP_VERSION = "1.0.4"
+APP_VERSION = "1.0.5"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FORECASTS_DIR = os.path.join(BASE_DIR, "Forecasts")
@@ -504,17 +504,25 @@ def models_median_chart(path, sig, models, cutoff=None):
         loaded = load_model(path, model, sig)
         if not loaded:
             continue
-        stats, _, _ = loaded
+        stats, _, det = loaded
         if cutoff is not None:
-            stats = stats[stats["valid_time"] <= cutoff]
+            mask = stats["valid_time"] <= cutoff
+            stats = stats[mask]
+            if det is not None:
+                det = det[mask.values]
         c = MODEL_COLORS[model]
         _band(fig, stats["valid_time"], stats["p10"], stats["p90"], c,
               f"{model} P10–P90", 0.12)
         fig.add_trace(go.Scatter(
             x=stats["valid_time"], y=stats["median"], mode="lines",
             name=f"{model} médiane", line=dict(color=c, width=2.8)))
+        if det is not None and det.notna().any():
+            fig.add_trace(go.Scatter(
+                x=stats["valid_time"], y=det.values, mode="lines",
+                name=f"{model} déterministe",
+                line=dict(color=c, width=1.6, dash="dot")))
     fig.update_layout(
-        title="Comparaison des modèles — médianes & dispersion",
+        title="Comparaison des modèles — médiane, dispersion & déterministe",
         height=480, hovermode="x unified", template="plotly_white",
         xaxis_title="Échéance (date de validité)", yaxis_title="Température (°C)",
         legend=dict(orientation="h", y=1.1), margin=dict(t=80, l=10, r=10, b=10),
@@ -643,6 +651,10 @@ def page_overview(runs, sig):
     models = available_models(latest["path"])
     if models:
         cutoff = multimodel_cutoff(latest["path"], sig)
+        st.caption(
+            "Trait plein = **médiane** de chaque modèle, bande = sa dispersion (P10–P90). "
+            "Pointillés = **run déterministe** (prévision unique « haute résolution ») : "
+            "utile pour voir si le scénario principal s'écarte du centre de son ensemble.")
         st.plotly_chart(models_median_chart(latest["path"], sig, models, cutoff),
                         use_container_width=True)
 
@@ -767,20 +779,6 @@ def page_convergence(runs, sig):
         st.warning("Il faut au moins 2 runs pour analyser la convergence.")
         return
 
-    # Runs avec un super-ensemble appauvri (≥ 1 modèle absent) → comparaisons moins fiables
-    runs_incomplets = [
-        (r["label"], [m for m in MODEL_COLORS if m not in available_models(r["path"])])
-        for _, r in runs.iterrows()
-    ]
-    runs_incomplets = [(lbl, miss) for lbl, miss in runs_incomplets if miss]
-    if runs_incomplets:
-        detail = " · ".join(f"{lbl} (manque {', '.join(miss)})"
-                            for lbl, miss in runs_incomplets)
-        st.warning(
-            "⚠️ Certains runs n'ont pas tous les modèles, leur super-ensemble est "
-            "appauvri : les révisions qui les concernent sont **moins fiables**.\n\n"
-            f"{detail}")
-
     # --- Historique commun : médiane/P10/P90 journalières de CHAQUE run (recalcul brut) ---
     records = []
     for _, r in runs.iterrows():
@@ -808,6 +806,30 @@ def page_convergence(runs, sig):
     if long.empty:
         st.warning("Données insuffisantes (aucune feuille modèle exploitable).")
         return
+
+    # Runs réellement présents dans les graphiques et privés d'au moins un modèle.
+    # incomplets : {datetime du run -> liste des modèles manquants}
+    runs_affiches = set(long["run_dt"].unique())
+    incomplets = {
+        r["datetime"]: [m for m in MODEL_COLORS if m not in available_models(r["path"])]
+        for _, r in runs.iterrows() if r["datetime"] in runs_affiches
+    }
+    incomplets = {dt: miss for dt, miss in incomplets.items() if miss}
+    label_par_dt = {r["datetime"]: r["label"] for _, r in runs.iterrows()}
+
+    def _run_tick(dt):
+        """Libellé d'un run pour les graphiques ; italique + astérisque si modèle manquant."""
+        s = pd.Timestamp(dt).strftime("%d %b %Hh")
+        return f"<i>{s}*</i>" if dt in incomplets else s
+
+    if incomplets:
+        detail = " · ".join(f"{label_par_dt[dt]} (manque {', '.join(incomplets[dt])})"
+                            for dt in sorted(incomplets, reverse=True))
+        st.warning(
+            "⚠️ Certains runs affichés n'ont pas tous les modèles, leur super-ensemble est "
+            "appauvri : les révisions qui les concernent sont **moins fiables**. "
+            "Dans les graphiques, ces runs sont notés en *italique* avec un astérisque (\\*).\n\n"
+            f"{detail}")
 
     # --- Sélection du run de référence pour les révisions ---
     idx = st.selectbox(
@@ -838,7 +860,7 @@ def page_convergence(runs, sig):
                       if v < 0 else _rgba("#888888", 0.4) for v in delta.values]
             fig_rev.add_trace(go.Bar(
                 x=delta.index, y=delta.values, offsetgroup=i,
-                name="Δ vs " + pd.Timestamp(pr).strftime("%d %b %Hh"),
+                name="Δ vs " + _run_tick(pr),
                 marker_color=colors,
             ))
         fig_rev.add_hline(y=0, line_color="#333", line_width=1.5)
@@ -955,7 +977,7 @@ def page_convergence(runs, sig):
         abs_max = max(abs_max, 0.5)  # évite une échelle à 0
         heat = go.Figure(data=go.Heatmap(
             z=delta_pivot.values,
-            x=[pd.Timestamp(c).strftime("%d %b %Hh") for c in delta_pivot.columns],
+            x=[_run_tick(c) for c in delta_pivot.columns],
             y=[pd.Timestamp(i).strftime("%d %b") for i in delta_pivot.index],
             colorscale="RdBu_r",
             zmid=0,
@@ -1007,8 +1029,9 @@ def page_run(sig):
                 st.error(f"Erreur lors du lancement : {e}")
 
 
-def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
-    """Graphique épuré : médiane + zone d'incertitude P10–P90 + deux seuils."""
+def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre,
+                        normale=NORMALE_CLIM_850):
+    """Graphique épuré : médiane + zone d'incertitude P10–P90 + normale + deux seuils."""
     x = syn["valid_time"]
     p10 = syn.get("P10")
     p90 = syn.get("P90")
@@ -1030,8 +1053,8 @@ def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
         hovertemplate="%{x|%a %d %b · %Hh}<br>Médiane : %{y:.1f} °C<extra></extra>"))
     # Normale climatique de saison (bleu) : référence « temps normal »
     fig.add_hline(
-        y=NORMALE_CLIM_850, line=dict(color="#2980B9", width=2, dash="dot"),
-        annotation_text=f"Normale climatique — {NORMALE_CLIM_850:.0f} °C",
+        y=normale, line=dict(color="#2980B9", width=2, dash="dot"),
+        annotation_text=f"Normale climatique — {normale:.0f} °C",
         annotation_position="bottom left",
         annotation_font=dict(color="#2471A3", size=12))
     # Lignes d'alerte : chaleur (orange) et canicule exceptionnelle (rouge)
@@ -1150,10 +1173,14 @@ def page_grand_public(runs, sig):
             "**un seul modèle** détaillé scénario par scénario (onglet **Spaghetti**), ou la "
             "**comparaison des médianes** de chaque modèle (onglet **Modèles**).")
 
-    # Réglages avancés : les deux seuils d'intensité (repliés par défaut)
+    # Réglages avancés : normale climatique + deux seuils d'intensité (repliés par défaut)
     with st.expander("⚙️ Réglages avancés"):
         st.caption("Heuristique plaine France l'été : température au sol ≈ T850 + 15 °C.")
-        col_a, col_b = st.columns(2)
+        col_n, col_a, col_b = st.columns(3)
+        seuil_normale = col_n.number_input(
+            "Normale climatique (°C à 850 hPa)",
+            min_value=0.0, max_value=20.0, value=float(NORMALE_CLIM_850), step=0.5,
+            help="Repère « temps de saison ». Sert de référence d'anomalie (ligne bleue).")
         seuil_chaleur = col_a.number_input(
             "Seuil chaleur — vert → orange (°C à 850 hPa)",
             min_value=10.0, max_value=25.0, value=float(SEUIL_CHALEUR_850), step=0.5,
@@ -1237,7 +1264,8 @@ def page_grand_public(runs, sig):
         "**seuils d'alerte** (orange/rouge), en température à 850 hPa.")
     st.plotly_chart(
         ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule,
-                            "Température à 850 hPa — tendance et incertitude"),
+                            "Température à 850 hPa — tendance et incertitude",
+                            normale=seuil_normale),
         use_container_width=True)
 
     # --- Graphique 2 : le calendrier des risques (dégradé) ---

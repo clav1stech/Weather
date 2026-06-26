@@ -508,5 +508,113 @@ def router_et_construire(extractions_brutes):
     print("\n✅ Terminé !")
 
 
+def tenter_rattrapage():
+    """Après le run principal, tente de compléter le fichier du run opposé si des modèles y manquent.
+
+    Ex : après le run 12Z, cherche le fichier 0Z le plus récent. Si ECMWF y manque
+    encore, le télécharge et l'ajoute — uniquement si Météociel sert toujours la
+    MÊME date et la MÊME heure de run que le fichier cible (double garde-fou).
+    Ne remplace jamais un modèle déjà présent.
+    """
+    autre_run = "0Z" if CHOIX_RUN == "12Z" else "12Z"
+    autre_run_param = "0" if autre_run == "0Z" else "12"
+    autre_heure = 0 if autre_run == "0Z" else 12
+
+    pattern = os.path.join(DOSSIER_SORTIE, f"Forecast-*-{autre_run}.xlsx")
+    fichiers = sorted(glob.glob(pattern), key=parse_file_datetime, reverse=True)
+    if not fichiers:
+        return
+
+    fichier_cible = fichiers[0]
+    date_attendue = parse_file_datetime(fichier_cible).date()
+
+    try:
+        wb_check = load_workbook(fichier_cible, read_only=True)
+        sheets_presents = set(wb_check.sheetnames)
+        wb_check.close()
+    except Exception as e:
+        print(f"  ⚠️ Rattrapage : impossible de lire {os.path.basename(fichier_cible)} ({e}).")
+        return
+
+    manquants = [m for m in modeles if SHEET_PAR_NOM[m['nom']] not in sheets_presents]
+    if not manquants:
+        return
+
+    print(f"\n🔁 Rattrapage {autre_run} : {os.path.basename(fichier_cible)} "
+          f"(date attendue : {date_attendue.strftime('%d/%m/%Y')})")
+    print(f"   Modèles manquants : {', '.join(m['nom'] for m in manquants)}")
+
+    urls_autre_run = {
+        "ECMWF ENS": f"https://www.meteociel.fr/modeles/ecmwfens_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&run={autre_run_param}",
+        "AIFS ENS":  f"https://www.meteociel.fr/modeles/ecmwfens_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&aifs=1&run={autre_run_param}",
+        "GEFS":      f"https://www.meteociel.fr/modeles/gefs_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&run={autre_run_param}",
+    }
+
+    nouveaux = {}
+    for m_conf in manquants:
+        nom = m_conf['nom']
+        url = urls_autre_run[nom]
+        print(f"   Téléchargement de {nom}...")
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.encoding = 'windows-1252'
+            html = response.text
+
+            match = re.search(r'(Run .*?(\d{2}/\d{2}/\d{4})\s+(\d{1,2})[Zz])', html)
+            if not match:
+                print(f"   ⚠️ {nom} : date illisible, ignoré.")
+                continue
+
+            run_date = datetime.datetime.strptime(match.group(2), "%d/%m/%Y").date()
+            run_heure = int(match.group(3))
+
+            if run_date != date_attendue:
+                print(f"   ⚠️ {nom} : date {run_date.strftime('%d/%m/%Y')} ≠ "
+                      f"{date_attendue.strftime('%d/%m/%Y')} (mauvais jour), ignoré.")
+                continue
+            if run_heure != autre_heure:
+                print(f"   ⚠️ {nom} : sur le run {run_heure}Z (attendu {autre_run}), ignoré.")
+                continue
+
+            df, colors = parser_tableau_meteociel(html)
+            if df is None:
+                print(f"   ⚠️ {nom} : tableau non parseable, ignoré.")
+                continue
+
+            nominal = ECHEANCE_MAX_NOMINALE.get(nom)
+            ech_max = max_echeance(df)
+            if nominal and (pd.isna(ech_max) or ech_max < SEUIL_COMPLETUDE * nominal):
+                ech_txt = "—" if pd.isna(ech_max) else f"{int(ech_max)}h"
+                print(f"   ⏳ {nom} encore partiel ({ech_txt}/{nominal}h), ignoré.")
+                continue
+
+            nouveaux[nom] = {'df': df, 'colors': colors, 'info': match.group(1)}
+            print(f"   ✅ {nom} récupéré.")
+        except Exception as e:
+            print(f"   ⚠️ {nom} : connexion échouée ({e}).")
+
+    if not nouveaux:
+        print("   Aucun nouveau modèle récupéré pour ce rattrapage.")
+        return
+
+    combined = {}
+    for sheet, nom in NOM_PAR_SHEET.items():
+        existant = lire_feuille_modele(fichier_cible, sheet)
+        if existant is not None:
+            combined[nom] = existant
+    for nom, data in nouveaux.items():
+        if nom not in combined:
+            combined[nom] = data
+
+    noms_ordonnes = [n for n in ORDRE_MODELES if n in combined]
+    construire_et_sauver(
+        {n: combined[n]['df'] for n in noms_ordonnes},
+        {n: combined[n]['colors'] for n in noms_ordonnes},
+        {n: combined[n]['info'] for n in noms_ordonnes},
+        fichier_cible
+    )
+
+
 if __name__ == "__main__":
     router_et_construire(extraire_modeles())
+    tenter_rattrapage()

@@ -45,6 +45,31 @@ jobs:
       - name: Run Forecast.py
         run: python Forecast.py ${{ steps.run_arg.outputs.arg }}
 
+      - name: Vérifier complétude du run
+        run: |
+          python - <<'EOF'
+          import glob, os, time
+          from openpyxl import load_workbook
+          now = time.time()
+          # Surveille tous les fichiers écrits dans l'heure (run principal + éventuel rattrapage)
+          recent = [f for f in glob.glob("Forecasts/*.xlsx") if now - os.path.getmtime(f) < 3600]
+          if not recent:
+              print("::warning::Aucun fichier xlsx écrit durant ce run")
+          else:
+              incomplets = []
+              for f in recent:
+                  wb = load_workbook(f, read_only=True)
+                  models = [s for s in wb.sheetnames if s in ("ECMWF", "AIFS", "GEFS")]
+                  wb.close()
+                  if len(models) < 3:
+                      missing = [m for m in ("ECMWF", "AIFS", "GEFS") if m not in models]
+                      incomplets.append(f"{os.path.basename(f)}: {len(models)}/3 (manque {', '.join(missing)})")
+                  else:
+                      print(f"Complet 3/3 — {os.path.basename(f)}")
+              if incomplets:
+                  print("::warning::" + " | ".join(incomplets))
+          EOF
+
       - name: Commit and push results
         run: |
           git config user.name "github-actions[bot]"

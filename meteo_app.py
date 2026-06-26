@@ -1436,6 +1436,12 @@ def main():
     if st.sidebar.button("🔄 Rafraîchir les données"):
         st.cache_data.clear()
         st.rerun()
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        "<small>🕐 **Mise à jour automatique**<br>"
+        "Run 0Z — vers 12h (heure Paris)<br>"
+        "Run 12Z — vers minuit (heure Paris)</small>",
+        unsafe_allow_html=True)
     st.sidebar.markdown(
         "<small>Données : ECMWF · NOAA</small>",
         unsafe_allow_html=True)

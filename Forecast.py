@@ -8,8 +8,7 @@ import pandas as pd
 import numpy as np
 from bs4 import BeautifulSoup
 from functools import reduce
-from collections import Counter
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
@@ -32,6 +31,19 @@ modeles = [
 ]
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+# Ordre canonique des modèles (ordre des feuilles + priorité d'affichage).
+ORDRE_MODELES = [m["nom"] for m in modeles]
+SHEET_PAR_NOM = {m["nom"]: m["sheet"] for m in modeles}
+NOM_PAR_SHEET = {m["sheet"]: m["nom"] for m in modeles}
+
+# Échéance maximale nominale par modèle (en heures). Sert à repérer les runs
+# publiés partiellement : météociel ne met d'abord en ligne qu'une partie des
+# échéances. Un modèle dont l'échéance max est nettement sous son nominal est
+# considéré « pas encore prêt » et écarté — sinon il tronquerait les graphiques
+# et risquerait d'écraser un run complet déjà en stock.
+ECHEANCE_MAX_NOMINALE = {"ECMWF ENS": 360, "AIFS ENS": 360, "GEFS": 384}
+SEUIL_COMPLETUDE = 0.9  # fraction du nominal requise pour juger un run « complet »
 
 # --- Fonctions Utilitaires ---
 def parse_file_datetime(filepath):
@@ -96,277 +108,405 @@ def appliquer_style_tableau(ws, start_row, style_type="standard", df_cols=None):
                 cell.fill = header_fill
                 cell.font = font_white
 
-# --- Initialisation ---
-wb = Workbook()
-wb.remove(wb.active)
+def max_echeance(df):
+    """Échéance maximale (en heures) présente dans un tableau modèle."""
+    return pd.to_numeric(df['Ech.'], errors='coerce').max()
 
-model_dataframes = {}
-model_colors = {}
-runs_info = []
 
-# --- 1. Extraction Tolérante ---
-extractions_brutes = []
+def lire_feuille_modele(fichier, sheet):
+    """Relit une feuille modèle déjà stockée (valeurs + couleurs des cellules).
 
-for mod in modeles:
-    print(f"Téléchargement de {mod['nom']}...")
+    Permet de récupérer un modèle déjà en stock pour compléter un run partiel
+    sans le re-télécharger (météociel l'ayant souvent déjà fait passer au run
+    suivant). Renvoie {'df', 'colors', 'info'} ou None si la feuille est absente.
+    """
+    if not os.path.exists(fichier):
+        return None
     try:
-        response = requests.get(mod["url"], headers=headers, timeout=10)
-        response.encoding = 'windows-1252'
-        html = response.text
-        
-        match = re.search(r'(Run .*?(\d{2}/\d{2}/\d{4})\s+(\d{1,2})[Zz])', html)
-        
-        if not match:
-            print(f"⚠️ AVERTISSEMENT : Impossible de lire la date pour {mod['nom']} (Tableau non publié ou format cassé).")
-            continue
-            
-        run_info_complet = match.group(1)
-        run_date_ext = match.group(2)
-        run_heure_ext = int(match.group(3))
-        
-        df, row_colors = parser_tableau_meteociel(html)
-        if df is not None:
-            extractions_brutes.append({
-                'nom': mod['nom'],
-                'sheet': mod['sheet'],
-                'df': df,
-                'colors': row_colors,
-                'date': run_date_ext,
-                'heure': run_heure_ext,
-                'info': run_info_complet
-            })
+        wb_src = load_workbook(fichier, data_only=True)
     except Exception as e:
-        print(f"⚠️ AVERTISSEMENT : Échec de la connexion pour {mod['nom']} ({e}).")
+        print(f"  ⚠️ Impossible de relire {os.path.basename(fichier)} ({e}).")
+        return None
+    if sheet not in wb_src.sheetnames:
+        return None
 
-if not extractions_brutes:
-    sys.exit("\n❌ ERREUR CRITIQUE : Absolument aucun modèle n'a pu être récupéré. Exécution annulée.")
+    ws = wb_src[sheet]
+    info = ws['A2'].value or ''
+    if isinstance(info, str) and info.startswith('Informations : '):
+        info = info[len('Informations : '):]
 
-# --- 2. Tri et Vote Majoritaire (Gestion de la désynchronisation) ---
-# Étape A : On s'assure d'abord que les modèles ont bien respecté l'heure demandée via l'URL
-modeles_heure_valide = []
-for m in extractions_brutes:
-    if m['heure'] == heure_attendue:
-        modeles_heure_valide.append(m)
-    else:
-        print(f"  ❌ {m['nom']} écarté (Mauvais run : {m['heure']}Z au lieu de {heure_attendue}Z)")
+    # En-tête en ligne 4, données à partir de la ligne 5 (cf. écriture ci-dessous).
+    rows = list(ws.iter_rows(min_row=4))
+    if not rows:
+        return None
+    header = [c.value for c in rows[0]]
+    ncol = len(header)
 
-if not modeles_heure_valide:
-    sys.exit(f"\n❌ ERREUR : Aucun modèle n'est disponible pour le run {CHOIX_RUN}.")
+    data, colors = [], []
+    for r in rows[1:]:
+        cells = list(r)[:ncol]
+        vals = [c.value for c in cells]
+        if all(v is None for v in vals):
+            continue
+        data.append(vals)
+        ligne_couleurs = []
+        for c in cells:
+            hexa = None
+            fill = c.fill
+            if fill is not None and fill.patternType and fill.fgColor is not None:
+                rgb = fill.fgColor.rgb
+                if isinstance(rgb, str) and len(rgb) >= 6:
+                    hexa = rgb[-6:]
+            ligne_couleurs.append(hexa)
+        colors.append(ligne_couleurs)
 
-# Étape B : Vote majoritaire sur la DATE du jour (pour isoler les modèles en retard)
-dates = [m['date'] for m in modeles_heure_valide]
-counts = Counter(dates)
+    df = pd.DataFrame(data, columns=header)
+    for col in df.columns:
+        if col not in ['Date', 'Ech.']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
 
-# En cas d'égalité stricte (ex: 1 modèle à J, 1 modèle à J-1), on privilégie la date la plus récente.
-def rank_date(item):
-    date_str, count = item
-    return (count, datetime.datetime.strptime(date_str, "%d/%m/%Y"))
+    return {'df': df, 'colors': colors, 'info': info}
 
-majority_date = sorted(counts.items(), key=rank_date, reverse=True)[0][0]
 
-date_file_str = datetime.datetime.strptime(majority_date, "%d/%m/%Y").strftime("%d%m%Y")
-fichier_actuel = os.path.join(DOSSIER_SORTIE, f"Forecast-{date_file_str}-{CHOIX_RUN}.xlsx")
+def construire_et_sauver(model_dataframes, model_colors, model_infos, fichier_cible):
+    """Construit le classeur (feuilles modèles + synthèses + deltas) et l'enregistre.
 
-print(f"\n👉 Date majoritaire retenue : {majority_date} (Run {CHOIX_RUN})")
+    `model_dataframes` / `model_colors` / `model_infos` sont indexés par nom de
+    modèle et déjà ordonnés (ordre canonique). Toutes les statistiques sont
+    recalculées à partir de l'union des modèles fournis.
+    """
+    wb = Workbook()
+    wb.remove(wb.active)
 
-for m in modeles_heure_valide:
-    if m['date'] == majority_date:
-        print(f"  ✅ {m['nom']} intégré au super-ensemble.")
-        model_dataframes[m['nom']] = m['df']
-        model_colors[m['nom']] = m['colors']
-        runs_info.append(f"{m['nom']} ({m['info']})")
-        
-        # Création de sa feuille individuelle
-        ws_data = wb.create_sheet(title=m["sheet"])
-        ws_data["A1"], ws_data["A2"] = f"Modèle : {m['nom']}", f"Informations : {m['info']}"
+    runs_info = [f"{nom} ({model_infos[nom]})" for nom in model_dataframes]
+
+    # --- Feuilles individuelles par modèle ---
+    for nom, df_mod in model_dataframes.items():
+        sheet = SHEET_PAR_NOM[nom]
+        colors = model_colors[nom]
+        ws_data = wb.create_sheet(title=sheet)
+        ws_data["A1"], ws_data["A2"] = f"Modèle : {nom}", f"Informations : {model_infos[nom]}"
         ws_data["A1"].font = ws_data["A2"].font = Font(bold=True)
-        
-        for r_idx, row in enumerate(dataframe_to_rows(m['df'], index=False, header=True), start=4):
+
+        for r_idx, row in enumerate(dataframe_to_rows(df_mod, index=False, header=True), start=4):
             for c_idx, value in enumerate(row, start=1):
                 cell = ws_data.cell(row=r_idx, column=c_idx, value=value)
-                if r_idx > 4: 
-                    color_hex = m['colors'][r_idx - 5][c_idx - 1]
+                if r_idx > 4:
+                    ci, cj = r_idx - 5, c_idx - 1
+                    color_hex = colors[ci][cj] if (ci < len(colors) and cj < len(colors[ci])) else None
                     if color_hex:
                         cell.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type='solid')
         appliquer_style_tableau(ws_data, start_row=4)
-    else:
-        print(f"  ❌ {m['nom']} écarté (En retard : toujours bloqué à la date du {m['date']})")
 
-# --- 3. Définition de l'historique ---
-fichiers_existants = glob.glob(os.path.join(DOSSIER_SORTIE, "Forecast-*.xlsx"))
-fichiers_tries = sorted(fichiers_existants, key=parse_file_datetime, reverse=True)
+    # --- Historique (runs strictement antérieurs, fenêtre de 5 jours) ---
+    current_dt = parse_file_datetime(fichier_cible)
+    limite_dt = current_dt - datetime.timedelta(days=5)
+    fichiers_existants = glob.glob(os.path.join(DOSSIER_SORTIE, "Forecast-*.xlsx"))
+    fichiers_tries = sorted(fichiers_existants, key=parse_file_datetime, reverse=True)
+    fichiers_precedents = [
+        f for f in fichiers_tries
+        if parse_file_datetime(f) < current_dt and parse_file_datetime(f) >= limite_dt
+    ][:10]
 
-current_dt = parse_file_datetime(fichier_actuel)
-limite_dt = current_dt - datetime.timedelta(days=5)
+    # --- Synthèses ---
+    dfs_to_merge, all_members = [], []
+    dfs_compare_list = []
+    det_col_names = {}  # short_nom -> nom de colonne renommée dans df_super
 
-fichiers_precedents = [
-    f for f in fichiers_tries 
-    if parse_file_datetime(f) < current_dt and parse_file_datetime(f) >= limite_dt
-][:10]
+    # Noms possibles de la colonne déterministe selon le modèle :
+    # ECMWF/AIFS → "DET", GEFS → "GFS" (run haute résolution, distinct des membres).
+    DET_RAW_NAMES = {'DET', 'GFS'}
 
-# --- 4. Synthèses ---
-print("\nCalcul des statistiques de synthèse...")
+    for mod_nom, df_mod in model_dataframes.items():
+        short_nom = mod_nom.replace(" ENS", "")
+        det_src = next((c for c in df_mod.columns
+                        if str(c).strip().upper() in DET_RAW_NAMES), None)
+        has_det = det_src is not None
+        exclude = ['Date', 'Ech.'] + ([det_src] if has_det else [])
+        membres = [c for c in df_mod.columns if c not in exclude]
 
-dfs_to_merge, all_members = [], []
-dfs_compare_list = []
-det_col_names = {}  # short_nom -> nom de colonne renommée dans df_super
+        extra_cols = [det_src] if has_det else []
+        df_temp = df_mod[['Date', 'Ech.'] + membres + extra_cols].copy()
+        new_cols = [f"{short_nom}_{c}" for c in membres]
+        det_renamed = [f"{short_nom}_DET"] if has_det else []
+        df_temp.columns = ['Date', 'Ech.'] + new_cols + det_renamed
+        all_members.extend(new_cols)
+        if has_det:
+            det_col_names[short_nom] = f"{short_nom}_DET"
+        dfs_to_merge.append(df_temp)
 
-# Noms possibles de la colonne déterministe selon le modèle :
-# ECMWF/AIFS → "DET", GEFS → "GFS" (run haute résolution, distinct des membres d'ensemble).
-DET_RAW_NAMES = {'DET', 'GFS'}
+        m_indiv = df_mod[membres].apply(pd.to_numeric, errors='coerce')
+        df_mod_stats = pd.DataFrame()
+        df_mod_stats['Date'] = df_mod['Date']
+        df_mod_stats['Ech'] = df_mod['Ech.']
+        df_mod_stats[f'{short_nom} P10'] = m_indiv.quantile(0.10, axis=1).round(1)
+        df_mod_stats[f'{short_nom} Médiane'] = m_indiv.median(axis=1).round(1)
+        if has_det:
+            df_mod_stats[f'{short_nom} DET'] = pd.to_numeric(df_mod[det_src], errors='coerce').round(1)
+        df_mod_stats[f'{short_nom} P90'] = m_indiv.quantile(0.90, axis=1).round(1)
+        df_mod_stats[f'{short_nom} Spread'] = (df_mod_stats[f'{short_nom} P90'] - df_mod_stats[f'{short_nom} P10']).round(1)
+        dfs_compare_list.append(df_mod_stats)
 
-for mod_nom, df_mod in model_dataframes.items():
-    short_nom = mod_nom.replace(" ENS", "")
-    # Détection tolérante du déterministe (gère le "GFS" du GEFS, sinon il serait
-    # compté à tort comme un membre d'ensemble et fausserait les statistiques).
-    det_src = next((c for c in df_mod.columns
-                    if str(c).strip().upper() in DET_RAW_NAMES), None)
-    has_det = det_src is not None
-    exclude = ['Date', 'Ech.'] + ([det_src] if has_det else [])
-    membres = [c for c in df_mod.columns if c not in exclude]
+    if dfs_to_merge:
+        # --- Super-Ensemble ---
+        df_super = reduce(lambda left, right: pd.merge(left, right, on=['Date', 'Ech.'], how='outer'), dfs_to_merge)
+        df_super = df_super[df_super['Date'].str.contains(' 12Z', na=False)].copy()
 
-    extra_cols = [det_src] if has_det else []
-    df_temp = df_mod[['Date', 'Ech.'] + membres + extra_cols].copy()
-    new_cols = [f"{short_nom}_{c}" for c in membres]
-    det_renamed = [f"{short_nom}_DET"] if has_det else []
-    df_temp.columns = ['Date', 'Ech.'] + new_cols + det_renamed
-    all_members.extend(new_cols)
-    if has_det:
-        det_col_names[short_nom] = f"{short_nom}_DET"
-    dfs_to_merge.append(df_temp)
+        df_super['Date'] = df_super['Date'].str.split(' ').str[0]
+        df_super['Date'] = pd.to_datetime(df_super['Date'], errors='coerce').dt.date
 
-    m_indiv = df_mod[membres].apply(pd.to_numeric, errors='coerce')
-    df_mod_stats = pd.DataFrame()
-    df_mod_stats['Date'] = df_mod['Date']
-    df_mod_stats['Ech'] = df_mod['Ech.']
-    df_mod_stats[f'{short_nom} P10'] = m_indiv.quantile(0.10, axis=1).round(1)
-    df_mod_stats[f'{short_nom} Médiane'] = m_indiv.median(axis=1).round(1)
-    if has_det:
-        df_mod_stats[f'{short_nom} DET'] = pd.to_numeric(df_mod[det_src], errors='coerce').round(1)
-    df_mod_stats[f'{short_nom} P90'] = m_indiv.quantile(0.90, axis=1).round(1)
-    df_mod_stats[f'{short_nom} Spread'] = (df_mod_stats[f'{short_nom} P90'] - df_mod_stats[f'{short_nom} P10']).round(1)
-    dfs_compare_list.append(df_mod_stats)
+        df_super['Ech_num'] = pd.to_numeric(df_super['Ech.'], errors='coerce')
+        df_super = df_super.sort_values('Ech_num').drop(columns=['Ech_num']).reset_index(drop=True)
 
-if dfs_to_merge:
-    # --- Super-Ensemble ---
-    df_super = reduce(lambda left, right: pd.merge(left, right, on=['Date', 'Ech.'], how='outer'), dfs_to_merge)
-    df_super = df_super[df_super['Date'].str.contains(' 12Z', na=False)].copy()
-    
-    df_super['Date'] = df_super['Date'].str.split(' ').str[0]
-    df_super['Date'] = pd.to_datetime(df_super['Date'], errors='coerce').dt.date
-    
-    df_super['Ech_num'] = pd.to_numeric(df_super['Ech.'], errors='coerce')
-    df_super = df_super.sort_values('Ech_num').drop(columns=['Ech_num']).reset_index(drop=True)
-    
-    m = df_super[all_members]
-    
-    df_stats = pd.DataFrame()
-    df_stats['Date'] = df_super['Date']
-    df_stats['Ech'] = df_super['Ech.']
-    df_stats['Min'] = m.min(axis=1).round(1)
-    df_stats['P10'] = m.quantile(0.10, axis=1).round(1)
-    df_stats['P25'] = m.quantile(0.25, axis=1).round(1)
-    df_stats['Médiane'] = m.median(axis=1).round(1)
-    for short_nom, det_col in det_col_names.items():
-        if det_col in df_super.columns:
-            df_stats[f'{short_nom} DET'] = pd.to_numeric(df_super[det_col], errors='coerce').round(1)
-    df_stats['P75'] = m.quantile(0.75, axis=1).round(1)
-    df_stats['P90'] = m.quantile(0.90, axis=1).round(1)
-    df_stats['Max'] = m.max(axis=1).round(1)
-    df_stats['Spread'] = (df_stats['P90'] - df_stats['P10']).round(1)
-    df_stats['Ecart-type'] = m.std(axis=1).round(2)
-    df_stats['Proba > 20°'] = ((m > 20).sum(axis=1) / m.notna().sum(axis=1)).fillna(0)
-    
-    df_stats_ech_num = pd.to_numeric(df_stats['Ech'], errors='coerce')
-    
-    # --- Deltas ---
-    for prev_file in fichiers_precedents:
+        m = df_super[all_members]
+
+        df_stats = pd.DataFrame()
+        df_stats['Date'] = df_super['Date']
+        df_stats['Ech'] = df_super['Ech.']
+        df_stats['Min'] = m.min(axis=1).round(1)
+        df_stats['P10'] = m.quantile(0.10, axis=1).round(1)
+        df_stats['P25'] = m.quantile(0.25, axis=1).round(1)
+        df_stats['Médiane'] = m.median(axis=1).round(1)
+        for short_nom, det_col in det_col_names.items():
+            if det_col in df_super.columns:
+                df_stats[f'{short_nom} DET'] = pd.to_numeric(df_super[det_col], errors='coerce').round(1)
+        df_stats['P75'] = m.quantile(0.75, axis=1).round(1)
+        df_stats['P90'] = m.quantile(0.90, axis=1).round(1)
+        df_stats['Max'] = m.max(axis=1).round(1)
+        df_stats['Spread'] = (df_stats['P90'] - df_stats['P10']).round(1)
+        df_stats['Ecart-type'] = m.std(axis=1).round(2)
+        df_stats['Proba > 20°'] = ((m > 20).sum(axis=1) / m.notna().sum(axis=1)).fillna(0)
+
+        df_stats_ech_num = pd.to_numeric(df_stats['Ech'], errors='coerce')
+
+        # --- Deltas ---
+        for prev_file in fichiers_precedents:
+            try:
+                prev_dt = parse_file_datetime(prev_file)
+                delta_hours = int((current_dt - prev_dt).total_seconds() / 3600)
+
+                df_prev = pd.read_excel(prev_file, sheet_name="Synthèse", skiprows=4)
+                if 'Médiane' in df_prev.columns and 'Ech' in df_prev.columns:
+
+                    df_prev['Ech_Num'] = pd.to_numeric(df_prev['Ech'], errors='coerce')
+                    prev_med_map = df_prev.set_index('Ech_Num')['Médiane'].to_dict()
+
+                    heure_str = "12Z" if prev_dt.hour == 12 else "0Z"
+                    col_delta = f"Δ {prev_dt.strftime('%d-%b')} {heure_str}"
+
+                    mediane_prev_aligned = df_stats_ech_num.apply(lambda e: prev_med_map.get(e + delta_hours, np.nan))
+                    df_stats[col_delta] = (df_stats['Médiane'] - mediane_prev_aligned).round(1)
+            except Exception:
+                pass
+
+        # --- Synthèse Comparée (Individuelle) ---
+        df_compare = reduce(lambda left, right: pd.merge(left, right, on=['Date', 'Ech'], how='outer'), dfs_compare_list)
+        df_compare = df_compare[df_compare['Date'].str.contains(' 12Z', na=False)].copy()
+
+        df_compare['Date'] = df_compare['Date'].str.split(' ').str[0]
+        df_compare['Date'] = pd.to_datetime(df_compare['Date'], errors='coerce').dt.date
+
+        df_compare['Ech_num'] = pd.to_numeric(df_compare['Ech'], errors='coerce')
+        df_compare = df_compare.sort_values('Ech_num').drop(columns=['Ech_num']).reset_index(drop=True)
+
+        # Divergence (sécurisée même s'il ne reste qu'un seul modèle)
+        median_cols = [c for c in df_compare.columns if 'Médiane' in c]
+        if len(median_cols) > 1:
+            df_compare['Divergence Modèles'] = (df_compare[median_cols].max(axis=1) - df_compare[median_cols].min(axis=1)).round(1)
+        else:
+            df_compare['Divergence Modèles'] = np.nan
+
+        # --- Écriture Feuille 1 : Synthèse Comparée ---
+        ws_comp = wb.create_sheet(title="Comparaison Modèles", index=0)
+        ws_comp["A1"] = "Comparaison des Tendances par Modèle - Echéances 12Z"
+        ws_comp["A2"] = f"Généré le : {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        ws_comp["A3"] = f"Divergence : Indique l'écart de température entre le modèle le plus chaud et le plus froid."
+        ws_comp["A1"].font = ws_comp["A2"].font = ws_comp["A3"].font = Font(bold=True)
+
+        for r_idx, row in enumerate(dataframe_to_rows(df_compare, index=False, header=True), start=5):
+            for c_idx, value in enumerate(row, start=1):
+                cell = ws_comp.cell(row=r_idx, column=c_idx, value=value)
+                col_name = df_compare.columns[c_idx-1]
+
+                if col_name == 'Date' and r_idx > 5:
+                    cell.number_format = 'dd-mmm'
+
+                if col_name == 'Divergence Modèles' and r_idx > 5 and pd.notna(value):
+                    if value >= 4.0:
+                        cell.font = Font(color="D32F2F", bold=True)
+                    elif value <= 1.5:
+                        cell.font = Font(color="1976D2", bold=True)
+
+        appliquer_style_tableau(ws_comp, start_row=5, style_type="compare", df_cols=df_compare.columns.tolist())
+        ws_comp.freeze_panes = "C6"
+
+        # --- Écriture Feuille 2 : Synthèse Globale ---
+        ws_synth = wb.create_sheet(title="Synthèse", index=1)
+        ws_synth["A1"] = "Synthèse Multi-Modèles (Super-Ensemble) - Echéances 12Z"
+        ws_synth["A2"] = f"Généré le : {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        ws_synth["A3"] = f"Runs inclus : { ' | '.join(runs_info) }"
+        ws_synth["A1"].font = ws_synth["A2"].font = ws_synth["A3"].font = Font(bold=True)
+
+        for r_idx, row in enumerate(dataframe_to_rows(df_stats, index=False, header=True), start=5):
+            for c_idx, value in enumerate(row, start=1):
+                cell = ws_synth.cell(row=r_idx, column=c_idx, value=value)
+                col_name = df_stats.columns[c_idx-1]
+
+                if col_name == 'Date' and r_idx > 5:
+                    cell.number_format = 'dd-mmm'
+
+                if col_name == 'Proba > 20°' and r_idx > 5:
+                    cell.number_format = '0.0%'
+
+                if col_name.startswith('Δ') and r_idx > 5 and pd.notna(value):
+                    if value > 0:
+                        cell.font = Font(color="D32F2F", bold=True)
+                    elif value < 0:
+                        cell.font = Font(color="1976D2", bold=True)
+
+        appliquer_style_tableau(ws_synth, start_row=5, df_cols=df_stats.columns.tolist())
+        ws_synth.freeze_panes = "C6"
+
+    wb.save(fichier_cible)
+    print(f"✅ Fichier sauvegardé sous : {fichier_cible}")
+
+
+# --- 1. Extraction Tolérante ---
+def extraire_modeles():
+    """Télécharge et parse les trois modèles. Renvoie la liste des extractions brutes."""
+    extractions_brutes = []
+    for mod in modeles:
+        print(f"Téléchargement de {mod['nom']}...")
         try:
-            prev_dt = parse_file_datetime(prev_file)
-            delta_hours = int((current_dt - prev_dt).total_seconds() / 3600)
-            
-            df_prev = pd.read_excel(prev_file, sheet_name="Synthèse", skiprows=4)
-            if 'Médiane' in df_prev.columns and 'Ech' in df_prev.columns:
-                
-                df_prev['Ech_Num'] = pd.to_numeric(df_prev['Ech'], errors='coerce')
-                prev_med_map = df_prev.set_index('Ech_Num')['Médiane'].to_dict()
-                
-                heure_str = "12Z" if prev_dt.hour == 12 else "0Z"
-                col_delta = f"Δ {prev_dt.strftime('%d-%b')} {heure_str}"
-                
-                mediane_prev_aligned = df_stats_ech_num.apply(lambda e: prev_med_map.get(e + delta_hours, np.nan))
-                df_stats[col_delta] = (df_stats['Médiane'] - mediane_prev_aligned).round(1)
-        except Exception:
-            pass 
-            
-    # --- Synthèse Comparée (Individuelle) ---
-    df_compare = reduce(lambda left, right: pd.merge(left, right, on=['Date', 'Ech'], how='outer'), dfs_compare_list)
-    df_compare = df_compare[df_compare['Date'].str.contains(' 12Z', na=False)].copy()
-    
-    df_compare['Date'] = df_compare['Date'].str.split(' ').str[0]
-    df_compare['Date'] = pd.to_datetime(df_compare['Date'], errors='coerce').dt.date
-    
-    df_compare['Ech_num'] = pd.to_numeric(df_compare['Ech'], errors='coerce')
-    df_compare = df_compare.sort_values('Ech_num').drop(columns=['Ech_num']).reset_index(drop=True)
-    
-    # Divergence (sécurisée même s'il ne reste qu'un seul modèle)
-    median_cols = [c for c in df_compare.columns if 'Médiane' in c]
-    if len(median_cols) > 1:
-        df_compare['Divergence Modèles'] = (df_compare[median_cols].max(axis=1) - df_compare[median_cols].min(axis=1)).round(1)
-    else:
-        df_compare['Divergence Modèles'] = np.nan
-    
-    # --- Écriture Feuille 1 : Synthèse Comparée ---
-    ws_comp = wb.create_sheet(title="Comparaison Modèles", index=0)
-    ws_comp["A1"] = "Comparaison des Tendances par Modèle - Echéances 12Z"
-    ws_comp["A2"] = f"Généré le : {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}"
-    ws_comp["A3"] = f"Divergence : Indique l'écart de température entre le modèle le plus chaud et le plus froid."
-    ws_comp["A1"].font = ws_comp["A2"].font = ws_comp["A3"].font = Font(bold=True)
-    
-    for r_idx, row in enumerate(dataframe_to_rows(df_compare, index=False, header=True), start=5):
-        for c_idx, value in enumerate(row, start=1):
-            cell = ws_comp.cell(row=r_idx, column=c_idx, value=value)
-            col_name = df_compare.columns[c_idx-1]
-            
-            if col_name == 'Date' and r_idx > 5:
-                cell.number_format = 'dd-mmm'
-                
-            if col_name == 'Divergence Modèles' and r_idx > 5 and pd.notna(value):
-                if value >= 4.0:
-                    cell.font = Font(color="D32F2F", bold=True)
-                elif value <= 1.5:
-                    cell.font = Font(color="1976D2", bold=True)
-                    
-    appliquer_style_tableau(ws_comp, start_row=5, style_type="compare", df_cols=df_compare.columns.tolist())
-    ws_comp.freeze_panes = "C6"
+            response = requests.get(mod["url"], headers=headers, timeout=10)
+            response.encoding = 'windows-1252'
+            html = response.text
 
-    # --- Écriture Feuille 2 : Synthèse Globale ---
-    ws_synth = wb.create_sheet(title="Synthèse", index=1)
-    ws_synth["A1"] = "Synthèse Multi-Modèles (Super-Ensemble) - Echéances 12Z"
-    ws_synth["A2"] = f"Généré le : {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}"
-    ws_synth["A3"] = f"Runs inclus : { ' | '.join(runs_info) }"
-    ws_synth["A1"].font = ws_synth["A2"].font = ws_synth["A3"].font = Font(bold=True)
-    
-    for r_idx, row in enumerate(dataframe_to_rows(df_stats, index=False, header=True), start=5):
-        for c_idx, value in enumerate(row, start=1):
-            cell = ws_synth.cell(row=r_idx, column=c_idx, value=value)
-            col_name = df_stats.columns[c_idx-1]
-            
-            if col_name == 'Date' and r_idx > 5:
-                cell.number_format = 'dd-mmm'
-            
-            if col_name == 'Proba > 20°' and r_idx > 5:
-                cell.number_format = '0.0%'
-                
-            if col_name.startswith('Δ') and r_idx > 5 and pd.notna(value):
-                if value > 0:
-                    cell.font = Font(color="D32F2F", bold=True)
-                elif value < 0:
-                    cell.font = Font(color="1976D2", bold=True)
-                    
-    appliquer_style_tableau(ws_synth, start_row=5, df_cols=df_stats.columns.tolist())
-    ws_synth.freeze_panes = "C6"
+            match = re.search(r'(Run .*?(\d{2}/\d{2}/\d{4})\s+(\d{1,2})[Zz])', html)
 
-# --- Sauvegarde ---
-wb.save(fichier_actuel)
-print(f"\n✅ Terminé ! Fichier sauvegardé sous : {fichier_actuel}")
+            if not match:
+                print(f"⚠️ AVERTISSEMENT : Impossible de lire la date pour {mod['nom']} (Tableau non publié ou format cassé).")
+                continue
+
+            run_info_complet = match.group(1)
+            run_date_ext = match.group(2)
+            run_heure_ext = int(match.group(3))
+
+            df, row_colors = parser_tableau_meteociel(html)
+            if df is not None:
+                extractions_brutes.append({
+                    'nom': mod['nom'],
+                    'sheet': mod['sheet'],
+                    'df': df,
+                    'colors': row_colors,
+                    'date': run_date_ext,
+                    'heure': run_heure_ext,
+                    'info': run_info_complet
+                })
+        except Exception as e:
+            print(f"⚠️ AVERTISSEMENT : Échec de la connexion pour {mod['nom']} ({e}).")
+    return extractions_brutes
+
+
+def router_et_construire(extractions_brutes):
+    """Range chaque modèle dans le fichier de SA date de run, complète l'existant,
+    écarte les runs aux échéances partielles, puis (re)construit chaque fichier."""
+    if not extractions_brutes:
+        sys.exit("\n❌ ERREUR CRITIQUE : Absolument aucun modèle n'a pu être récupéré. Exécution annulée.")
+
+    # --- 2. Filtrage : heure demandée puis complétude des échéances ---
+    # Étape A : on ne garde que les modèles ayant bien respecté l'heure demandée.
+    modeles_heure_valide = []
+    for m in extractions_brutes:
+        if m['heure'] == heure_attendue:
+            modeles_heure_valide.append(m)
+        else:
+            print(f"  ❌ {m['nom']} écarté (Mauvais run : {m['heure']}Z au lieu de {heure_attendue}Z)")
+
+    if not modeles_heure_valide:
+        sys.exit(f"\n❌ ERREUR : Aucun modèle n'est disponible pour le run {CHOIX_RUN}.")
+
+    # Étape B : on écarte les modèles publiés partiellement (échéances tronquées).
+    # Météociel ne met d'abord en ligne qu'une partie des échéances : intégrer un tel
+    # modèle tronquerait les graphiques et pourrait écraser un run complet en stock.
+    # On préfère attendre que les échéances soient (quasi) complètes.
+    modeles_prets = []
+    for m in modeles_heure_valide:
+        nominal = ECHEANCE_MAX_NOMINALE.get(m['nom'])
+        ech_max = max_echeance(m['df'])
+        if nominal and (pd.isna(ech_max) or ech_max < SEUIL_COMPLETUDE * nominal):
+            ech_txt = "—" if pd.isna(ech_max) else f"{int(ech_max)}h"
+            print(f"  ⏳ {m['nom']} écarté (run encore partiel : échéances jusqu'à {ech_txt} "
+                  f"/ {nominal}h attendues). La donnée existante est conservée.")
+            continue
+        modeles_prets.append(m)
+
+    if not modeles_prets:
+        sys.exit("\n⏳ Aucun modèle complet pour l'instant : rien n'a été écrit "
+                 "(les runs précédents restent intacts).")
+
+    # --- 3. Routage par date de run ---
+    # Météociel fait passer les modèles au run suivant à des moments différents
+    # (souvent GEFS, puis AIFS, puis ECMWF). Chaque modèle est donc rangé dans le
+    # fichier correspondant à SA propre date de run, et non dans une date imposée à
+    # tous. On complète/met à jour le fichier sans jamais perdre l'antériorité.
+    groupes_par_date = {}
+    for m in modeles_prets:
+        groupes_par_date.setdefault(m['date'], []).append(m)
+
+    print(f"\n👉 Run {CHOIX_RUN} — dates détectées : "
+          + ", ".join(f"{d} ({', '.join(x['nom'] for x in g)})"
+                      for d, g in sorted(groupes_par_date.items(),
+                                         key=lambda kv: datetime.datetime.strptime(kv[0], '%d/%m/%Y'))))
+
+    # On traite les dates de la plus ancienne à la plus récente : ainsi un fichier
+    # récent peut calculer ses deltas sur un fichier antérieur déjà rafraîchi.
+    for date_str in sorted(groupes_par_date,
+                           key=lambda d: datetime.datetime.strptime(d, '%d/%m/%Y')):
+        fresh = groupes_par_date[date_str]
+        date_file_str = datetime.datetime.strptime(date_str, "%d/%m/%Y").strftime("%d%m%Y")
+        fichier_cible = os.path.join(DOSSIER_SORTIE, f"Forecast-{date_file_str}-{CHOIX_RUN}.xlsx")
+
+        print(f"\n📂 {os.path.basename(fichier_cible)} (run du {date_str})")
+
+        # On part des modèles déjà stockés dans le fichier (pour compléter un run
+        # partiel), puis on superpose les modèles fraîchement téléchargés.
+        combined = {}  # nom -> {'df', 'colors', 'info'}
+        if os.path.exists(fichier_cible):
+            for sheet, nom in NOM_PAR_SHEET.items():
+                existant = lire_feuille_modele(fichier_cible, sheet)
+                if existant is not None:
+                    combined[nom] = existant
+                    print(f"  📦 {nom} déjà en stock (conservé).")
+
+        for m in fresh:
+            nom = m['nom']
+            frais = {'df': m['df'], 'colors': m['colors'], 'info': m['info']}
+            if nom in combined:
+                # Garde-fou anti-régression : on ne remplace un modèle stocké que si
+                # la version fraîche a au moins autant d'échéances (jamais complet → partiel).
+                ech_frais = max_echeance(m['df'])
+                ech_stock = max_echeance(combined[nom]['df'])
+                if pd.notna(ech_stock) and pd.notna(ech_frais) and ech_frais < ech_stock:
+                    print(f"  🛡️ {nom} : version stockée plus complète "
+                          f"({int(ech_stock)}h > {int(ech_frais)}h) — conservée.")
+                    continue
+                print(f"  🔄 {nom} rafraîchi.")
+            else:
+                print(f"  ✅ {nom} ajouté.")
+            combined[nom] = frais
+
+        # Ordre canonique des feuilles (ECMWF, AIFS, GEFS).
+        noms_ordonnes = [n for n in ORDRE_MODELES if n in combined]
+        model_dataframes = {n: combined[n]['df'] for n in noms_ordonnes}
+        model_colors = {n: combined[n]['colors'] for n in noms_ordonnes}
+        model_infos = {n: combined[n]['info'] for n in noms_ordonnes}
+
+        print(f"  → Modèles inclus : {', '.join(noms_ordonnes)}")
+        construire_et_sauver(model_dataframes, model_colors, model_infos, fichier_cible)
+
+    print("\n✅ Terminé !")
+
+
+if __name__ == "__main__":
+    router_et_construire(extraire_modeles())

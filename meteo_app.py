@@ -31,6 +31,9 @@ from plotly.subplots import make_subplots
 # --------------------------------------------------------------------------- #
 #  Configuration générale
 # --------------------------------------------------------------------------- #
+# Version de l'app — à incrémenter manuellement à chaque évolution notable.
+APP_VERSION = "1.0.4"
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FORECASTS_DIR = os.path.join(BASE_DIR, "Forecasts")
 FORECAST_SCRIPT = os.path.join(BASE_DIR, "Forecast.py")
@@ -51,6 +54,7 @@ DET_COL_NAMES = {"DET", "GFS"}
 # À 850 hPa le cycle diurne est négligeable : on agrège la journée par mise en commun.
 SEUIL_CHALEUR_850 = 14.0   # °C — ligne de repère sur le graphique
 SEUIL_CANICULE_850 = 18.0  # °C — seuil de canicule exceptionnelle (pilote le risque)
+NORMALE_CLIM_850 = 10.0    # °C — normale climatique de saison à 850 hPa (référence d'anomalie)
 
 st.set_page_config(
     page_title="Dashboard Météo — Ensembles Paris",
@@ -548,6 +552,32 @@ def spread_chart(syn):
 # --------------------------------------------------------------------------- #
 #  Pages
 # --------------------------------------------------------------------------- #
+def _kpi_card(label, value, help_txt="", anomalie=None):
+    """Carte KPI maison (style proche de st.metric) avec, en option, l'anomalie vs
+    normale climatique affichée **à côté** de la valeur (rouge si +, bleu si −)."""
+    anomalie_html = ""
+    if anomalie is not None:
+        delta = anomalie - NORMALE_CLIM_850
+        if delta >= 0.05:
+            couleur, signe = "#C0392B", "+"
+        elif delta <= -0.05:
+            couleur, signe = "#2980B9", "−"
+        else:
+            couleur, signe = "#7F8C8D", "±"
+        anomalie_html = (
+            f"<span style='color:{couleur};font-size:0.95rem;font-weight:600;"
+            f"margin-left:8px;white-space:nowrap;'>"
+            f"({signe}{abs(delta):.1f} °C norm.)</span>")
+    title_attr = f' title="{help_txt}"' if help_txt else ""
+    return (
+        f"<div{title_attr} style='background:#f6f8fb;border:1px solid #e6ebf2;"
+        "border-radius:12px;padding:12px 16px;height:100%;'>"
+        f"<div style='font-size:0.8rem;color:#5b6b7f;'>{label}</div>"
+        f"<div style='font-size:1.85rem;font-weight:600;color:#1a2330;line-height:1.3;'>"
+        f"{value}{anomalie_html}</div>"
+        "</div>")
+
+
 def page_overview(runs, sig):
     st.title("🌡️ Dashboard Météo — Prévisions d'ensemble (Paris)")
     if runs.empty:
@@ -555,7 +585,8 @@ def page_overview(runs, sig):
         return
 
     latest = runs.iloc[0]
-    st.caption(f"Run le plus récent : **{latest['label']}** · {len(runs)} runs archivés")
+    st.caption(f"Dernière prévision : **{latest['label']}** · "
+               f"{len(runs)} prévisions (runs) archivées · températures à 850 hPa")
 
     syn = super_ensemble(latest["path"], sig)
     if syn is None or syn.empty:
@@ -566,15 +597,32 @@ def page_overview(runs, sig):
     c1, c2, c3, c4 = st.columns(4)
     med_col = "Médiane"
     today_row = syn.iloc[0]
-    c1.metric("Médiane prochaine échéance", f"{today_row[med_col]:.1f} °C")
-    c2.metric("Spread moyen", f"{syn['Spread'].mean():.1f} °C",
-              help="Largeur moyenne P90−P10 sur toutes les échéances")
+    c1.markdown(
+        _kpi_card("Prochaine échéance (médiane)", f"{today_row[med_col]:.1f} °C",
+                  "Scénario central pour la première échéance à venir",
+                  anomalie=today_row[med_col]),
+        unsafe_allow_html=True)
+    c2.markdown(
+        _kpi_card("Dispersion moyenne", f"{syn['Spread'].mean():.1f} °C",
+                  "Largeur moyenne de la fourchette des scénarios (spread P90−P10) "
+                  "sur toutes les échéances — indicateur d'incertitude"),
+        unsafe_allow_html=True)
     peak = syn.loc[syn[med_col].idxmax()]
-    c3.metric("Pic médian prévu", f"{peak[med_col]:.1f} °C",
-              help=f"{peak['valid_time'].strftime('%d %b %Hh')}")
-    c4.metric("Échéances médiane > 20°", int((syn[med_col] > 20).sum()),
-              help="Nombre d'échéances avec médiane au-dessus de 20 °C")
+    c3.markdown(
+        _kpi_card("Pic de chaleur prévu (médiane)", f"{peak[med_col]:.1f} °C",
+                  f"Maximum du scénario central · {peak['valid_time'].strftime('%d %b %Hh')}",
+                  anomalie=peak[med_col]),
+        unsafe_allow_html=True)
+    c4.markdown(
+        _kpi_card("Échéances > 20 °C (médiane)", f"{int((syn[med_col] > 20).sum())}",
+                  "Nombre d'échéances où le scénario central dépasse 20 °C à 850 hPa"),
+        unsafe_allow_html=True)
 
+    st.caption(
+        "**Panache de dispersion** : la ligne rouge est le scénario central (médiane) ; "
+        "les bandes, du clair au foncé, regroupent une part croissante des scénarios "
+        "(extrêmes Min–Max, puis 80 % P10–P90, puis 50 % central P25–P75). "
+        "Bandes étroites = prévision sûre ; bandes larges = forte incertitude.")
     st.plotly_chart(fan_chart(syn, f"Panache du super-ensemble — {latest['label']}"),
                     use_container_width=True)
 
@@ -586,12 +634,15 @@ def page_overview(runs, sig):
 
 
 def page_explore(runs, sig):
-    st.title("📊 Explorer un run")
+    st.title("📊 Explorer une prévision (run)")
+    st.caption(
+        "Vue détaillée d'un même run sous plusieurs angles : panache de dispersion, "
+        "scénarios individuels, comparaison des modèles, incertitude et tableaux de données.")
     if runs.empty:
         st.warning("Aucun run disponible.")
         return
 
-    idx = st.selectbox("Choisir un run", runs.index,
+    idx = st.selectbox("Choisir un run (date + heure du calcul)", runs.index,
                        format_func=lambda i: runs.loc[i, "label"])
     run = runs.loc[idx]
     path = run["path"]
@@ -683,7 +734,11 @@ def page_explore(runs, sig):
 
 
 def page_convergence(runs, sig):
-    st.title("🔄 Révisions & Convergence")
+    st.title("🔄 Révisions & convergence des prévisions")
+    st.caption(
+        "Chaque nouveau calcul (run) corrige le précédent. Cette page montre **comment la "
+        "prévision d'une même date a évolué d'un run à l'autre** : si elle se stabilise, "
+        "on peut s'y fier ; si elle bouge encore beaucoup, l'incertitude reste forte.")
 
     if len(runs) < 2:
         st.warning("Il faut au moins 2 runs pour analyser la convergence.")
@@ -936,6 +991,12 @@ def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
         x=x, y=med, mode="lines", name="Tendance (médiane)",
         line=dict(color="#2C3E50", width=3),
         hovertemplate="%{x|%a %d %b · %Hh}<br>Médiane : %{y:.1f} °C<extra></extra>"))
+    # Normale climatique de saison (bleu) : référence « temps normal »
+    fig.add_hline(
+        y=NORMALE_CLIM_850, line=dict(color="#2980B9", width=2, dash="dot"),
+        annotation_text=f"Normale climatique — {NORMALE_CLIM_850:.0f} °C",
+        annotation_position="bottom left",
+        annotation_font=dict(color="#2471A3", size=12))
     # Lignes d'alerte : chaleur (orange) et canicule exceptionnelle (rouge)
     fig.add_hline(
         y=seuil_chaleur, line=dict(color="#F39C12", width=2, dash="dash"),
@@ -988,8 +1049,69 @@ def page_grand_public(runs, sig):
 
     latest = runs.iloc[0]
     st.caption(
-        f"Run le plus récent : **{latest['label']}** · "
-        "lecture simplifiée du super-ensemble (ECMWF + AIFS + GEFS)")
+        f"Dernière prévision : **{latest['label']}** · "
+        "synthèse simplifiée des trois modèles d'ensemble (ECMWF + AIFS + GEFS)")
+
+    with st.expander("❓ Comment lire cet indicateur — la température à 850 hPa (T850)"):
+        st.markdown(
+            "**Pourquoi « 850 hPa » ?** Cet indicateur ne suit pas la température au sol, "
+            "mais la **température de l'air vers 1 500 m d'altitude** (niveau de pression "
+            "850 hPa, noté *T850*). C'est la référence des météorologues pour juger d'une "
+            "vague de chaleur : elle décrit la masse d'air sur toute la région, sans être "
+            "faussée par les effets locaux (vent, humidité du sol, chaleur urbaine).\n\n"
+            "**Elle ne varie quasiment pas entre le jour et la nuit.** Contrairement au "
+            "thermomètre au sol qui grimpe l'après-midi et retombe la nuit, la T850 reste "
+            "stable sur 24 h : **une seule valeur résume donc la journée entière.**\n\n"
+            "**Repères (plaine, été) — au sol il fait en gros _T850 + 15 °C_ :**\n"
+            "- **≈ 14–15 °C à 850 hPa → ~30 °C au sol** : chaleur notable.\n"
+            "- **≈ 18–20 °C à 850 hPa → ~35 °C au sol** : canicule exceptionnelle.\n\n"
+            "En clair, **au-delà de ~18 °C de T850, le signal doit alerter.**\n\n"
+            "**⚠️ Le « +15 °C » n'est qu'un ordre de grandeur.** Pour une même T850, la "
+            "température réelle au sol (T2m) peut varier de plusieurs degrés. "
+            "Ce qui creuse l'écart :\n"
+            "- **Ensoleillement et durée du jour** : ciel clair et journées longues → le sol "
+            "chauffe plus fort l'air en surface.\n"
+            "- **Sécheresse du sol** : un sol sec n'évapore plus d'eau, donc toute l'énergie "
+            "solaire part en chaleur (les canicules s'auto-amplifient avec la sécheresse).\n"
+            "- **Subsidence anticyclonique** : l'air qui descend se comprime, se réchauffe et "
+            "écrase la couche d'air près du sol.\n"
+            "- **Advection / vent** : un flux de sud peut amener de l'air encore plus chaud à "
+            "basse altitude.\n\n"
+            "À l'inverse, **nuages, sol humide, vent marin ou matinée** réduisent l'écart. "
+            "La T850 indique le *potentiel* de chaleur ; ces facteurs décident jusqu'où il "
+            "se réalise au sol.")
+
+    with st.expander("📡 D'où viennent ces prévisions ? (modèles, runs, super-ensemble)"):
+        st.markdown(
+            "**Trois modèles d'ensemble sont combinés :**\n"
+            "- **ECMWF** — modèle *physique* du Centre européen (Reading, Royaume-Uni), "
+            "référence mondiale de la prévision à moyenne échéance ; son ensemble compte "
+            "une cinquantaine de scénarios.\n"
+            "- **AIFS** — le modèle d'**intelligence artificielle** du même Centre européen, "
+            "récent, très rapide et désormais très performant.\n"
+            "- **GEFS** — l'ensemble américain de la **NOAA** (États-Unis), une trentaine de "
+            "scénarios.\n\n"
+            "**Pourquoi un « ensemble » ?** Chaque modèle est relancé avec de légères "
+            "variations des conditions initiales, produisant des dizaines de **scénarios "
+            "(« membres »)**. Leur dispersion = la mesure de l'incertitude.\n\n"
+            "**Runs 0Z / 12Z.** Un *run* est un calcul lancé à heure fixe en **temps "
+            "universel (UTC)** : le **0Z** part de minuit UTC, le **12Z** de midi UTC "
+            "(≈ 14 h à Paris l'été). Chaque jour fournit ainsi de nouveaux runs qui affinent "
+            "la prévision au fil des sorties.\n\n"
+            "**Mise en ligne (indicatif, heure de Paris).** Les sorties ne sont pas "
+            "disponibles tout de suite : il faut le temps du calcul et de la diffusion. "
+            "Le GEFS arrive le premier ; l'ECMWF, plus tardif, ferme la marche. En pratique "
+            "le **0Z** complet est exploitable en **fin de matinée**, le **12Z** en "
+            "**soirée**.\n\n"
+            "**Super-ensemble.** Plutôt qu'un seul modèle, cette appli **met en commun tous "
+            "les scénarios des trois ensembles** : c'est le *super-ensemble*. Une prévision "
+            "partagée par de nombreux scénarios issus de modèles différents est plus solide.\n\n"
+            "**Ce qu'affichent les graphiques :**\n"
+            "- *Indicateur de canicule* et *Vue d'ensemble* → le **super-ensemble** "
+            "(les 3 modèles réunis).\n"
+            "- *Explorer un run* → au choix : le super-ensemble (onglet **Panache**), "
+            "**un seul modèle** détaillé scénario par scénario (onglet **Spaghetti**), ou la "
+            "**comparaison des médianes** de chaque modèle (onglet **Modèles**).")
 
     # Réglages avancés : les deux seuils d'intensité (repliés par défaut)
     with st.expander("⚙️ Réglages avancés"):
@@ -1014,8 +1136,9 @@ def page_grand_public(runs, sig):
         st.error("Aucune feuille modèle exploitable pour ce run.")
         return
     st.caption(
-        f"Super-ensemble recalculé sur la grille 6h "
-        f"(jusqu'à {int(syn['n_membres'].max())} membres ECMWF+AIFS+GEFS par échéance).")
+        f"Synthèse recalculée toutes les 6 h, en combinant jusqu'à "
+        f"{int(syn['n_membres'].max())} scénarios (« membres ») ECMWF + AIFS + GEFS "
+        "par échéance — plus il y a de scénarios, plus la prévision est robuste.")
 
     # --- Risque canicule par jour : PROBABILITÉ de dépasser le seuil exceptionnel ---
     # On met en commun les membres de la journée (cycle diurne négligeable à 850 hPa)
@@ -1068,18 +1191,26 @@ def page_grand_public(runs, sig):
               help=f"{pic['date'].strftime('%a %d %b')} · médiane {pic['Médiane']:.1f} °C")
 
     # --- Graphique 1 : la ligne de flottaison ---
+    st.subheader("📈 Évolution de la chaleur prévue")
+    st.caption(
+        "Courbe foncée = **scénario central** (médiane des modèles). "
+        "Bande rouge claire = **fourchette des scénarios** (P10–P90, soit 8 cas sur 10) : "
+        "plus elle est large, plus la prévision est incertaine. "
+        "Pointillés : la **normale climatique** (bleu, ~temps de saison) et les deux "
+        "**seuils d'alerte** (orange/rouge), en température à 850 hPa.")
     st.plotly_chart(
         ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule,
-                            "Évolution de la chaleur à 850 hPa"),
+                            "Température à 850 hPa — tendance et incertitude"),
         use_container_width=True)
 
     # --- Graphique 2 : le calendrier des risques (dégradé) ---
     st.subheader("🗓️ Calendrier du risque de canicule")
     st.caption(
-        f"Couleur = probabilité de dépasser **{seuil_canicule:.0f} °C** à 850 hPa "
-        "(canicule exceptionnelle). 🟢 Pas de signal (hors dernier décile) → "
-        "🟡🟠 risque croissant → 🔴 canicule quasi-sûre. "
-        "Repérez les blocs rouges consécutifs (la durée) et le retour au vert (la fin).")
+        f"Chaque case = un jour. La couleur indique la **probabilité de dépasser "
+        f"{seuil_canicule:.0f} °C à 850 hPa** (canicule exceptionnelle) : "
+        "🟢 pas de signal → 🟡🟠 risque croissant → 🔴 canicule quasi-certaine. "
+        "Les blocs rouges consécutifs donnent la **durée** de l'épisode, "
+        "le retour au vert sa **fin**.")
     st.plotly_chart(calendrier_risques(jours, seuil_canicule), use_container_width=True)
 
 
@@ -1091,20 +1222,24 @@ def main():
     runs = list_runs(sig)
 
     st.sidebar.title("🌦️ Navigation")
-    pages = ["Vue d'ensemble", "Indicateur de canicule", "Explorer un run",
+    pages = ["Indicateur de canicule", "Vue d'ensemble", "Explorer un run",
              "Convergence des runs"]
     if IS_LOCAL:
         pages.append("Lancer un run")
     page = st.sidebar.radio("Aller à", pages)
     st.sidebar.markdown("---")
-    st.sidebar.metric("Runs archivés", len(runs))
+    st.sidebar.metric("Prévisions archivées", len(runs),
+                      help="Nombre de runs (calculs) disponibles dans Forecasts/")
     if not runs.empty:
-        st.sidebar.caption(f"Dernier : {runs.iloc[0]['label']}")
+        st.sidebar.caption(f"Dernière : {runs.iloc[0]['label']}")
     if st.sidebar.button("🔄 Rafraîchir les données"):
         st.cache_data.clear()
         st.rerun()
     st.sidebar.markdown(
         "<small>Données : Meteociel · Paris · échéances 12Z</small>",
+        unsafe_allow_html=True)
+    st.sidebar.markdown(
+        f"<small>Version {APP_VERSION}</small>",
         unsafe_allow_html=True)
 
     if page == "Vue d'ensemble":

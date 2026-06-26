@@ -45,8 +45,8 @@ DET_COL_NAMES = {"DET", "GFS"}
 #   • SEUIL_CANICULE : 20 °C @850 ≈ 35 °C au sol — seuil de canicule exceptionnelle ;
 #     c'est lui qui pilote le risque (probabilité de dépassement → dégradé de couleur).
 # À 850 hPa le cycle diurne est négligeable : on agrège la journée par mise en commun.
-SEUIL_CHALEUR_850 = 15.0   # °C — ligne de repère sur le graphique
-SEUIL_CANICULE_850 = 20.0  # °C — seuil de canicule exceptionnelle (pilote le risque)
+SEUIL_CHALEUR_850 = 14.0   # °C — ligne de repère sur le graphique
+SEUIL_CANICULE_850 = 18.0  # °C — seuil de canicule exceptionnelle (pilote le risque)
 
 st.set_page_config(
     page_title="Dashboard Météo — Ensembles Paris",

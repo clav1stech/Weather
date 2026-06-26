@@ -1,0 +1,58 @@
+name: Run Forecast
+
+on:
+  schedule:
+    - cron: '0 10 * * *'
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+    inputs:
+      run_choice:
+        description: 'Run (0Z ou 12Z)'
+        required: true
+        default: '12Z'
+        type: choice
+        options:
+          - '0Z'
+          - '12Z'
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests pandas numpy beautifulsoup4 openpyxl
+
+      - name: Determine run argument
+        id: run_arg
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "arg=${{ github.event.inputs.run_choice }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 10 * * *" ]; then
+            echo "arg=0Z" >> $GITHUB_OUTPUT
+          else
+            echo "arg=12Z" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Forecast.py
+        run: python Forecast.py ${{ steps.run_arg.outputs.arg }}
+
+      - name: Commit and push results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "action@github.com"
+          git add Forecasts/*.xlsx
+          if ! git diff --cached --quiet; then
+            git commit -m "MAJ auto données météo"
+            git push
+          else
+            echo "Aucune modification à committer."
+          fi

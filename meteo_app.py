@@ -615,9 +615,23 @@ def models_median_chart(path, sig, models, cutoff=None):
     return fig
 
 
-def divergence_from_raw(path, sig, models, cutoff=None):
-    """Divergence inter-modèles recalculée depuis le brut : médiane la + chaude −
-    la + froide, par échéance, restreinte aux pas où ≥ 2 modèles sont présents."""
+def model_bias_from_raw(path, sig, models, syn, cutoff=None):
+    """Biais de chaque modèle par rapport à la médiane du super-ensemble.
+
+    Retourne un DataFrame index=valid_time, une colonne par modèle, valeurs =
+    médiane_modèle − médiane_super-ensemble (arrondi à 2 déc.).
+
+    Anti-variation factice : la médiane du super-ensemble est la médiane des membres
+    *poolés des modèles présents*. Si un modèle disparaît à une échéance, cette
+    référence se déplace et le biais de TOUS les autres modèles saute — sans que
+    leur prévision n'ait changé. On neutralise ce biais en ne calculant le biais
+    qu'aux échéances à **composition complète** (tous les modèles du run présents) :
+    la référence y est de composition constante, donc toute variation des courbes
+    reflète un vrai écart entre modèles. Les échéances incomplètes deviennent un
+    trou synchronisé sur toutes les courbes plutôt qu'un décalage trompeur.
+    """
+    if syn is None or syn.empty:
+        return None
     meds = {}
     for model in models:
         loaded = load_model(path, model, sig)
@@ -625,15 +639,23 @@ def divergence_from_raw(path, sig, models, cutoff=None):
             continue
         stats, _, _ = loaded
         meds[model] = pd.Series(stats["median"].values, index=stats["valid_time"])
-    if len(meds) < 2:
+    if len(meds) < 2:  # sans ≥ 2 modèles, le biais vs super-ensemble n'a pas de sens
         return None
-    df = pd.concat(meds, axis=1).sort_index().dropna(thresh=2)  # ≥ 2 modèles comparables
+    df = pd.concat(meds, axis=1).sort_index()
+    # Aligne sur la grille temporelle du super-ensemble (référence) et tronque.
+    se_med = pd.Series(syn["Médiane"].values, index=pd.to_datetime(syn["valid_time"]))
+    df = df.reindex(se_med.index)
     if cutoff is not None:
         df = df[df.index <= cutoff]
-    if df.empty:
+        se_med = se_med[se_med.index <= cutoff]
+    bias = df.sub(se_med, axis=0).round(2)
+    # Masque (trou) toute échéance où un modèle manque : référence non comparable.
+    bias[df.isna().any(axis=1)] = np.nan
+    valid = bias.notna().any(axis=1)
+    if not valid.any():
         return None
-    div = (df.max(axis=1) - df.min(axis=1)).round(2)
-    return pd.DataFrame({"valid_time": div.index, "Divergence": div.values})
+    # Rogne les bords vides mais conserve les trous internes (gaps visibles).
+    return bias.loc[valid.idxmax():valid[::-1].idxmax()]
 
 
 def spread_chart(syn):
@@ -799,17 +821,26 @@ def page_explore(runs, sig):
         if models:
             st.plotly_chart(models_median_chart(path, sig, models, cutoff),
                             use_container_width=True)
-            div = divergence_from_raw(path, sig, models, cutoff)
-            if div is not None:
+            bias = model_bias_from_raw(path, sig, models, syn, cutoff)
+            if bias is not None and not bias.empty:
                 figd = go.Figure()
-                figd.add_trace(go.Bar(
-                    x=div["valid_time"], y=div["Divergence"],
-                    marker_color=_rgba("#7D3C98", 0.6), name="Divergence"))
+                figd.add_hline(y=0, line_dash="dot", line_color="#888888", line_width=1.5)
+                for model in bias.columns:
+                    col = MODEL_COLORS.get(model, "#666666")
+                    figd.add_trace(go.Scatter(
+                        x=bias.index, y=bias[model],
+                        name=model, mode="lines+markers", connectgaps=False,
+                        line=dict(color=col, width=2.5),
+                        marker=dict(size=4),
+                        hovertemplate=f"<b>{model}</b> %{{x|%d/%m %HZ}}<br>"
+                                      f"Biais : %{{y:+.2f}} °C<extra></extra>",
+                    ))
                 figd.update_layout(
-                    title="Divergence inter-modèles (médiane la + chaude − la + froide)",
-                    height=320, template="plotly_white",
-                    xaxis_title="Échéance", yaxis_title="Écart (°C)",
-                    margin=dict(t=60, l=10, r=10, b=10))
+                    title="Biais des modèles par rapport à la médiane du super-ensemble",
+                    height=340, template="plotly_white", hovermode="x unified",
+                    xaxis_title="Échéance", yaxis_title="Biais vs super-ensemble (°C)",
+                    legend=dict(orientation="h", y=1.12),
+                    margin=dict(t=70, l=10, r=10, b=10))
                 st.plotly_chart(figd, use_container_width=True)
         else:
             st.info("Comparaison indisponible (pas de feuilles modèles).")

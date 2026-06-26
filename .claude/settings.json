@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./Export/**)",
+      "Edit(./Export/**)",
+      "Glob(./Export/**)",
+      "Grep(./Export/**)"
+    ]
+  }
+}

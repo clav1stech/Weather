@@ -3,3 +3,9 @@ __pycache__/
 
 # Fichiers temporaires Excel (verrous OneDrive / Excel)
 ~$*.xlsx
+
+# Sauvegardes locales — jamais synchronisées sur GitHub
+Export/
+
+# Réglages Claude Code personnels (non partagés)
+.claude/settings.local.json

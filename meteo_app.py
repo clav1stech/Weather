@@ -35,6 +35,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FORECASTS_DIR = os.path.join(BASE_DIR, "Forecasts")
 FORECAST_SCRIPT = os.path.join(BASE_DIR, "Forecast.py")
 
+# Lancer un run n'a de sens qu'en local (sur le Cloud le conteneur est éphémère).
+# On n'expose l'option que si WEATHER_LOCAL=1 est défini dans l'environnement.
+IS_LOCAL = os.environ.get("WEATHER_LOCAL") == "1"
+
 # Palette alignée sur les couleurs du fichier Excel généré par Forecast.py
 MODEL_COLORS = {"ECMWF": "#1F618D", "AIFS": "#1E8449", "GEFS": "#B9770E"}
 DET_LABEL = {"ECMWF": "DET", "AIFS": "DET", "GEFS": "GFS"}
@@ -1087,11 +1091,11 @@ def main():
     runs = list_runs(sig)
 
     st.sidebar.title("🌦️ Navigation")
-    page = st.sidebar.radio(
-        "Aller à",
-        ["Vue d'ensemble", "Indicateur de canicule", "Explorer un run",
-         "Convergence des runs", "Lancer un run"],
-    )
+    pages = ["Vue d'ensemble", "Indicateur de canicule", "Explorer un run",
+             "Convergence des runs"]
+    if IS_LOCAL:
+        pages.append("Lancer un run")
+    page = st.sidebar.radio("Aller à", pages)
     st.sidebar.markdown("---")
     st.sidebar.metric("Runs archivés", len(runs))
     if not runs.empty:
@@ -1111,7 +1115,7 @@ def main():
         page_explore(runs, sig)
     elif page == "Convergence des runs":
         page_convergence(runs, sig)
-    else:
+    elif page == "Lancer un run" and IS_LOCAL:
         page_run(sig)
 
 

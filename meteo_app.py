@@ -999,7 +999,7 @@ def page_convergence(runs, sig):
 def page_run(sig):
     st.title("🚀 Lancer un nouveau run")
     st.write(
-        "Exécute `Forecast.py` : télécharge les tableaux Meteociel (ECMWF/AIFS/GEFS), "
+        "Exécute `Forecast.py` : télécharge les tableaux (ECMWF/AIFS/GEFS), "
         "construit le super-ensemble et enregistre un fichier dans `Forecasts/`."
     )
     run_choice = st.radio("Run à récupérer", ["0Z", "12Z"], horizontal=True)
@@ -1301,7 +1301,7 @@ def main():
         st.cache_data.clear()
         st.rerun()
     st.sidebar.markdown(
-        "<small>Données : Meteociel · Paris · échéances 12Z</small>",
+        "<small>Données : ECMWF · NOAA</small>",
         unsafe_allow_html=True)
     st.sidebar.markdown(
         f"<small>Version {APP_VERSION}</small>",

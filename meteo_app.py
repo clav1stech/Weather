@@ -32,7 +32,7 @@ from plotly.subplots import make_subplots
 #  Configuration générale
 # --------------------------------------------------------------------------- #
 # Version de l'app — à incrémenter manuellement à chaque évolution notable.
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FORECASTS_DIR = os.path.join(BASE_DIR, "Forecasts")
@@ -129,6 +129,20 @@ def list_runs(_mtime_signature):
         )
     df = pd.DataFrame(rows).sort_values("datetime", ascending=False).reset_index(drop=True)
     return df
+
+
+def latest_refresh_status(runs):
+    """Heure du dernier rafraîchissement (mtime du fichier le plus récent) et
+    complétude (tous les modèles présents ou non) du dernier run."""
+    if runs.empty:
+        return None, True, []
+    latest_path = runs.iloc[0]["path"]
+    try:
+        refreshed_at = datetime.fromtimestamp(os.path.getmtime(latest_path))
+    except OSError:
+        refreshed_at = None
+    missing = [m for m in MODEL_COLORS if m not in available_models(latest_path)]
+    return refreshed_at, not missing, missing
 
 
 def runs_signature():
@@ -321,8 +335,8 @@ def _assemble_pooled(member_frames, presence, det_series, grid_hours, truncate):
     """
     if not member_frames:
         return None
-    allm = pd.concat(member_frames, axis=1).sort_index()
-    pres = pd.concat(presence, axis=1).reindex(allm.index)
+    allm = pd.concat(member_frames, axis=1, sort=True).sort_index()
+    pres = pd.concat(presence, axis=1, sort=True).reindex(allm.index)
     n_models = (pres == True).sum(axis=1)  # NaN (modèle absent) compte comme False
     keep_grid = allm.index.to_series().dt.hour.isin(grid_hours)
     allm, n_models = allm[keep_grid], n_models[keep_grid]
@@ -641,7 +655,7 @@ def model_bias_from_raw(path, sig, models, syn, cutoff=None):
         meds[model] = pd.Series(stats["median"].values, index=stats["valid_time"])
     if len(meds) < 2:  # sans ≥ 2 modèles, le biais vs super-ensemble n'a pas de sens
         return None
-    df = pd.concat(meds, axis=1).sort_index()
+    df = pd.concat(meds, axis=1, sort=True).sort_index()
     # Aligne sur la grille temporelle du super-ensemble (référence) et tronque.
     se_med = pd.Series(syn["Médiane"].values, index=pd.to_datetime(syn["valid_time"]))
     df = df.reindex(se_med.index)
@@ -714,8 +728,14 @@ def page_overview(runs, sig):
         return
 
     latest = runs.iloc[0]
+    refreshed_at, complete, missing = latest_refresh_status(runs)
+    refresh_txt = (f" · rafraîchi le {refreshed_at.strftime('%d/%m/%Y à %Hh%M')}"
+                   if refreshed_at is not None else "")
+    statut_txt = ("complet ✅" if complete
+                  else f"partiel ⚠️ (manque {', '.join(missing)})")
     st.caption(f"Dernière prévision : **{latest['label']}** · "
-               f"{len(runs)} prévisions (runs) archivées · températures à 850 hPa")
+               f"{len(runs)} prévisions (runs) archivées · températures à 850 hPa"
+               f"{refresh_txt} · {statut_txt}")
 
     syn = super_ensemble(latest["path"], sig)
     if syn is None or syn.empty:
@@ -753,7 +773,7 @@ def page_overview(runs, sig):
         "(extrêmes Min–Max, puis 80 % P10–P90, puis 50 % central P25–P75). "
         "Bandes étroites = prévision sûre ; bandes larges = forte incertitude.")
     st.plotly_chart(fan_chart(syn, f"Panache du super-ensemble — {latest['label']}"),
-                    use_container_width=True)
+                    width='stretch')
 
     models = available_models(latest["path"])
     if models:
@@ -763,7 +783,7 @@ def page_overview(runs, sig):
             "Pointillés = **run déterministe** (prévision unique « haute résolution ») : "
             "utile pour voir si le scénario principal s'écarte du centre de son ensemble.")
         st.plotly_chart(models_median_chart(latest["path"], sig, models, cutoff),
-                        use_container_width=True)
+                        width='stretch')
 
 
 def page_explore(runs, sig):
@@ -801,7 +821,7 @@ def page_explore(runs, sig):
     with tab_fan:
         if syn is not None and not syn.empty:
             st.plotly_chart(fan_chart(syn, f"Super-ensemble — {run['label']}"),
-                            use_container_width=True)
+                            width='stretch')
         else:
             st.info("Aucune feuille modèle exploitable dans ce run.")
 
@@ -813,14 +833,14 @@ def page_explore(runs, sig):
                 stats, members, det = loaded
                 st.plotly_chart(
                     spaghetti_chart(members, stats, det, model, DET_LABEL.get(model, "DET")),
-                    use_container_width=True)
+                    width='stretch')
         else:
             st.info("Aucune feuille modèle individuelle dans ce run.")
 
     with tab_cmp:
         if models:
             st.plotly_chart(models_median_chart(path, sig, models, cutoff),
-                            use_container_width=True)
+                            width='stretch')
             bias = model_bias_from_raw(path, sig, models, syn, cutoff)
             if bias is not None and not bias.empty:
                 figd = go.Figure()
@@ -841,13 +861,13 @@ def page_explore(runs, sig):
                     xaxis_title="Échéance", yaxis_title="Biais vs super-ensemble (°C)",
                     legend=dict(orientation="h", y=1.12),
                     margin=dict(t=70, l=10, r=10, b=10))
-                st.plotly_chart(figd, use_container_width=True)
+                st.plotly_chart(figd, width='stretch')
         else:
             st.info("Comparaison indisponible (pas de feuilles modèles).")
 
     with tab_unc:
         if syn is not None and not syn.empty:
-            st.plotly_chart(spread_chart(syn), use_container_width=True)
+            st.plotly_chart(spread_chart(syn), width='stretch')
         else:
             st.info("Pas de données d'incertitude.")
 
@@ -876,7 +896,7 @@ def page_explore(runs, sig):
             if len(num_cols):
                 styler = raw.style.background_gradient(
                     cmap="RdYlBu_r", subset=list(num_cols), axis=None).format(precision=1)
-            st.dataframe(styler, use_container_width=True, height=520)
+            st.dataframe(styler, width='stretch', height=520)
             st.download_button(
                 "⬇️ Télécharger la table (CSV)",
                 raw.to_csv(index=False).encode("utf-8-sig"),
@@ -1007,7 +1027,7 @@ def page_convergence(runs, sig):
             legend=dict(orientation="h", y=1.12),
             margin=dict(t=30, l=10, r=10, b=10),
         )
-        st.plotly_chart(fig_rev, use_container_width=True)
+        st.plotly_chart(fig_rev, width='stretch')
     else:
         st.info("Pas de run antérieur comparable à ce run de référence.")
 
@@ -1092,7 +1112,7 @@ def page_convergence(runs, sig):
         fig_conv.update_layout(
             height=240 * nrows, template="plotly_white",
             margin=dict(t=40, l=10, r=10, b=10))
-        st.plotly_chart(fig_conv, use_container_width=True)
+        st.plotly_chart(fig_conv, width='stretch')
 
     st.markdown("---")
 
@@ -1127,7 +1147,7 @@ def page_convergence(runs, sig):
             yaxis_title="Date prévue",
             margin=dict(t=10, l=10, r=10, b=10),
         )
-        st.plotly_chart(heat, use_container_width=True)
+        st.plotly_chart(heat, width='stretch')
 
 
 def page_run(sig):
@@ -1400,7 +1420,7 @@ def page_grand_public(runs, sig):
         ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule,
                             "Température à 850 hPa — tendance et incertitude",
                             normale=seuil_normale),
-        use_container_width=True)
+        width='stretch')
 
     # --- Graphique 2 : le calendrier des risques (dégradé) ---
     st.subheader("🗓️ Calendrier du risque de canicule")
@@ -1410,7 +1430,7 @@ def page_grand_public(runs, sig):
         "🟢 pas de signal → 🟡🟠 risque croissant → 🔴 canicule quasi-certaine. "
         "Les blocs rouges consécutifs donnent la **durée** de l'épisode, "
         "le retour au vert sa **fin**.")
-    st.plotly_chart(calendrier_risques(jours, seuil_canicule), use_container_width=True)
+    st.plotly_chart(calendrier_risques(jours, seuil_canicule), width='stretch')
 
 
 # --------------------------------------------------------------------------- #
@@ -1431,6 +1451,13 @@ def main():
                       help="Nombre de runs (calculs) disponibles dans Forecasts/")
     if not runs.empty:
         st.sidebar.caption(f"Dernière : {runs.iloc[0]['label']}")
+        refreshed_at, complete, missing = latest_refresh_status(runs)
+        if refreshed_at is not None:
+            st.sidebar.caption(f"🕐 Rafraîchi le {refreshed_at.strftime('%d/%m/%Y à %Hh%M')}")
+        if complete:
+            st.sidebar.caption("✅ Données complètes (3 modèles)")
+        else:
+            st.sidebar.caption(f"⚠️ Données partielles — manque : {', '.join(missing)}")
     if st.sidebar.button("🔄 Rafraîchir les données"):
         st.cache_data.clear()
         st.rerun()

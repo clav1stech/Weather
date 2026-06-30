@@ -107,7 +107,7 @@ def parse_file_dt(path):
     return d + timedelta(hours=RUN_HOURS[run]), d.date(), run
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1800)
 def list_runs(_mtime_signature):
     """Liste les runs disponibles, du plus récent au plus ancien."""
     rows = []
@@ -1024,11 +1024,9 @@ def page_convergence(runs, sig):
         "run plus proche de cette date (échéance future)."
     )
 
-    targets = sorted(long["target"].unique())
-    default_t = (
-        [t for t in targets if t >= pd.Timestamp(datetime.now().date())][:5]
-        or targets[-5:]
-    )
+    today = pd.Timestamp(datetime.now().date())
+    targets = sorted(t for t in long["target"].unique() if t >= today)
+    default_t = targets[:5]
     chosen = st.multiselect(
         "Dates cibles à suivre",
         targets,

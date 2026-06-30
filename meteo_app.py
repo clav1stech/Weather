@@ -55,15 +55,49 @@ st.markdown(
       .block-container {padding-top: 1.6rem; padding-bottom: 2rem;}
       h1, h2, h3 {letter-spacing: -0.01em;}
       div[data-testid="stMetric"] {
-          background: #f6f8fb; border: 1px solid #e6ebf2;
+          background: rgba(128,138,157,0.10);
+          border: 1px solid rgba(128,138,157,0.25);
           border-radius: 12px; padding: 12px 16px;}
-      .stPlotlyChart {border: 1px solid #eef1f5; border-radius: 12px; padding: 4px;}
+      .stPlotlyChart {border: 1px solid rgba(128,138,157,0.22); border-radius: 12px; padding: 4px;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 _PCT_COLS = ["Min", "P10", "P25", "Médiane", "P75", "P90", "Max"]
+
+
+# --------------------------------------------------------------------------- #
+#  Thème clair / sombre — adapte graphiques et cartes au thème actif
+# --------------------------------------------------------------------------- #
+def _is_dark():
+    """Le thème sombre est-il actif ? Gère le mode auto/système (Streamlit récent)
+    via st.context.theme, avec repli sur la base configurée dans config.toml."""
+    try:
+        theme = st.context.theme
+        if theme is not None and getattr(theme, "type", None):
+            return theme.type == "dark"
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return (st.get_option("theme.base") or "light").lower() == "dark"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _plotly_template():
+    """Template Plotly cohérent avec le thème courant. Template ET couleurs d'encre
+    (cf. _ink) partagent _is_dark() : même si la détection ne colle pas exactement à
+    la page, le graphique reste lisible car ses fonds et traits restent cohérents."""
+    return "plotly_dark" if _is_dark() else "plotly_white"
+
+
+def _ink(dark=None):
+    """Couleur des traits/textes forts (médiane, contrôle, axe zéro), lisible quel
+    que soit le thème : ardoise sur fond clair, presque-blanc sur fond sombre."""
+    if dark is None:
+        dark = _is_dark()
+    return "#E6E9EE" if dark else "#2C3E50"
 
 
 # --------------------------------------------------------------------------- #
@@ -385,7 +419,7 @@ def fan_chart(syn, title):
     """Panache de dispersion du super-ensemble : Min–Max, P10–P90, P25–P75, médiane."""
     x = syn["valid_time"]
     fig = go.Figure()
-    base = "#2C3E50"
+    base = _ink()
     _band(fig, x, syn["Min"], syn["Max"], base, "Min–Max", 0.08)
     _band(fig, x, syn["P10"], syn["P90"], base, "P10–P90", 0.16)
     _band(fig, x, syn["P25"], syn["P75"], base, "P25–P75 (50 %)", 0.28)
@@ -393,7 +427,7 @@ def fan_chart(syn, title):
                              line=dict(color="#E74C3C", width=3)))
     fig.update_layout(title=title, height=480, hovermode="x unified",
                       xaxis_title="Échéance (date de validité)", yaxis_title="Température (°C)",
-                      legend=dict(orientation="h", y=1.08), template="plotly_white",
+                      legend=dict(orientation="h", y=1.08), template=_plotly_template(),
                       margin=dict(t=70, l=10, r=10, b=10))
     return fig
 
@@ -411,10 +445,10 @@ def spaghetti_chart(members, stats, det, model):
                              name="Médiane", line=dict(color=color, width=3.5)))
     if det is not None:
         fig.add_trace(go.Scatter(x=det.index, y=det.values, mode="lines",
-                                 name="Contrôle", line=dict(color="#111", width=2, dash="dash")))
+                                 name="Contrôle", line=dict(color=_ink(), width=2, dash="dash")))
     fig.update_layout(
         title=f"Spaghetti des membres — {model} ({members.shape[1]} scénarios)",
-        height=480, hovermode="x unified", template="plotly_white",
+        height=480, hovermode="x unified", template=_plotly_template(),
         xaxis_title="Échéance (date de validité)", yaxis_title="Température (°C)",
         legend=dict(orientation="h", y=1.08), margin=dict(t=70, l=10, r=10, b=10))
     return fig
@@ -441,7 +475,7 @@ def models_median_chart(sub, models, cutoff=None):
                                      name=f"{model} contrôle",
                                      line=dict(color=c, width=1.6, dash="dot")))
     fig.update_layout(title="Comparaison des modèles — médiane, dispersion & contrôle",
-                      height=480, hovermode="x unified", template="plotly_white",
+                      height=480, hovermode="x unified", template=_plotly_template(),
                       xaxis_title="Échéance (date de validité)", yaxis_title="Température (°C)",
                       legend=dict(orientation="h", y=1.1), margin=dict(t=80, l=10, r=10, b=10))
     return fig
@@ -462,7 +496,7 @@ def divergence_chart(div, cutoff=None):
     fig.add_hline(y=1.5, line=dict(color="#1976D2", width=1, dash="dot"),
                   annotation_text="faible (≤1.5 °C)", annotation_position="bottom left")
     fig.update_layout(title="Divergence inter-modèles (écart des médianes)",
-                      height=340, template="plotly_white", hovermode="x unified",
+                      height=340, template=_plotly_template(), hovermode="x unified",
                       xaxis_title="Échéance", yaxis_title="Écart chaud−froid (°C)",
                       margin=dict(t=70, l=10, r=10, b=10))
     return fig
@@ -476,7 +510,7 @@ def spread_chart(syn):
     fig.add_trace(go.Scatter(x=syn["valid_time"], y=syn["Ecart-type"], name="Écart-type",
                              yaxis="y2", line=dict(color="#C0392B", width=2.5)))
     fig.update_layout(title="Incertitude de la prévision selon l'échéance",
-                      height=360, template="plotly_white", hovermode="x unified",
+                      height=360, template=_plotly_template(), hovermode="x unified",
                       xaxis_title="Échéance", yaxis_title="Spread (°C)",
                       yaxis2=dict(title="Écart-type (°C)", overlaying="y", side="right"),
                       legend=dict(orientation="h", y=1.15), margin=dict(t=70, l=10, r=10, b=10))
@@ -493,7 +527,7 @@ def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
                              fill="tonexty", fillcolor=_rgba("#E74C3C", 0.10),
                              name="Marge d'incertitude", hoverinfo="skip"))
     fig.add_trace(go.Scatter(x=x, y=syn["Médiane"], mode="lines", name="Tendance (médiane)",
-                             line=dict(color="#2C3E50", width=3),
+                             line=dict(color=_ink(), width=3),
                              hovertemplate="%{x|%a %d %b · %Hh}<br>Médiane : %{y:.1f} °C<extra></extra>"))
     # Normale climatique saisonnière (cosinus) — courbe, pas une simple ligne.
     fig.add_trace(go.Scatter(x=x, y=clim_normal(x), mode="lines", name="Normale climatique",
@@ -505,7 +539,7 @@ def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
     fig.add_hline(y=seuil_canicule, line=dict(color="#E74C3C", width=2, dash="dash"),
                   annotation_text=f"Canicule exceptionnelle — {seuil_canicule:.0f} °C",
                   annotation_position="top left", annotation_font=dict(color="#C0392B", size=12))
-    fig.update_layout(title=titre, height=440, hovermode="x unified", template="plotly_white",
+    fig.update_layout(title=titre, height=440, hovermode="x unified", template=_plotly_template(),
                       xaxis_title=None, yaxis_title="Température à 850 hPa (°C)",
                       legend=dict(orientation="h", y=1.08), margin=dict(t=70, l=10, r=10, b=10))
     return fig
@@ -539,7 +573,7 @@ def calendrier_risques(jours, seuil):
         colorscale=CANICULE_SCALE, zmin=0.0, zmax=1.0, xgap=3, ygap=0,
         text=[texts], hovertemplate="%{text}<extra></extra>",
         colorbar=dict(title="P(canicule)", tickformat=".0%", thickness=12, len=0.9)))
-    fig.update_layout(height=150, template="plotly_white",
+    fig.update_layout(height=150, template=_plotly_template(),
                       xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
                       yaxis=dict(visible=False), margin=dict(t=10, l=10, r=10, b=10))
     return fig
@@ -561,10 +595,11 @@ def _kpi_card(label, value, help_txt="", value_point=None, valid_time=None):
                          f"margin-left:8px;white-space:nowrap;'>"
                          f"({signe}{abs(delta):.1f} °C norm.)</span>")
     title_attr = f' title="{help_txt}"' if help_txt else ""
-    return (f"<div{title_attr} style='background:#f6f8fb;border:1px solid #e6ebf2;"
+    return (f"<div{title_attr} style='background:rgba(128,138,157,0.10);"
+            "border:1px solid rgba(128,138,157,0.25);"
             "border-radius:12px;padding:12px 16px;height:100%;'>"
-            f"<div style='font-size:0.8rem;color:#5b6b7f;'>{label}</div>"
-            f"<div style='font-size:1.85rem;font-weight:600;color:#1a2330;line-height:1.3;'>"
+            f"<div style='font-size:0.8rem;opacity:0.7;'>{label}</div>"
+            f"<div style='font-size:1.85rem;font-weight:600;color:inherit;line-height:1.3;'>"
             f"{value}{anomalie_html}</div></div>")
 
 
@@ -696,7 +731,9 @@ def page_explore(runs, sig):
         else:
             num_cols = raw.select_dtypes(include="number").columns
             styler = (raw.style.background_gradient(cmap="RdYlBu_r", subset=list(num_cols),
-                                                    axis=None).format(precision=1)
+                                                    axis=None)
+                      .set_properties(subset=list(num_cols), color="#1a2330")
+                      .format(precision=1)
                       if len(num_cols) else raw)
             st.dataframe(styler, width="stretch", height=520)
             u = utc_cycle(run["run_date"])
@@ -831,8 +868,8 @@ def page_convergence(runs, sig):
                       if v < 0 else _rgba("#888888", 0.4) for v in delta.values]
             fig.add_trace(go.Bar(x=delta.index, y=delta.values, offsetgroup=i,
                                  name="Δ vs " + _run_tick(pr), marker_color=colors))
-        fig.add_hline(y=0, line_color="#333", line_width=1.5)
-        fig.update_layout(height=380, template="plotly_white", hovermode="x unified",
+        fig.add_hline(y=0, line_color=_ink(), line_width=1.5)
+        fig.update_layout(height=380, template=_plotly_template(), hovermode="x unified",
                           barmode="group", xaxis_title="Date prévue", yaxis_title="Révision (°C)",
                           legend=dict(orientation="h", y=1.12), margin=dict(t=30, l=10, r=10, b=10))
         st.plotly_chart(fig, width="stretch")
@@ -894,7 +931,7 @@ def page_convergence(runs, sig):
         fig.update_yaxes(title_text="Temp. prévue (°C)", col=1)
         for cpos in range(1, ncols + 1):
             fig.update_xaxes(title_text="Jours avant l'échéance", row=nrows, col=cpos)
-        fig.update_layout(height=240 * nrows, template="plotly_white",
+        fig.update_layout(height=240 * nrows, template=_plotly_template(),
                           margin=dict(t=40, l=10, r=10, b=10))
         st.plotly_chart(fig, width="stretch")
 
@@ -916,7 +953,7 @@ def page_convergence(runs, sig):
             colorbar=dict(title="Révision (°C)"),
             hovertemplate="Run %{x}<br>Cible %{y}<br>Révision : %{z:+.1f} °C<extra></extra>"))
         heat.update_layout(height=max(300, 26 * len(delta_pivot.index) + 120),
-                           template="plotly_white", xaxis_title="Run", yaxis_title="Date prévue",
+                           template=_plotly_template(), xaxis_title="Run", yaxis_title="Date prévue",
                            margin=dict(t=10, l=10, r=10, b=10))
         st.plotly_chart(heat, width="stretch")
 
@@ -1194,7 +1231,8 @@ def page_run(sig):
             show = latest[[c for c in detail_cols if c in latest.columns]].sort_values(
                 "diff", key=lambda s: s.abs(), ascending=False)
             styler = show.style.apply(
-                lambda r: ["background-color:#fdecea" if r["flag"] else "" for _ in r], axis=1
+                lambda r: ["background-color:#fdecea;color:#611a15" if r["flag"] else ""
+                           for _ in r], axis=1
             ).format({"legacy_value": "{:.1f}", "openmeteo_value": "{:.1f}",
                       "diff": "{:+.2f}", "tol": "{:.2f}"})
             st.dataframe(styler, width="stretch", height=400, hide_index=True)

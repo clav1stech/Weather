@@ -3,6 +3,11 @@
 ## Langue
 - Toujours répondre en **français**, sauf si l'utilisateur demande explicitement une autre langue.
 
+## Tenir ce fichier à jour
+- Dès que tu **détectes une règle générale** du projet (invariant, convention, contrainte, préférence récurrente de l'utilisateur, piège à éviter), **ajoute-la ici** dans la section adéquate — ne la laisse pas seulement dans un commentaire de code ou dans l'échange.
+- Ne consigner que les règles **durables et générales**, pas un détail ponctuel propre à une seule tâche. En cas de doute sur la portée, demander avant d'inscrire.
+- Préférer **mettre à jour** une consigne existante plutôt que d'en empiler une quasi-identique ; garder ce fichier concis et sans doublon.
+
 ## Vue d'ensemble du projet
 Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
 - `Forecast.py` : pipeline API Open-Meteo → base plate unique `data/database_paris.parquet`.

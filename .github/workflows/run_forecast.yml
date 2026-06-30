@@ -1,83 +1,34 @@
-name: Run Forecast
+name: Data Pipeline Weather
 
 on:
   schedule:
-    - cron: '0 10 * * *'
-    - cron: '0 22 * * *'
+    # Tourne à 10:15, 16:15, 22:15, et 04:15 UTC (Parfait pour chasser les runs 0Z, 6Z, 12Z, 18Z)
+    - cron: '15 4,10,16,22 * * *'
   workflow_dispatch:
-    inputs:
-      run_choice:
-        description: 'Run (0Z ou 12Z)'
-        required: true
-        default: '12Z'
-        type: choice
-        options:
-          - '0Z'
-          - '12Z'
 
 jobs:
-  forecast:
+  update-data:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install requests pandas numpy beautifulsoup4 openpyxl
+      - name: Install Dependencies
+        run: pip install requests pandas pyarrow beautifulsoup4 openpyxl
 
-      - name: Determine run argument
-        id: run_arg
+      - name: Execute Pipeline
+        run: python run_dual.py
+
+      - name: Commit and Push Database
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "arg=${{ github.event.inputs.run_choice }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "0 10 * * *" ]; then
-            echo "arg=0Z" >> $GITHUB_OUTPUT
-          else
-            echo "arg=12Z" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Run Forecast.py
-        run: python Forecast.py ${{ steps.run_arg.outputs.arg }}
-
-      - name: Vérifier complétude du run
-        run: |
-          python - <<'EOF'
-          import glob, os, time
-          from openpyxl import load_workbook
-          now = time.time()
-          # Surveille tous les fichiers écrits dans l'heure (run principal + éventuel rattrapage)
-          recent = [f for f in glob.glob("Forecasts/*.xlsx") if now - os.path.getmtime(f) < 3600]
-          if not recent:
-              print("::warning::Aucun fichier xlsx écrit durant ce run")
-          else:
-              incomplets = []
-              for f in recent:
-                  wb = load_workbook(f, read_only=True)
-                  models = [s for s in wb.sheetnames if s in ("ECMWF", "AIFS", "GEFS")]
-                  wb.close()
-                  if len(models) < 3:
-                      missing = [m for m in ("ECMWF", "AIFS", "GEFS") if m not in models]
-                      incomplets.append(f"{os.path.basename(f)}: {len(models)}/3 (manque {', '.join(missing)})")
-                  else:
-                      print(f"Complet 3/3 — {os.path.basename(f)}")
-              if incomplets:
-                  print("::warning::" + " | ".join(incomplets))
-          EOF
-
-      - name: Commit and push results
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "action@github.com"
-          git add Forecasts/*.xlsx
-          if ! git diff --cached --quiet; then
-            git commit -m "MAJ auto données météo"
-            git push
-          else
-            echo "Aucune modification à committer."
-          fi
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          shopt -s nullglob
+          git add data/*.parquet data/*.csv Forecasts/*.xlsx
+          git diff-index --quiet HEAD || git commit -m "Pipeline: Base de données synchronisée"
+          git push

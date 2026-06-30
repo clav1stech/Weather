@@ -1,620 +1,329 @@
+# -*- coding: utf-8 -*-
+"""Pipeline de données météo — API d'ensembles Open-Meteo → base plate unifiée.
+
+Un seul appel HTTP couvre tous les modèles à la fois, mais chaque modèle cycle à
+son propre rythme (cf. config.MODELS `cycles`) : l'API ne publie pas l'heure
+d'initialisation réelle par modèle, donc à chaque exécution :
+  1. pour CHAQUE modèle, on estime SON cycle le plus récent (0/6/12/18Z) d'après
+     l'heure UTC et sa propre liste de cycles — ex. à un poll « 6Z », GEM (qui ne
+     cycle qu'à 0Z/12Z) est étiqueté 0Z, pas 6Z ;
+  2. interroge l'API Open-Meteo (tous les modèles / variables de config.py) ;
+  3. normalise le JSON en table plate « tidy »
+     [run_date, model, member, valid_time, <variables...>], run_date variant donc
+     d'un modèle à l'autre dans un même fetch ;
+  4. ne conserve, par modèle, que les données réellement renouvelées par rapport
+     au dernier run stocké (cf. _is_fresh) — garde-fou si un modèle n'a pas encore
+     publié son cycle attendu au moment du poll ;
+  5. fusionne dans data/database_paris.parquet sans jamais perdre l'historique
+     (remplace, par (run_date, modèle), le run identique éventuel, append le run
+     frais, écriture atomique).
+
+Aucun scraping HTML : tout passe par l'API. Voir config.py pour les réglages.
+"""
+
 import os
-import sys
-import glob
-import datetime
 import re
+import sys
+import datetime as dt
+
 import requests
-import pandas as pd
 import numpy as np
-from bs4 import BeautifulSoup
-from functools import reduce
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.utils import get_column_letter
+import pandas as pd
 
-# --- Configuration ---
-DOSSIER_SORTIE = "Forecasts"
-os.makedirs(DOSSIER_SORTIE, exist_ok=True)
-
-# Switch du run souhaité : "0Z" ou "12Z"
-# Priorité : argument CLI (ex: `python Forecast.py 12Z`), puis variable d'env, sinon "0Z".
-_run_arg = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("0Z", "12Z") else None
-CHOIX_RUN = _run_arg or os.environ.get("FORECAST_RUN", "0Z")
-run_param = "0" if CHOIX_RUN == "0Z" else "12"
-heure_attendue = 12 if CHOIX_RUN == "12Z" else 0
-
-modeles = [
-    {"nom": "ECMWF ENS", "sheet": "ECMWF", "url": f"https://www.meteociel.fr/modeles/ecmwfens_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&run={run_param}"},
-    {"nom": "AIFS ENS", "sheet": "AIFS", "url": f"https://www.meteociel.fr/modeles/ecmwfens_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&aifs=1&run={run_param}"},
-    {"nom": "GEFS", "sheet": "GEFS", "url": f"https://www.meteociel.fr/modeles/gefs_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&run={run_param}"}
-]
-
-headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
-# Ordre canonique des modèles (ordre des feuilles + priorité d'affichage).
-ORDRE_MODELES = [m["nom"] for m in modeles]
-SHEET_PAR_NOM = {m["nom"]: m["sheet"] for m in modeles}
-NOM_PAR_SHEET = {m["sheet"]: m["nom"] for m in modeles}
-
-# Échéance maximale nominale par modèle (en heures). Sert à repérer les runs
-# publiés partiellement : météociel ne met d'abord en ligne qu'une partie des
-# échéances. Un modèle dont l'échéance max est nettement sous son nominal est
-# considéré « pas encore prêt » et écarté — sinon il tronquerait les graphiques
-# et risquerait d'écraser un run complet déjà en stock.
-ECHEANCE_MAX_NOMINALE = {"ECMWF ENS": 360, "AIFS ENS": 360, "GEFS": 384}
-SEUIL_COMPLETUDE = 0.9  # fraction du nominal requise pour juger un run « complet »
-
-# --- Fonctions Utilitaires ---
-def parse_file_datetime(filepath):
-    match = re.search(r'Forecast-(\d{8})(?:-(0Z|12Z))?\.xlsx', os.path.basename(filepath))
-    if match:
-        dt = datetime.datetime.strptime(match.group(1), "%d%m%Y")
-        run = match.group(2) if match.group(2) else "12Z" 
-        heures = 12 if run == "12Z" else 0
-        return dt + datetime.timedelta(hours=heures)
-    return datetime.datetime.min
-
-def parser_tableau_meteociel(html):
-    soup = BeautifulSoup(html, 'html.parser')
-    table = soup.find('table', class_='gefs')
-    if not table: return None, None
-    
-    data, colors = [], []
-    for tr in table.find_all('tr'):
-        row_data, row_colors = [], []
-        for td in tr.find_all(['td', 'th']):
-            row_data.append(td.get_text(strip=True))
-            bg = td.get('bgcolor')
-            row_colors.append(bg.lstrip('#') if bg else None)
-        data.append(row_data)
-        colors.append(row_colors)
-        
-    df = pd.DataFrame(data[1:], columns=data[0])
-    for col in df.columns:
-        if col not in ['Date', 'Ech.']:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-    return df, colors[1:]
-
-def appliquer_style_tableau(ws, start_row, style_type="standard", df_cols=None):
-    center_align = Alignment(horizontal="center", vertical="center")
-    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-    font_white = Font(color="FFFFFF", bold=True)
-    
-    default_fill = PatternFill(start_color="34495E", end_color="34495E", fill_type="solid")
-    color_ecmwf = PatternFill(start_color="1F618D", end_color="1F618D", fill_type="solid") 
-    color_aifs = PatternFill(start_color="1E8449", end_color="1E8449", fill_type="solid")  
-    color_gefs = PatternFill(start_color="B9770E", end_color="B9770E", fill_type="solid")  
-    color_div = PatternFill(start_color="7D3C98", end_color="7D3C98", fill_type="solid")   
-
-    for col in range(1, ws.max_column + 1):
-        col_letter = get_column_letter(col)
-        ws.column_dimensions[col_letter].width = 15 if col == 1 else 11
-        
-        header_fill = default_fill
-        if df_cols:
-            col_name = df_cols[col - 1]
-            if "ECMWF" in col_name: header_fill = color_ecmwf
-            elif "AIFS" in col_name: header_fill = color_aifs
-            elif "GEFS" in col_name: header_fill = color_gefs
-            elif style_type == "compare" and "Divergence" in col_name: header_fill = color_div
-
-        for row in ws.iter_rows(min_row=start_row, max_row=ws.max_row, min_col=col, max_col=col):
-            cell = row[0]
-            cell.alignment = center_align
-            cell.border = thin_border
-            if cell.row == start_row:
-                cell.fill = header_fill
-                cell.font = font_white
-
-def max_echeance(df):
-    """Échéance maximale (en heures) présente dans un tableau modèle."""
-    return pd.to_numeric(df['Ech.'], errors='coerce').max()
+import config as C
 
 
-def lire_feuille_modele(fichier, sheet):
-    """Relit une feuille modèle déjà stockée (valeurs + couleurs des cellules).
+# --------------------------------------------------------------------------- #
+#  Détection du run — par modèle (chaque modèle a son propre rythme de cycle)
+# --------------------------------------------------------------------------- #
+def detect_model_run_date(model, now_utc=None):
+    """Cycle le plus récent de CE modèle (datetime UTC tz-naïf), d'après sa propre
+    liste `cycles` (cf. config.MODELS) — pas un cycle global partagé.
 
-    Permet de récupérer un modèle déjà en stock pour compléter un run partiel
-    sans le re-télécharger (météociel l'ayant souvent déjà fait passer au run
-    suivant). Renvoie {'df', 'colors', 'info'} ou None si la feuille est absente.
+    Open-Meteo recomble les heures passées de la journée depuis le run précédent :
+    le premier pas non-NaN tombe toujours à 00:00 local et n'identifie donc pas le
+    cycle. On le déduit de l'heure UTC (moins le délai de publication, le run étant
+    exploitable ~PUBLICATION_LAG_HOURS après son initialisation), en ne retenant que
+    les heures de cycle réellement supportées par ce modèle.
     """
-    if not os.path.exists(fichier):
-        return None
-    try:
-        wb_src = load_workbook(fichier, data_only=True)
-    except Exception as e:
-        print(f"  ⚠️ Impossible de relire {os.path.basename(fichier)} ({e}).")
-        return None
-    if sheet not in wb_src.sheetnames:
-        return None
-
-    ws = wb_src[sheet]
-    info = ws['A2'].value or ''
-    if isinstance(info, str) and info.startswith('Informations : '):
-        info = info[len('Informations : '):]
-
-    # En-tête en ligne 4, données à partir de la ligne 5 (cf. écriture ci-dessous).
-    rows = list(ws.iter_rows(min_row=4))
-    if not rows:
-        return None
-    header = [c.value for c in rows[0]]
-    ncol = len(header)
-
-    data, colors = [], []
-    for r in rows[1:]:
-        cells = list(r)[:ncol]
-        vals = [c.value for c in cells]
-        if all(v is None for v in vals):
-            continue
-        data.append(vals)
-        ligne_couleurs = []
-        for c in cells:
-            hexa = None
-            fill = c.fill
-            if fill is not None and fill.patternType and fill.fgColor is not None:
-                rgb = fill.fgColor.rgb
-                if isinstance(rgb, str) and len(rgb) >= 6:
-                    hexa = rgb[-6:]
-            ligne_couleurs.append(hexa)
-        colors.append(ligne_couleurs)
-
-    df = pd.DataFrame(data, columns=header)
-    for col in df.columns:
-        if col not in ['Date', 'Ech.']:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    return {'df': df, 'colors': colors, 'info': info}
-
-
-def construire_et_sauver(model_dataframes, model_colors, model_infos, fichier_cible):
-    """Construit le classeur (feuilles modèles + synthèses + deltas) et l'enregistre.
-
-    `model_dataframes` / `model_colors` / `model_infos` sont indexés par nom de
-    modèle et déjà ordonnés (ordre canonique). Toutes les statistiques sont
-    recalculées à partir de l'union des modèles fournis.
-    """
-    wb = Workbook()
-    wb.remove(wb.active)
-
-    runs_info = [f"{nom} ({model_infos[nom]})" for nom in model_dataframes]
-
-    # --- Feuilles individuelles par modèle ---
-    for nom, df_mod in model_dataframes.items():
-        sheet = SHEET_PAR_NOM[nom]
-        colors = model_colors[nom]
-        ws_data = wb.create_sheet(title=sheet)
-        ws_data["A1"], ws_data["A2"] = f"Modèle : {nom}", f"Informations : {model_infos[nom]}"
-        ws_data["A1"].font = ws_data["A2"].font = Font(bold=True)
-
-        for r_idx, row in enumerate(dataframe_to_rows(df_mod, index=False, header=True), start=4):
-            for c_idx, value in enumerate(row, start=1):
-                cell = ws_data.cell(row=r_idx, column=c_idx, value=value)
-                if r_idx > 4:
-                    ci, cj = r_idx - 5, c_idx - 1
-                    color_hex = colors[ci][cj] if (ci < len(colors) and cj < len(colors[ci])) else None
-                    if color_hex:
-                        cell.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type='solid')
-        appliquer_style_tableau(ws_data, start_row=4)
-
-    # --- Historique (runs strictement antérieurs, fenêtre de 5 jours) ---
-    current_dt = parse_file_datetime(fichier_cible)
-    limite_dt = current_dt - datetime.timedelta(days=5)
-    fichiers_existants = glob.glob(os.path.join(DOSSIER_SORTIE, "Forecast-*.xlsx"))
-    fichiers_tries = sorted(fichiers_existants, key=parse_file_datetime, reverse=True)
-    fichiers_precedents = [
-        f for f in fichiers_tries
-        if parse_file_datetime(f) < current_dt and parse_file_datetime(f) >= limite_dt
-    ][:10]
-
-    # --- Synthèses ---
-    dfs_to_merge, all_members = [], []
-    dfs_compare_list = []
-    det_col_names = {}  # short_nom -> nom de colonne renommée dans df_super
-
-    # Noms possibles de la colonne déterministe selon le modèle :
-    # ECMWF/AIFS → "DET", GEFS → "GFS" (run haute résolution, distinct des membres).
-    DET_RAW_NAMES = {'DET', 'GFS'}
-
-    for mod_nom, df_mod in model_dataframes.items():
-        short_nom = mod_nom.replace(" ENS", "")
-        det_src = next((c for c in df_mod.columns
-                        if str(c).strip().upper() in DET_RAW_NAMES), None)
-        has_det = det_src is not None
-        exclude = ['Date', 'Ech.'] + ([det_src] if has_det else [])
-        membres = [c for c in df_mod.columns if c not in exclude]
-
-        extra_cols = [det_src] if has_det else []
-        df_temp = df_mod[['Date', 'Ech.'] + membres + extra_cols].copy()
-        new_cols = [f"{short_nom}_{c}" for c in membres]
-        det_renamed = [f"{short_nom}_DET"] if has_det else []
-        df_temp.columns = ['Date', 'Ech.'] + new_cols + det_renamed
-        all_members.extend(new_cols)
-        if has_det:
-            det_col_names[short_nom] = f"{short_nom}_DET"
-        dfs_to_merge.append(df_temp)
-
-        m_indiv = df_mod[membres].apply(pd.to_numeric, errors='coerce')
-        df_mod_stats = pd.DataFrame()
-        df_mod_stats['Date'] = df_mod['Date']
-        df_mod_stats['Ech'] = df_mod['Ech.']
-        df_mod_stats[f'{short_nom} P10'] = m_indiv.quantile(0.10, axis=1).round(1)
-        df_mod_stats[f'{short_nom} Médiane'] = m_indiv.median(axis=1).round(1)
-        if has_det:
-            df_mod_stats[f'{short_nom} DET'] = pd.to_numeric(df_mod[det_src], errors='coerce').round(1)
-        df_mod_stats[f'{short_nom} P90'] = m_indiv.quantile(0.90, axis=1).round(1)
-        df_mod_stats[f'{short_nom} Spread'] = (df_mod_stats[f'{short_nom} P90'] - df_mod_stats[f'{short_nom} P10']).round(1)
-        dfs_compare_list.append(df_mod_stats)
-
-    if dfs_to_merge:
-        # --- Super-Ensemble ---
-        df_super = reduce(lambda left, right: pd.merge(left, right, on=['Date', 'Ech.'], how='outer'), dfs_to_merge)
-        df_super = df_super[df_super['Date'].str.contains(' 12Z', na=False)].copy()
-
-        df_super['Date'] = df_super['Date'].str.split(' ').str[0]
-        df_super['Date'] = pd.to_datetime(df_super['Date'], errors='coerce').dt.date
-
-        df_super['Ech_num'] = pd.to_numeric(df_super['Ech.'], errors='coerce')
-        df_super = df_super.sort_values('Ech_num').drop(columns=['Ech_num']).reset_index(drop=True)
-
-        m = df_super[all_members]
-
-        df_stats = pd.DataFrame()
-        df_stats['Date'] = df_super['Date']
-        df_stats['Ech'] = df_super['Ech.']
-        df_stats['Min'] = m.min(axis=1).round(1)
-        df_stats['P10'] = m.quantile(0.10, axis=1).round(1)
-        df_stats['P25'] = m.quantile(0.25, axis=1).round(1)
-        df_stats['Médiane'] = m.median(axis=1).round(1)
-        for short_nom, det_col in det_col_names.items():
-            if det_col in df_super.columns:
-                df_stats[f'{short_nom} DET'] = pd.to_numeric(df_super[det_col], errors='coerce').round(1)
-        df_stats['P75'] = m.quantile(0.75, axis=1).round(1)
-        df_stats['P90'] = m.quantile(0.90, axis=1).round(1)
-        df_stats['Max'] = m.max(axis=1).round(1)
-        df_stats['Spread'] = (df_stats['P90'] - df_stats['P10']).round(1)
-        df_stats['Ecart-type'] = m.std(axis=1).round(2)
-        df_stats['Proba > 20°'] = ((m > 20).sum(axis=1) / m.notna().sum(axis=1)).fillna(0)
-
-        df_stats_ech_num = pd.to_numeric(df_stats['Ech'], errors='coerce')
-
-        # --- Deltas ---
-        for prev_file in fichiers_precedents:
-            try:
-                prev_dt = parse_file_datetime(prev_file)
-                delta_hours = int((current_dt - prev_dt).total_seconds() / 3600)
-
-                df_prev = pd.read_excel(prev_file, sheet_name="Synthèse", skiprows=4)
-                if 'Médiane' in df_prev.columns and 'Ech' in df_prev.columns:
-
-                    df_prev['Ech_Num'] = pd.to_numeric(df_prev['Ech'], errors='coerce')
-                    prev_med_map = df_prev.set_index('Ech_Num')['Médiane'].to_dict()
-
-                    heure_str = "12Z" if prev_dt.hour == 12 else "0Z"
-                    col_delta = f"Δ {prev_dt.strftime('%d-%b')} {heure_str}"
-
-                    mediane_prev_aligned = df_stats_ech_num.apply(lambda e: prev_med_map.get(e + delta_hours, np.nan))
-                    df_stats[col_delta] = (df_stats['Médiane'] - mediane_prev_aligned).round(1)
-            except Exception:
-                pass
-
-        # --- Synthèse Comparée (Individuelle) ---
-        df_compare = reduce(lambda left, right: pd.merge(left, right, on=['Date', 'Ech'], how='outer'), dfs_compare_list)
-        df_compare = df_compare[df_compare['Date'].str.contains(' 12Z', na=False)].copy()
-
-        df_compare['Date'] = df_compare['Date'].str.split(' ').str[0]
-        df_compare['Date'] = pd.to_datetime(df_compare['Date'], errors='coerce').dt.date
-
-        df_compare['Ech_num'] = pd.to_numeric(df_compare['Ech'], errors='coerce')
-        df_compare = df_compare.sort_values('Ech_num').drop(columns=['Ech_num']).reset_index(drop=True)
-
-        # Divergence (sécurisée même s'il ne reste qu'un seul modèle)
-        median_cols = [c for c in df_compare.columns if 'Médiane' in c]
-        if len(median_cols) > 1:
-            df_compare['Divergence Modèles'] = (df_compare[median_cols].max(axis=1) - df_compare[median_cols].min(axis=1)).round(1)
-        else:
-            df_compare['Divergence Modèles'] = np.nan
-
-        # --- Écriture Feuille 1 : Synthèse Comparée ---
-        ws_comp = wb.create_sheet(title="Comparaison Modèles", index=0)
-        ws_comp["A1"] = "Comparaison des Tendances par Modèle - Echéances 12Z"
-        ws_comp["A2"] = f"Généré le : {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        ws_comp["A3"] = f"Divergence : Indique l'écart de température entre le modèle le plus chaud et le plus froid."
-        ws_comp["A1"].font = ws_comp["A2"].font = ws_comp["A3"].font = Font(bold=True)
-
-        for r_idx, row in enumerate(dataframe_to_rows(df_compare, index=False, header=True), start=5):
-            for c_idx, value in enumerate(row, start=1):
-                cell = ws_comp.cell(row=r_idx, column=c_idx, value=value)
-                col_name = df_compare.columns[c_idx-1]
-
-                if col_name == 'Date' and r_idx > 5:
-                    cell.number_format = 'dd-mmm'
-
-                if col_name == 'Divergence Modèles' and r_idx > 5 and pd.notna(value):
-                    if value >= 4.0:
-                        cell.font = Font(color="D32F2F", bold=True)
-                    elif value <= 1.5:
-                        cell.font = Font(color="1976D2", bold=True)
-
-        appliquer_style_tableau(ws_comp, start_row=5, style_type="compare", df_cols=df_compare.columns.tolist())
-        ws_comp.freeze_panes = "C6"
-
-        # --- Écriture Feuille 2 : Synthèse Globale ---
-        ws_synth = wb.create_sheet(title="Synthèse", index=1)
-        ws_synth["A1"] = "Synthèse Multi-Modèles (Super-Ensemble) - Echéances 12Z"
-        ws_synth["A2"] = f"Généré le : {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        ws_synth["A3"] = f"Runs inclus : { ' | '.join(runs_info) }"
-        ws_synth["A1"].font = ws_synth["A2"].font = ws_synth["A3"].font = Font(bold=True)
-
-        for r_idx, row in enumerate(dataframe_to_rows(df_stats, index=False, header=True), start=5):
-            for c_idx, value in enumerate(row, start=1):
-                cell = ws_synth.cell(row=r_idx, column=c_idx, value=value)
-                col_name = df_stats.columns[c_idx-1]
-
-                if col_name == 'Date' and r_idx > 5:
-                    cell.number_format = 'dd-mmm'
-
-                if col_name == 'Proba > 20°' and r_idx > 5:
-                    cell.number_format = '0.0%'
-
-                if col_name.startswith('Δ') and r_idx > 5 and pd.notna(value):
-                    if value > 0:
-                        cell.font = Font(color="D32F2F", bold=True)
-                    elif value < 0:
-                        cell.font = Font(color="1976D2", bold=True)
-
-        appliquer_style_tableau(ws_synth, start_row=5, df_cols=df_stats.columns.tolist())
-        ws_synth.freeze_panes = "C6"
-
-    wb.save(fichier_cible)
-    print(f"✅ Fichier sauvegardé sous : {fichier_cible}")
-
-
-# --- 1. Extraction Tolérante ---
-def extraire_modeles():
-    """Télécharge et parse les trois modèles. Renvoie la liste des extractions brutes."""
-    extractions_brutes = []
-    for mod in modeles:
-        print(f"Téléchargement de {mod['nom']}...")
-        try:
-            response = requests.get(mod["url"], headers=headers, timeout=10)
-            response.encoding = 'windows-1252'
-            html = response.text
-
-            match = re.search(r'(Run .*?(\d{2}/\d{2}/\d{4})\s+(\d{1,2})[Zz])', html)
-
-            if not match:
-                print(f"⚠️ AVERTISSEMENT : Impossible de lire la date pour {mod['nom']} (Tableau non publié ou format cassé).")
-                continue
-
-            run_info_complet = match.group(1)
-            run_date_ext = match.group(2)
-            run_heure_ext = int(match.group(3))
-
-            df, row_colors = parser_tableau_meteociel(html)
-            if df is not None:
-                extractions_brutes.append({
-                    'nom': mod['nom'],
-                    'sheet': mod['sheet'],
-                    'df': df,
-                    'colors': row_colors,
-                    'date': run_date_ext,
-                    'heure': run_heure_ext,
-                    'info': run_info_complet
-                })
-        except Exception as e:
-            print(f"⚠️ AVERTISSEMENT : Échec de la connexion pour {mod['nom']} ({e}).")
-    return extractions_brutes
-
-
-def router_et_construire(extractions_brutes):
-    """Range chaque modèle dans le fichier de SA date de run, complète l'existant,
-    écarte les runs aux échéances partielles, puis (re)construit chaque fichier."""
-    if not extractions_brutes:
-        sys.exit("\n❌ ERREUR CRITIQUE : Absolument aucun modèle n'a pu être récupéré. Exécution annulée.")
-
-    # --- 2. Filtrage : heure demandée puis complétude des échéances ---
-    # Étape A : on ne garde que les modèles ayant bien respecté l'heure demandée.
-    modeles_heure_valide = []
-    for m in extractions_brutes:
-        if m['heure'] == heure_attendue:
-            modeles_heure_valide.append(m)
-        else:
-            print(f"  ❌ {m['nom']} écarté (Mauvais run : {m['heure']}Z au lieu de {heure_attendue}Z)")
-
-    if not modeles_heure_valide:
-        sys.exit(f"\n❌ ERREUR : Aucun modèle n'est disponible pour le run {CHOIX_RUN}.")
-
-    # Étape B : on écarte les modèles publiés partiellement (échéances tronquées).
-    # Météociel ne met d'abord en ligne qu'une partie des échéances : intégrer un tel
-    # modèle tronquerait les graphiques et pourrait écraser un run complet en stock.
-    # On préfère attendre que les échéances soient (quasi) complètes.
-    modeles_prets = []
-    for m in modeles_heure_valide:
-        nominal = ECHEANCE_MAX_NOMINALE.get(m['nom'])
-        ech_max = max_echeance(m['df'])
-        if nominal and (pd.isna(ech_max) or ech_max < SEUIL_COMPLETUDE * nominal):
-            ech_txt = "—" if pd.isna(ech_max) else f"{int(ech_max)}h"
-            print(f"  ⏳ {m['nom']} écarté (run encore partiel : échéances jusqu'à {ech_txt} "
-                  f"/ {nominal}h attendues). La donnée existante est conservée.")
-            continue
-        modeles_prets.append(m)
-
-    if not modeles_prets:
-        sys.exit("\n⏳ Aucun modèle complet pour l'instant : rien n'a été écrit "
-                 "(les runs précédents restent intacts).")
-
-    # --- 3. Routage par date de run ---
-    # Météociel fait passer les modèles au run suivant à des moments différents
-    # (souvent GEFS, puis AIFS, puis ECMWF). Chaque modèle est donc rangé dans le
-    # fichier correspondant à SA propre date de run, et non dans une date imposée à
-    # tous. On complète/met à jour le fichier sans jamais perdre l'antériorité.
-    groupes_par_date = {}
-    for m in modeles_prets:
-        groupes_par_date.setdefault(m['date'], []).append(m)
-
-    print(f"\n👉 Run {CHOIX_RUN} — dates détectées : "
-          + ", ".join(f"{d} ({', '.join(x['nom'] for x in g)})"
-                      for d, g in sorted(groupes_par_date.items(),
-                                         key=lambda kv: datetime.datetime.strptime(kv[0], '%d/%m/%Y'))))
-
-    # On traite les dates de la plus ancienne à la plus récente : ainsi un fichier
-    # récent peut calculer ses deltas sur un fichier antérieur déjà rafraîchi.
-    for date_str in sorted(groupes_par_date,
-                           key=lambda d: datetime.datetime.strptime(d, '%d/%m/%Y')):
-        fresh = groupes_par_date[date_str]
-        date_file_str = datetime.datetime.strptime(date_str, "%d/%m/%Y").strftime("%d%m%Y")
-        fichier_cible = os.path.join(DOSSIER_SORTIE, f"Forecast-{date_file_str}-{CHOIX_RUN}.xlsx")
-
-        print(f"\n📂 {os.path.basename(fichier_cible)} (run du {date_str})")
-
-        # On part des modèles déjà stockés dans le fichier (pour compléter un run
-        # partiel), puis on superpose les modèles fraîchement téléchargés.
-        combined = {}  # nom -> {'df', 'colors', 'info'}
-        if os.path.exists(fichier_cible):
-            for sheet, nom in NOM_PAR_SHEET.items():
-                existant = lire_feuille_modele(fichier_cible, sheet)
-                if existant is not None:
-                    combined[nom] = existant
-                    print(f"  📦 {nom} déjà en stock (conservé).")
-
-        for m in fresh:
-            nom = m['nom']
-            frais = {'df': m['df'], 'colors': m['colors'], 'info': m['info']}
-            if nom in combined:
-                # Garde-fou anti-régression : on ne remplace un modèle stocké que si
-                # la version fraîche a au moins autant d'échéances (jamais complet → partiel).
-                ech_frais = max_echeance(m['df'])
-                ech_stock = max_echeance(combined[nom]['df'])
-                if pd.notna(ech_stock) and pd.notna(ech_frais) and ech_frais < ech_stock:
-                    print(f"  🛡️ {nom} : version stockée plus complète "
-                          f"({int(ech_stock)}h > {int(ech_frais)}h) — conservée.")
-                    continue
-                print(f"  🔄 {nom} rafraîchi.")
-            else:
-                print(f"  ✅ {nom} ajouté.")
-            combined[nom] = frais
-
-        # Ordre canonique des feuilles (ECMWF, AIFS, GEFS).
-        noms_ordonnes = [n for n in ORDRE_MODELES if n in combined]
-        model_dataframes = {n: combined[n]['df'] for n in noms_ordonnes}
-        model_colors = {n: combined[n]['colors'] for n in noms_ordonnes}
-        model_infos = {n: combined[n]['info'] for n in noms_ordonnes}
-
-        print(f"  → Modèles inclus : {', '.join(noms_ordonnes)}")
-        construire_et_sauver(model_dataframes, model_colors, model_infos, fichier_cible)
-
-    print("\n✅ Terminé !")
-
-
-def tenter_rattrapage():
-    """Après le run principal, tente de compléter le fichier du run opposé si des modèles y manquent.
-
-    Ex : après le run 12Z, cherche le fichier 0Z le plus récent. Si ECMWF y manque
-    encore, le télécharge et l'ajoute — uniquement si Météociel sert toujours la
-    MÊME date et la MÊME heure de run que le fichier cible (double garde-fou).
-    Ne remplace jamais un modèle déjà présent.
-    """
-    autre_run = "0Z" if CHOIX_RUN == "12Z" else "12Z"
-    autre_run_param = "0" if autre_run == "0Z" else "12"
-    autre_heure = 0 if autre_run == "0Z" else 12
-
-    pattern = os.path.join(DOSSIER_SORTIE, f"Forecast-*-{autre_run}.xlsx")
-    fichiers = sorted(glob.glob(pattern), key=parse_file_datetime, reverse=True)
-    if not fichiers:
-        return
-
-    fichier_cible = fichiers[0]
-    date_attendue = parse_file_datetime(fichier_cible).date()
-
-    try:
-        wb_check = load_workbook(fichier_cible, read_only=True)
-        sheets_presents = set(wb_check.sheetnames)
-        wb_check.close()
-    except Exception as e:
-        print(f"  ⚠️ Rattrapage : impossible de lire {os.path.basename(fichier_cible)} ({e}).")
-        return
-
-    manquants = [m for m in modeles if SHEET_PAR_NOM[m['nom']] not in sheets_presents]
-    if not manquants:
-        return
-
-    print(f"\n🔁 Rattrapage {autre_run} : {os.path.basename(fichier_cible)} "
-          f"(date attendue : {date_attendue.strftime('%d/%m/%Y')})")
-    print(f"   Modèles manquants : {', '.join(m['nom'] for m in manquants)}")
-
-    urls_autre_run = {
-        "ECMWF ENS": f"https://www.meteociel.fr/modeles/ecmwfens_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&run={autre_run_param}",
-        "AIFS ENS":  f"https://www.meteociel.fr/modeles/ecmwfens_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&aifs=1&run={autre_run_param}",
-        "GEFS":      f"https://www.meteociel.fr/modeles/gefs_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&run={autre_run_param}",
+    now = now_utc or dt.datetime.now(dt.timezone.utc)
+    anchored = now - dt.timedelta(hours=C.PUBLICATION_LAG_HOURS)
+    cycles = sorted(model["cycles"])
+    eligible = [h for h in cycles if h <= anchored.hour]
+    day = anchored.date()
+    if eligible:
+        cycle_hour = eligible[-1]
+    else:
+        cycle_hour = cycles[-1]
+        day -= dt.timedelta(days=1)
+    return dt.datetime(day.year, day.month, day.day, cycle_hour)
+
+
+def run_label(run_date):
+    return f"{run_date.hour:02d}Z"
+
+
+# --------------------------------------------------------------------------- #
+#  Requête API
+# --------------------------------------------------------------------------- #
+def fetch_payload():
+    """Appel HTTP unique couvrant tous les modèles et variables."""
+    params = {
+        "latitude": C.LATITUDE,
+        "longitude": C.LONGITUDE,
+        "hourly": ",".join(v["api"] for v in C.VARIABLES),
+        "models": ",".join(m["api"] for m in C.MODELS),
+        "timezone": C.TIMEZONE,
+        "forecast_days": C.FORECAST_DAYS,
     }
+    resp = requests.get(C.API_URL, params=params, timeout=C.HTTP_TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
 
-    nouveaux = {}
-    for m_conf in manquants:
-        nom = m_conf['nom']
-        url = urls_autre_run[nom]
-        print(f"   Téléchargement de {nom}...")
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            response.encoding = 'windows-1252'
-            html = response.text
 
-            match = re.search(r'(Run .*?(\d{2}/\d{2}/\d{4})\s+(\d{1,2})[Zz])', html)
-            if not match:
-                print(f"   ⚠️ {nom} : date illisible, ignoré.")
-                continue
+# --------------------------------------------------------------------------- #
+#  Normalisation JSON → table plate
+# --------------------------------------------------------------------------- #
+def _member_pattern(var_api, model_api):
+    """Regex matchant les clés d'une variable pour un modèle.
+    Groupe 1 = numéro de membre (None pour le membre de contrôle = 0)."""
+    return re.compile(rf"^{re.escape(var_api)}_(?:member(\d+)_)?{re.escape(model_api)}$")
 
-            run_date = datetime.datetime.strptime(match.group(2), "%d/%m/%Y").date()
-            run_heure = int(match.group(3))
 
-            if run_date != date_attendue:
-                print(f"   ⚠️ {nom} : date {run_date.strftime('%d/%m/%Y')} ≠ "
-                      f"{date_attendue.strftime('%d/%m/%Y')} (mauvais jour), ignoré.")
-                continue
-            if run_heure != autre_heure:
-                print(f"   ⚠️ {nom} : sur le run {run_heure}Z (attendu {autre_run}), ignoré.")
-                continue
+def _members_of(hourly, model_api):
+    """Numéros de membres présents pour un modèle (0 = contrôle), via la variable
+    primaire. On suppose le même jeu de membres pour toutes les variables."""
+    pat = _member_pattern(C.VARIABLES[0]["api"], model_api)
+    members = set()
+    for key in hourly:
+        m = pat.match(key)
+        if m:
+            members.add(int(m.group(1)) if m.group(1) else 0)
+    return sorted(members)
 
-            df, colors = parser_tableau_meteociel(html)
-            if df is None:
-                print(f"   ⚠️ {nom} : tableau non parseable, ignoré.")
-                continue
 
-            nominal = ECHEANCE_MAX_NOMINALE.get(nom)
-            ech_max = max_echeance(df)
-            if nominal and (pd.isna(ech_max) or ech_max < SEUIL_COMPLETUDE * nominal):
-                ech_txt = "—" if pd.isna(ech_max) else f"{int(ech_max)}h"
-                print(f"   ⏳ {nom} encore partiel ({ech_txt}/{nominal}h), ignoré.")
-                continue
+def _series_key(var_api, model_api, member):
+    return f"{var_api}_{model_api}" if member == 0 else f"{var_api}_member{member:02d}_{model_api}"
 
-            nouveaux[nom] = {'df': df, 'colors': colors, 'info': match.group(1)}
-            print(f"   ✅ {nom} récupéré.")
-        except Exception as e:
-            print(f"   ⚠️ {nom} : connexion échouée ({e}).")
 
-    if not nouveaux:
-        print("   Aucun nouveau modèle récupéré pour ce rattrapage.")
+def parse_payload(payload, now_utc=None):
+    """JSON Open-Meteo → DataFrame plat. Grille horaire uniforme conservée jusqu'à
+    16 j ; un modèle qui s'arrête tôt laisse simplement des NaN en queue.
+
+    Chaque modèle reçoit SA propre `run_date` (cf. detect_model_run_date) — un même
+    fetch peut donc mélanger des modèles étiquetés à des cycles différents (ex. GEM
+    en 0Z pendant que ECMWF/AIFS/GEFS sont en 6Z).
+
+    Aucune troncature par horizon nominal ici : l'horizon réel d'un cycle (combien
+    d'échéances un modèle a effectivement recalculées) varie d'un jour à l'autre et
+    n'est pas un fait fixe par modèle (constaté empiriquement sur AIFS) — toute
+    table d'horizons codée en dur serait donc non fiable. La distinction entre
+    « échéances réellement renouvelées » et « queue collée de l'ancien cycle » se
+    fait plus loin, empiriquement, par comparaison échéance-par-échéance au dernier
+    run stocké (cf. mask_stale_tail).
+    """
+    hourly = payload["hourly"]
+    utc_offset = int(payload.get("utc_offset_seconds", 0))
+    # Heure locale renvoyée par l'API → UTC tz-naïf (comparable aux run_date).
+    valid_time = pd.to_datetime(hourly["time"]) - pd.Timedelta(seconds=utc_offset)
+
+    frames = []
+    for model in C.MODELS:
+        model_run_date = detect_model_run_date(model, now_utc)
+
+        for member in _members_of(hourly, model["api"]):
+            frame = pd.DataFrame({"valid_time": valid_time})
+            frame["run_date"] = model_run_date
+            frame["model"] = model["label"]
+            frame["member"] = member
+            for var in C.VARIABLES:
+                key = _series_key(var["api"], model["api"], member)
+                vals = hourly.get(key)
+                frame[var["col"]] = (
+                    pd.to_numeric(pd.Series(vals), errors="coerce").to_numpy()
+                    if vals is not None else np.nan
+                )
+            frames.append(frame)
+
+    if not frames:
+        return pd.DataFrame(columns=C.SCHEMA)
+
+    df = pd.concat(frames, ignore_index=True)
+
+    if C.DROP_EMPTY_SERIES:
+        # Écarte les séries (modèle, membre) entièrement vides (modèle indisponible
+        # ce run) ; conserve les séries partielles (valides + queue NaN).
+        non_empty = df.groupby(["model", "member"])[C.VAR_COLS].transform(
+            lambda s: s.notna().any())
+        df = df[non_empty.any(axis=1)].reset_index(drop=True)
+
+    return df[C.SCHEMA]
+
+
+# --------------------------------------------------------------------------- #
+#  Fraîcheur — détection empirique, échéance par échéance
+# --------------------------------------------------------------------------- #
+def load_existing():
+    if os.path.exists(C.DB_PATH):
+        return pd.read_parquet(C.DB_PATH)
+    return pd.DataFrame(columns=C.SCHEMA)
+
+
+def mask_stale_tail(model_label, candidate, existing):
+    """NaN-ifie, dans `candidate` (lignes d'UN modèle), les échéances dont les
+    valeurs sont quasi identiques à celles du dernier run stocké pour ce modèle —
+    signe qu'Open-Meteo ressert encore la queue de l'ancien cycle, pas une donnée
+    réellement recalculée par le cycle courant.
+
+    Comparaison échéance par échéance (et non un seul verdict pour tout le
+    modèle) : deux membres d'ensemble indépendants ne tombent jamais pile sur la
+    même valeur par hasard (perturbations aléatoires), donc un écart quasi nul à
+    une échéance donnée trahit fiablement une copie, quel que soit l'horizon réel
+    du cycle — qui varie d'un jour à l'autre et n'est plus supposé à l'avance.
+
+    Renvoie (candidate masqué, a_du_neuf). a_du_neuf=False si AUCUNE échéance
+    n'a changé : le modèle entier est alors considéré comme pas encore renouvelé
+    (équivalent à l'ancien comportement « skip » par modèle).
+    """
+    prior = existing[existing["model"] == model_label]
+    if prior.empty:
+        return candidate, True
+    latest_run = prior["run_date"].max()
+    prior_latest = prior[prior["run_date"] == latest_run]
+
+    merged = candidate.merge(
+        prior_latest[["member", "valid_time", *C.VAR_COLS]],
+        on=["member", "valid_time"], suffixes=("_new", "_old"), how="left")
+
+    abs_diff = pd.Series(0.0, index=merged.index)
+    n_comparable = pd.Series(0, index=merged.index)
+    has_new_value = pd.Series(False, index=merged.index)
+    for col in C.VAR_COLS:
+        new_v, old_v = merged[f"{col}_new"], merged[f"{col}_old"]
+        both_valid = new_v.notna() & old_v.notna()
+        abs_diff += (new_v - old_v).abs().where(both_valid, 0.0)
+        n_comparable += both_valid.astype(int)
+        has_new_value |= new_v.notna()
+
+    per_step = pd.DataFrame({"valid_time": merged["valid_time"], "abs_diff": abs_diff,
+                             "n": n_comparable, "has_new": has_new_value})
+
+    def _classify(g):
+        # n=0 : aucune valeur comparable des deux côtés.
+        #   • le candidat a quand même une valeur (`has_new`) → couverture
+        #     inédite (ex. au-delà de ce que le run précédent couvrait) → fraîche.
+        #   • sinon, NaN nativement des deux côtés → ni fraîche ni périmée,
+        #     n'influence pas le verdict (déjà NaN, rien à masquer).
+        if g["n"].sum() == 0:
+            return "fresh" if g["has_new"].any() else "empty"
+        return "fresh" if (g["abs_diff"].sum() / g["n"].sum()) > C.FRESHNESS_EPS else "stale"
+
+    step_class = per_step.groupby("valid_time").apply(_classify, include_groups=False)
+    stale_steps = step_class[step_class == "stale"].index
+
+    candidate = candidate.copy()
+    candidate.loc[candidate["valid_time"].isin(stale_steps), C.VAR_COLS] = np.nan
+    a_du_neuf = bool((step_class == "fresh").any())
+    return candidate, a_du_neuf
+
+
+def filter_fresh_rows(fresh, existing):
+    """Applique mask_stale_tail à chaque modèle ; écarte entièrement les modèles
+    sans la moindre échéance renouvelée (cf. mask_stale_tail)."""
+    kept, stale_labels = [], []
+    for model_label, candidate in fresh.groupby("model"):
+        masked, a_du_neuf = mask_stale_tail(model_label, candidate, existing)
+        if a_du_neuf:
+            kept.append(masked)
+        else:
+            stale_labels.append(model_label)
+    out = pd.concat(kept, ignore_index=True) if kept else fresh.iloc[0:0]
+    return out, stale_labels
+
+
+# --------------------------------------------------------------------------- #
+#  Persistance
+# --------------------------------------------------------------------------- #
+def _validate(df):
+    if df is None or df.empty:
+        raise ValueError("Run frais vide — rien à écrire.")
+    missing = [c for c in C.SCHEMA if c not in df.columns]
+    if missing:
+        raise ValueError(f"Colonnes manquantes dans le run frais : {missing}")
+    if df[C.VAR_COLS].notna().any(axis=None) is False:
+        raise ValueError("Aucune valeur valide dans le run frais.")
+
+
+def persist(fresh, existing=None):
+    """Fusion atomique : retire, pour chaque (run_date, modèle) présent dans
+    `fresh`, les lignes déjà stockées sous ce même couple, puis append. Comme
+    `fresh` peut mélanger des modèles à des cycles différents (ex. GEM en 0Z,
+    ECMWF en 6Z), le dédoublonnage se fait par couple — jamais par run_date seul.
+    Les modèles absents de `fresh` (cycle pas encore renouvelé, cf.
+    filter_fresh_models) gardent leur run antérieur intact — jamais de perte
+    d'historique.
+
+    L'écrasement du fichier persistant n'a lieu qu'une fois le DataFrame complet
+    validé et écrit dans un fichier temporaire (os.replace = remplacement atomique).
+    """
+    _validate(fresh)
+    os.makedirs(C.DATA_DIR, exist_ok=True)
+
+    if existing is None:
+        existing = load_existing()
+
+    if existing.empty:
+        combined = fresh.copy()
+    else:
+        fresh_keys = fresh[["run_date", "model"]].drop_duplicates()
+        merged = existing.merge(fresh_keys, on=["run_date", "model"],
+                                how="left", indicator=True)
+        dup_mask = (merged["_merge"] == "both").to_numpy()
+        combined = pd.concat([existing[~dup_mask], fresh], ignore_index=True)
+
+    combined = combined.sort_values(["run_date", "model", "member", "valid_time"]) \
+                       .reset_index(drop=True)
+
+    tmp = C.DB_PATH + ".tmp"
+    combined.to_parquet(tmp, index=False)
+    os.replace(tmp, C.DB_PATH)  # remplacement atomique — jamais d'écriture partielle
+    return combined
+
+
+# --------------------------------------------------------------------------- #
+#  Entrée
+# --------------------------------------------------------------------------- #
+def main():
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    print("⏳ Requête Open-Meteo…")
+    payload = fetch_payload()
+
+    candidate = parse_payload(payload, now_utc)
+    cycles = {m["label"]: detect_model_run_date(m, now_utc) for m in C.MODELS}
+    print("   Cycle détecté par modèle : " +
+          ", ".join(f"{label} {run_label(rd)}" for label, rd in cycles.items()))
+
+    existing = load_existing()
+    fresh, stale = filter_fresh_rows(candidate, existing)
+    if stale:
+        print(f"   ⏸️  Cycle inchangé (run déjà en stock conservé) : {', '.join(stale)}")
+    if fresh.empty:
+        print("ℹ️  Aucun modèle renouvelé à ce poll — base laissée telle quelle.")
         return
+    for model_label, g in fresh.groupby("model"):
+        valid = g.dropna(subset=C.VAR_COLS)
+        last = valid["valid_time"].max() if not valid.empty else None
+        print(f"   ✅ {model_label} renouvelé — échéances valides jusqu'à {last}")
+    print(f"   Lignes du run frais  : {len(fresh):,}")
 
-    combined = {}
-    for sheet, nom in NOM_PAR_SHEET.items():
-        existant = lire_feuille_modele(fichier_cible, sheet)
-        if existant is not None:
-            combined[nom] = existant
-    for nom, data in nouveaux.items():
-        if nom not in combined:
-            combined[nom] = data
-
-    noms_ordonnes = [n for n in ORDRE_MODELES if n in combined]
-    construire_et_sauver(
-        {n: combined[n]['df'] for n in noms_ordonnes},
-        {n: combined[n]['colors'] for n in noms_ordonnes},
-        {n: combined[n]['info'] for n in noms_ordonnes},
-        fichier_cible
-    )
+    combined = persist(fresh, existing)
+    n_runs = combined[["run_date", "model"]].drop_duplicates().shape[0]
+    print(f"✅ Base mise à jour : {len(combined):,} lignes · {n_runs} run(s) modèle archivés")
+    print(f"   → {C.DB_PATH}")
 
 
 if __name__ == "__main__":
-    router_et_construire(extraire_modeles())
-    tenter_rattrapage()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001
+        sys.exit(f"❌ Échec du pipeline : {exc}")

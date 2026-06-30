@@ -8,16 +8,15 @@ fetch/scrape lui-même : consomme les sorties déjà produites par Forecast.py
 (parquet) et Forecast_legacy.py (xlsx) pour le run demandé. Orchestré par
 run_dual.py.
 
-Stratégie de comparaison par modèle (cf. config.LEGACY_COMPARE_STRATEGY) :
-  • "det"    : colonne DET legacy vs membre de contrôle (member 0) Open-Meteo —
-    valide pour ECMWF/AIFS, qui partagent le même run de contrôle entre les
-    deux sources (même trajectoire physique).
-  • "median" : médiane des membres d'ensemble des deux côtés — pour GEFS, dont
-    la colonne « GFS » scrapée est en réalité le run déterministe haute
-    résolution séparé, pas le membre de contrôle de l'ensemble GEFS (constaté
-    empiriquement : écarts de 5-15°C en comparaison DET-à-DET). La médiane,
-    elle, reste comparable puisque les deux sources poolent le même ensemble
-    GEFS (31 membres, 0 à 30).
+Comparaison médiane-vs-médiane pour TOUS les modèles (cf.
+config.LEGACY_COMPARE_STRATEGY) : la colonne « DET »/« GFS » scrapée sur
+Météociel est le run déterministe HAUTE RÉSOLUTION (HRES/GFS-det), un produit
+distinct du membre de contrôle (member 0) de l'API ensemble — les confronter
+fabrique ~7 °C d'écart artificiel à longue échéance (bords opposés du panache).
+La médiane des membres reste comparable, les deux sources poolant le même
+ensemble. Le seuil de flag s'élargit avec l'échéance (tol = BASE + PER_DAY·jours,
+plafonné) : on cherche un BUG pipeline (offset court-terme), pas la divergence-
+modèle légitime de longue échéance.
 """
 
 import glob
@@ -77,7 +76,11 @@ def _read_legacy_sheet(path, sheet):
 
 
 def _legacy_metric(path, sheet, strategy):
-    """DataFrame [valid_time, legacy_value] pour la métrique demandée."""
+    """DataFrame [valid_time, legacy_value] pour la métrique demandée.
+
+    En stratégie « median », on n'émet une échéance que si au moins
+    CROSS_CHECK_MIN_MEMBERS membres y sont valides (sinon la médiane n'est pas
+    représentative — cf. config)."""
     df, det_col, member_cols = _read_legacy_sheet(path, sheet)
     empty = pd.DataFrame(columns=["valid_time", "legacy_value"])
     if df is None:
@@ -91,18 +94,28 @@ def _legacy_metric(path, sheet, strategy):
         if not member_cols:
             return empty
         members = df[member_cols].apply(pd.to_numeric, errors="coerce")
-        out = pd.DataFrame({"valid_time": df["valid_time"], "legacy_value": members.median(axis=1)})
+        out = pd.DataFrame({"valid_time": df["valid_time"],
+                            "legacy_value": members.median(axis=1),
+                            "_n": members.notna().sum(axis=1)})
+        out = out[out["_n"] >= C.CROSS_CHECK_MIN_MEMBERS].drop(columns="_n")
     return out.dropna(subset=["valid_time"])
 
 
 def _openmeteo_metric(db, model_label, run_date, strategy):
-    """DataFrame [valid_time, openmeteo_value] pour la métrique demandée."""
+    """DataFrame [valid_time, openmeteo_value] pour la métrique demandée.
+
+    En « median », on n'émet une échéance que si au moins CROSS_CHECK_MIN_MEMBERS
+    membres y sont valides — symétrique du garde-fou legacy (la queue masquée par
+    mask_stale_tail laisse des échéances à 0-2 membres, non représentatives)."""
     sub = db[(db["model"] == model_label) & (db["run_date"] == run_date)]
     if strategy == "det":
         out = sub[sub["member"] == 0][["valid_time", C.PRIMARY_VAR]]
-    else:  # "median"
-        out = sub.groupby("valid_time", as_index=False)[C.PRIMARY_VAR].median()
-    return out.rename(columns={C.PRIMARY_VAR: "openmeteo_value"})
+        return out.rename(columns={C.PRIMARY_VAR: "openmeteo_value"})
+    # "median"
+    agg = sub.groupby("valid_time")[C.PRIMARY_VAR].agg(
+        openmeteo_value="median", _n="count")
+    agg = agg[agg["_n"] >= C.CROSS_CHECK_MIN_MEMBERS]
+    return agg.drop(columns="_n").reset_index()
 
 
 def cross_check(run_label, now_utc=None):
@@ -140,7 +153,17 @@ def cross_check(run_label, now_utc=None):
         if merged.empty:
             continue
         merged["diff"] = (merged["legacy_value"] - merged["openmeteo_value"]).round(2)
-        merged["flag"] = merged["diff"].abs() > C.CROSS_CHECK_TOLERANCE_C
+        # Tolérance fonction de l'échéance : un bug pipeline ressort à courte
+        # échéance (offset constant) ; à longue échéance, deux ensembles distincts
+        # divergent légitimement de 1-2 °C (cf. config). tol = BASE + PER_DAY·jours,
+        # plafonnée à CAP.
+        lead_h = (merged["valid_time"] - run_date).dt.total_seconds() / 3600
+        merged["lead_h"] = lead_h.round().astype(int)
+        tol = (C.CROSS_CHECK_TOLERANCE_BASE_C
+               + C.CROSS_CHECK_TOLERANCE_PER_DAY_C * (lead_h / 24)).clip(
+            upper=C.CROSS_CHECK_TOLERANCE_CAP_C)
+        merged["tol"] = tol.round(2)
+        merged["flag"] = merged["diff"].abs() > tol
         merged.insert(0, "metric", strategy)
         merged.insert(0, "model", model_label)
         merged.insert(0, "run_date", run_date)
@@ -153,7 +176,7 @@ def cross_check(run_label, now_utc=None):
 
     report = pd.concat(rows, ignore_index=True)
     report = report[["checked_at", "run_date", "model", "metric", "valid_time",
-                     "legacy_value", "openmeteo_value", "diff", "flag"]]
+                     "lead_h", "legacy_value", "openmeteo_value", "diff", "tol", "flag"]]
 
     os.makedirs(C.DATA_DIR, exist_ok=True)
     header = not os.path.exists(C.CROSS_CHECK_LOG_PATH)
@@ -162,7 +185,8 @@ def cross_check(run_label, now_utc=None):
     n_flag = int(report["flag"].sum())
     print(f"🔍 Contrôle croisé {run_label} : {len(report)} échéances comparées "
           f"({', '.join(sorted(report['model'].unique()))}), "
-          f"{n_flag} écart(s) > {C.CROSS_CHECK_TOLERANCE_C}°C")
+          f"{n_flag} écart(s) hors tolérance "
+          f"({C.CROSS_CHECK_TOLERANCE_BASE_C}→{C.CROSS_CHECK_TOLERANCE_CAP_C}°C selon échéance)")
     if n_flag:
         worst = report.reindex(report["diff"].abs().sort_values(ascending=False).index)
         print(worst.head(5).to_string(index=False))

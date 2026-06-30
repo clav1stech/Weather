@@ -37,23 +37,30 @@ PUBLICATION_LAG_HOURS = 4
 #          0Z/12Z ; à 6Z/18Z son « run » n'existe pas.
 # desc   : description courte affichée dans le dashboard (page « Indicateur de
 #          canicule » → expander explicatif).
+# horizon_h (OPTIONNEL) : horizon nominal du cycle PRINCIPAL (0Z/12Z), en heures.
+#          Sert UNIQUEMENT à désambiguïser l'étiquette de run à partir de la
+#          dernière échéance publiée (cf. Forecast.infer_run_date) — ce n'est PAS
+#          une table de troncature bloquante. L'inférence n'est retenue que si
+#          elle tombe net sur un cycle ET reste à portée du cycle horloge ; sinon
+#          (run partiel/tronqué, off-cycle 6Z/18Z plus court que son nominal)
+#          repli sur la détection horloge. Un modèle SANS horizon_h (ex. GEM, dont
+#          l'horizon réel n'est pas connu de façon fiable) utilise directement ce
+#          repli — c'est le choix sûr quand on ignore si le modèle publie partiel.
 #
-# Pas de champ « horizon nominal » : l'horizon réel d'un cycle 6Z/18Z varie d'un
-# jour à l'autre (constaté sur AIFS, qui dépasse parfois largement la moitié de
-# période) — toute table figée serait donc non fiable. La distinction entre
-# échéances réellement renouvelées et queue collée de l'ancien cycle se fait de
-# façon empirique au pipeline (cf. Forecast.mask_stale_tail).
+# La distinction « échéances réellement renouvelées » vs « queue collée de l'ancien
+# cycle » reste empirique au pipeline (cf. Forecast.mask_stale_tail) : horizon_h
+# ne fige rien, il ne fait que lever l'ambiguïté 06Z-servi-comme-12Z.
 MODELS = [
     {"api": "ecmwf_ifs025_ensemble",   "label": "ECMWF", "main": True,  "color": "#1F618D",
-     "cycles": [0, 6, 12, 18],
+     "cycles": [0, 6, 12, 18], "horizon_h": 360,
      "desc": "modèle *physique* du Centre européen (Reading, Royaume-Uni), référence "
              "mondiale de la prévision à moyenne échéance"},
     {"api": "ecmwf_aifs025_ensemble",  "label": "AIFS",  "main": True,  "color": "#1E8449",
-     "cycles": [0, 6, 12, 18],
+     "cycles": [0, 6, 12, 18], "horizon_h": 360,
      "desc": "le modèle d'**intelligence artificielle** du même Centre européen, récent, "
              "très rapide et désormais très performant"},
     {"api": "ncep_gefs_seamless",      "label": "GEFS",  "main": True,  "color": "#B9770E",
-     "cycles": [0, 6, 12, 18],
+     "cycles": [0, 6, 12, 18], "horizon_h": 384,
      "desc": "l'ensemble américain de la **NOAA** (États-Unis)"},
     {"api": "gem_global_ensemble",     "label": "GEM",   "main": False, "color": "#16A085",
      "cycles": [0, 12],
@@ -97,6 +104,16 @@ DROP_EMPTY_SERIES = True
 # aléatoires) ne tombent quasiment jamais sous ce seuil par coïncidence.
 FRESHNESS_EPS = 0.05  # °C — écart moyen abs. minimal, PAR ÉCHÉANCE, pour la juger fraîche
 
+# --- Inférence du run pilotée par la donnée (cf. Forecast.infer_run_date) ----- #
+# L'identité du cycle vit dans la DERNIÈRE échéance publiée (init + horizon), pas
+# dans la première (rebouchée par l'API depuis 00:00 local). On rétro-calcule
+# init = dernière_échéance − horizon_h et on le cale sur la grille de cycles.
+# Deux garde-fous, pour ne JAMAIS dégrader le comportement horloge actuel :
+RUN_SNAP_TOLERANCE_H = 3   # init calé doit tomber à ≤ 3 h d'un cycle (sinon repli)
+RUN_INFER_MAX_SHIFT_H = 9  # …et à ≤ 9 h du cycle horloge : l'inférence ne peut que
+                           # corriger vers un cycle VOISIN (ex. 12Z→06Z), jamais
+                           # téléporter. Au-delà (run tronqué, off-cycle court) → repli.
+
 # --------------------------------------------------------------------------- #
 #  Climatologie & seuils (à 850 hPa)
 # --------------------------------------------------------------------------- #
@@ -113,27 +130,40 @@ SEUIL_CANICULE_850 = 18.0  # °C — seuil de canicule exceptionnelle (pilote le
 # --------------------------------------------------------------------------- #
 #  Contrôle croisé Open-Meteo vs legacy (Météociel) — cf. validate_cross_pipeline.py
 # --------------------------------------------------------------------------- #
-# Le run de contrôle (membre 0 / DET) représente la même trajectoire physique
-# des deux côtés : un écart au-delà de ce seuil est jugé suspect (à investiguer),
-# pas une simple divergence de modèle.
-CROSS_CHECK_TOLERANCE_C = 0.5
+# Objectif du contrôle : détecter un BUG pipeline (offset constant, corruption,
+# mauvais cycle), PAS la divergence-modèle légitime. À courte échéance un bug se
+# traduit par un écart constant ; à longue échéance, deux ensembles distincts
+# (versions de modèle, post-traitement, échantillon de membres, résolution
+# horaire vs 6-horaire) divergent de 1-2 °C sans anomalie. La tolérance s'élargit
+# donc avec l'échéance : tol(lead) = BASE + PER_DAY·jours, plafonnée à CAP.
+CROSS_CHECK_TOLERANCE_BASE_C = 0.5     # °C — seuil à échéance ~0
+CROSS_CHECK_TOLERANCE_PER_DAY_C = 0.2  # °C — élargissement par jour d'échéance
+CROSS_CHECK_TOLERANCE_CAP_C = 3.0      # °C — plafond (au-delà = vraie anomalie)
+# Comparaison de médianes : exiger un minimum de membres valides des DEUX côtés,
+# sinon la médiane n'est pas représentative (ex. queue AIFS NaN-ifiée, 1-2 membres).
+CROSS_CHECK_MIN_MEMBERS = 5
 CROSS_CHECK_LOG_PATH = os.path.join(DATA_DIR, "cross_check_log.csv")
 LEGACY_MODELS = {"ECMWF": "ECMWF", "AIFS": "AIFS", "GEFS": "GEFS"}  # label -> feuille xlsx
 LEGACY_DET_NAMES = {"DET", "GFS"}  # nom de la colonne contrôle selon le modèle
 LEGACY_FORECASTS_DIR = os.path.join(BASE_DIR, "Forecasts")
 
 # Stratégie de comparaison par modèle :
-#   • "det"    : colonne DET/GFS legacy vs membre de contrôle (member 0) Open-Meteo
-#                — valide seulement quand les deux représentent la MÊME trajectoire
-#                physique (vrai pour ECMWF/AIFS, leur run de contrôle est partagé
-#                entre les deux sources).
-#   • "median" : médiane des membres d'ensemble des deux côtés — pour GEFS, où la
-#                colonne « GFS » scrapée est en réalité le run déterministe haute
-#                résolution séparé (produit différent du membre de contrôle de
-#                l'ensemble GEFS), donc pas comparable au DET. La médiane reste
-#                comparable car les deux sources poolent le même ensemble GEFS
-#                (31 membres, 0 à 30).
-LEGACY_COMPARE_STRATEGY = {"ECMWF": "det", "AIFS": "det", "GEFS": "median"}
+#   • "median" : médiane des membres d'ensemble des deux côtés. Stratégie par
+#                défaut pour TOUS les modèles, car la colonne « DET »/« GFS »
+#                scrapée sur Météociel est en réalité le run déterministe HAUTE
+#                RÉSOLUTION (HRES pour ECMWF, GFS-det pour GEFS), un produit
+#                SÉPARÉ du membre de contrôle (member 0) de l'API ensemble.
+#                Vérifié empiriquement : sur ECMWF à J+13, « DET » Météociel ≈
+#                +4 °C vs sa propre médiane (bord chaud du HRES) tandis que le
+#                member 0 Open-Meteo ≈ −6 °C vs sa médiane (bord froid de l'ENS
+#                control) → la comparaison det-vs-det confronte deux produits aux
+#                bords opposés du panache et fabrique ~7 °C d'écart artificiel. La
+#                médiane-vs-médiane le ramène à 1-2 °C (les deux sources poolent
+#                le même ensemble).
+#   • "det"    : colonne DET/GFS legacy vs member 0 Open-Meteo — conservé pour
+#                mémoire/usage explicite, mais NON recommandé (produits distincts,
+#                cf. ci-dessus).
+LEGACY_COMPARE_STRATEGY = {"ECMWF": "median", "AIFS": "median", "GEFS": "median"}
 
 # --------------------------------------------------------------------------- #
 #  Dérivés (ne pas éditer)

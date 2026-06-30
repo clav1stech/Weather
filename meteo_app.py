@@ -1162,9 +1162,11 @@ def page_run(sig):
 
     st.markdown("---")
     st.subheader("🔍 Historique du contrôle croisé")
-    st.caption("Comparaison ECMWF/AIFS (run de contrôle) et GEFS (médiane) entre Open-Meteo et "
-              f"Météociel, échéance par échéance. Écart signalé (⚠️) au-delà de "
-              f"{C.CROSS_CHECK_TOLERANCE_C:.1f} °C.")
+    st.caption("Comparaison **médiane d'ensemble** (ECMWF/AIFS/GEFS) entre Open-Meteo et "
+              "Météociel, échéance par échéance. Seuil de signalement (⚠️) élargi avec "
+              f"l'échéance, de {C.CROSS_CHECK_TOLERANCE_BASE_C:.1f} à "
+              f"{C.CROSS_CHECK_TOLERANCE_CAP_C:.1f} °C (un bug pipeline ressort à courte "
+              "échéance ; à longue échéance deux ensembles distincts divergent légitimement).")
     log_sig = cross_check_log_signature()
     log = load_cross_check_log(log_sig)
     if log.empty:
@@ -1186,12 +1188,15 @@ def page_run(sig):
             st.warning(f"⚠️ {int(latest['flag'].sum())} échéance(s) au-delà du seuil sur le "
                       "dernier contrôle — détail ci-dessous.")
         with st.expander("📋 Détail du dernier contrôle"):
-            show = latest[["model", "metric", "valid_time", "legacy_value",
-                          "openmeteo_value", "diff", "flag"]].sort_values(
+            detail_cols = ["model", "metric", "valid_time", "lead_h", "legacy_value",
+                           "openmeteo_value", "diff", "tol", "flag"]
+            # Rétro-compat : un log antérieur au format lead-aware n'a ni lead_h ni tol.
+            show = latest[[c for c in detail_cols if c in latest.columns]].sort_values(
                 "diff", key=lambda s: s.abs(), ascending=False)
             styler = show.style.apply(
                 lambda r: ["background-color:#fdecea" if r["flag"] else "" for _ in r], axis=1
-            ).format({"legacy_value": "{:.1f}", "openmeteo_value": "{:.1f}", "diff": "{:+.2f}"})
+            ).format({"legacy_value": "{:.1f}", "openmeteo_value": "{:.1f}",
+                      "diff": "{:+.2f}", "tol": "{:.2f}"})
             st.dataframe(styler, width="stretch", height=400, hide_index=True)
 
         with st.expander("📜 Historique complet (tous contrôles)"):

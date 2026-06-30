@@ -63,6 +63,47 @@ def run_label(run_date):
     return f"{run_date.hour:02d}Z"
 
 
+def _snap_to_cycle(when, cycles):
+    """Datetime (tz-naïf) du cycle (heure ∈ `cycles`) le plus proche de `when`,
+    en considérant veille / jour / lendemain pour gérer les bords de journée."""
+    best = None
+    for day_offset in (-1, 0, 1):
+        day = (when + dt.timedelta(days=day_offset)).date()
+        for h in cycles:
+            cand = dt.datetime(day.year, day.month, day.day, h)
+            if best is None or abs((cand - when)) < abs((best - when)):
+                best = cand
+    return best
+
+
+def infer_run_date(model, last_valid, now_utc=None):
+    """run_date de CE modèle, piloté par la donnée, avec repli horloge sûr.
+
+    L'identité du cycle vit dans la DERNIÈRE échéance publiée (init + horizon),
+    pas dans la première (l'API reboucle les heures passées depuis 00:00 local).
+    On rétro-calcule init = last_valid − horizon_h et on le cale sur la grille de
+    cycles du modèle.
+
+    Garde-fous (runs partiels/tronqués, off-cycles courts — dont on ne connaît pas
+    la liste à l'avance) : l'inférence n'est RETENUE que si l'init calé tombe net
+    sur un cycle (résidu ≤ RUN_SNAP_TOLERANCE_H) ET reste à portée du cycle
+    horloge (≤ RUN_INFER_MAX_SHIFT_H) — elle ne peut donc que CORRIGER vers un
+    cycle voisin (ex. 06Z servi sous étiquette 12Z → ramené à 06Z), jamais
+    téléporter. Sinon (horizon inconnu, run tronqué, off-cycle plus court que son
+    nominal) → repli sur detect_model_run_date (comportement horloge éprouvé)."""
+    wall = detect_model_run_date(model, now_utc)
+    horizon = model.get("horizon_h")
+    if horizon is None or last_valid is None or pd.isna(last_valid):
+        return wall
+    inferred = pd.Timestamp(last_valid) - pd.Timedelta(hours=horizon)
+    snapped = _snap_to_cycle(inferred.to_pydatetime(), model["cycles"])
+    residual_h = abs((inferred - snapped).total_seconds()) / 3600
+    shift_h = abs((snapped - wall).total_seconds()) / 3600
+    if residual_h <= C.RUN_SNAP_TOLERANCE_H and shift_h <= C.RUN_INFER_MAX_SHIFT_H:
+        return snapped
+    return wall
+
+
 # --------------------------------------------------------------------------- #
 #  Requête API
 # --------------------------------------------------------------------------- #
@@ -106,13 +147,29 @@ def _series_key(var_api, model_api, member):
     return f"{var_api}_{model_api}" if member == 0 else f"{var_api}_member{member:02d}_{model_api}"
 
 
+def _model_last_valid(hourly, valid_time, model_api, members):
+    """Dernière `valid_time` où AU MOINS un membre du modèle a une valeur non-NaN
+    pour la variable primaire (= init + horizon réellement publié). NaT si le
+    modèle est absent du payload. Calculé sur le payload BRUT — avant tout
+    masquage de fraîcheur — car c'est la couverture réelle de l'API qui porte
+    l'identité du cycle (cf. infer_run_date)."""
+    primary = C.VARIABLES[0]["api"]
+    mask = np.zeros(len(valid_time), dtype=bool)
+    for member in members:
+        vals = hourly.get(_series_key(primary, model_api, member))
+        if vals is not None:
+            mask |= pd.to_numeric(pd.Series(vals), errors="coerce").notna().to_numpy()
+    return valid_time[mask].max() if mask.any() else pd.NaT
+
+
 def parse_payload(payload, now_utc=None):
     """JSON Open-Meteo → DataFrame plat. Grille horaire uniforme conservée jusqu'à
     16 j ; un modèle qui s'arrête tôt laisse simplement des NaN en queue.
 
-    Chaque modèle reçoit SA propre `run_date` (cf. detect_model_run_date) — un même
-    fetch peut donc mélanger des modèles étiquetés à des cycles différents (ex. GEM
-    en 0Z pendant que ECMWF/AIFS/GEFS sont en 6Z).
+    Chaque modèle reçoit SA propre `run_date` (cf. infer_run_date : déduit de la
+    dernière échéance publiée, repli horloge si ambigu) — un même fetch peut donc
+    mélanger des modèles étiquetés à des cycles différents (ex. GEM en 0Z pendant
+    que ECMWF/AIFS/GEFS sont en 6Z).
 
     Aucune troncature par horizon nominal ici : l'horizon réel d'un cycle (combien
     d'échéances un modèle a effectivement recalculées) varie d'un jour à l'autre et
@@ -129,9 +186,11 @@ def parse_payload(payload, now_utc=None):
 
     frames = []
     for model in C.MODELS:
-        model_run_date = detect_model_run_date(model, now_utc)
+        members = _members_of(hourly, model["api"])
+        last_valid = _model_last_valid(hourly, valid_time, model["api"], members)
+        model_run_date = infer_run_date(model, last_valid, now_utc)
 
-        for member in _members_of(hourly, model["api"]):
+        for member in members:
             frame = pd.DataFrame({"valid_time": valid_time})
             frame["run_date"] = model_run_date
             frame["model"] = model["label"]
@@ -299,9 +358,11 @@ def main():
     payload = fetch_payload()
 
     candidate = parse_payload(payload, now_utc)
-    cycles = {m["label"]: detect_model_run_date(m, now_utc) for m in C.MODELS}
-    print("   Cycle détecté par modèle : " +
-          ", ".join(f"{label} {run_label(rd)}" for label, rd in cycles.items()))
+    # run_date réellement retenu par modèle (inférence donnée + repli horloge).
+    rd_by_model = candidate.drop_duplicates("model").set_index("model")["run_date"]
+    print("   Cycle retenu par modèle : " +
+          ", ".join(f"{m['label']} {run_label(rd_by_model[m['label']])}"
+                    for m in C.MODELS if m["label"] in rd_by_model.index))
 
     existing = load_existing()
     fresh, stale = filter_fresh_rows(candidate, existing)

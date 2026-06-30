@@ -7,5 +7,12 @@ __pycache__/
 # Sauvegardes locales — jamais synchronisées sur GitHub
 Export/
 
+# Métadonnées OS
+.DS_Store
+Thumbs.db
+
 # Réglages Claude Code personnels (non partagés)
 .claude/settings.local.json
+
+# Environnement virtuel local (macOS)
+.venv/

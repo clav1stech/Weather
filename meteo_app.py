@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import glob
+import shutil
 import subprocess
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -29,9 +30,10 @@ from plotly.subplots import make_subplots
 
 import config as C
 import run_dual
+import Forecast as F  # persist() : fusion validée, anti-régression, écriture atomique
 import validate_cross_pipeline as V  # helpers de lecture des xlsx legacy (Météociel)
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 LOCAL_TZ = ZoneInfo("Europe/Paris")
 VAR = C.PRIMARY_VAR  # variable principale affichée (t850)
 
@@ -1875,6 +1877,42 @@ def page_run(sig):
                     st.error(f"Erreur : {e}")
 
     st.markdown("---")
+    st.subheader("🩹 Import ciblé depuis le legacy")
+    st.caption("Comble une **absence avérée** du parquet Open-Meteo depuis un xlsx "
+               "Météociel (même principe que `migrate.py`, mais un seul couple "
+               "run × modèle à la fois). Ne liste que les couples présents en "
+               "legacy et **sans aucune donnée valide** côté Open-Meteo — jamais "
+               "d'écrasement. Sauvegarde datée du parquet avant écriture ; les "
+               "xlsx restent en lecture seule.")
+    cands = legacy_import_candidates(sig, legacy_signature())
+    if cands.empty:
+        st.info("Aucune absence à combler : tous les runs legacy sont déjà "
+                "couverts par des données valides dans le parquet Open-Meteo.")
+    else:
+        def _cand_label(r):
+            reach = "" if pd.isna(r["lead_h"]) else f" · portée {r['lead_h']/24:.1f} j"
+            return (f"{r['model']} — run {r['run_date']:%d/%m/%Y} "
+                    f"{r['run_date'].hour}Z · {int(r['n_members'])} membres"
+                    f"{reach} · {r['file']}")
+
+        choice = st.selectbox("Run legacy à importer (absent du parquet)",
+                              cands.to_dict("records"), format_func=_cand_label)
+        confirm = st.checkbox("Je confirme l'import de ce run dans le parquet "
+                              "(sauvegarde datée créée automatiquement avant écriture).")
+        if st.button("📥 Importer ce run", type="primary", disabled=not confirm):
+            with st.spinner("Import en cours…"):
+                try:
+                    ok, msg = import_legacy_run(choice["file"], choice["model"],
+                                                choice["run_date"])
+                except Exception as e:  # noqa: BLE001
+                    ok, msg = False, f"Erreur inattendue : {e}"
+            if ok:
+                st.success(f"✅ {msg}")
+                st.cache_data.clear()
+            else:
+                st.error(f"❌ {msg}")
+
+    st.markdown("---")
     st.subheader("🔍 Historique du contrôle croisé")
     st.caption("Comparaison **médiane d'ensemble** (ECMWF/AIFS/GEFS) entre Open-Meteo et "
               "Météociel, échéance par échéance. Seuil de signalement (⚠️) élargi avec "
@@ -2022,6 +2060,138 @@ def legacy_presence(_sig):
                 "n_members": int(members.notna().any(axis=0).sum()),
                 "last_vt": last_vt, "lead_h": lead_h, "n_ech": len(valid)})
     return pd.DataFrame(rows, columns=cols)
+
+
+# --------------------------------------------------------------------------- #
+#  Import ciblé legacy → parquet — comble une absence avérée, jamais d'écrasement
+# --------------------------------------------------------------------------- #
+# Même principe que migrate.py (xlsx Météociel → schéma plat), mais restreint à
+# UN SEUL couple (run, modèle), choisi par l'utilisateur parmi les couples
+# présents en legacy et SANS AUCUNE donnée valide côté Open-Meteo. Les xlsx
+# restent en lecture seule (assurance-vie du projet) ; le parquet est sauvegardé
+# (copie datée) avant toute écriture ; la fusion passe par Forecast.persist
+# (validation, anti-régression, écriture atomique .tmp + os.replace).
+
+def _member_id_from_col(col_name):
+    """'1', '12'… → entier ; None si la colonne n'est pas un membre numéroté.
+    (Le contrôle DET/GFS est identifié à part via det_col → membre 0.)"""
+    m = re.search(r"(\d+)", str(col_name).strip())
+    return int(m.group(1)) if m else None
+
+
+@st.cache_data(show_spinner=False)
+def legacy_import_candidates(_db_sig, _legacy_sig):
+    """Couples (run_date, modèle) présents dans les xlsx legacy mais sans la
+    moindre valeur valide dans le parquet Open-Meteo — les seuls importables.
+
+    Comparaison en UTC tz-naïf des deux côtés : parquet BRUT (F.load_existing),
+    jamais load_db qui convertit run_date en heure de Paris. Si plusieurs xlsx
+    couvrent le même run (re-scrapes), on garde le plus complet (last_vt max,
+    puis scrape le plus récent)."""
+    leg = legacy_presence(_legacy_sig)
+    if leg.empty:
+        return leg
+    leg = leg.dropna(subset=["run_date"])
+    leg = leg[leg["model"].isin(C.MODEL_LABELS)]
+    if leg.empty:
+        return leg
+
+    db = F.load_existing()
+    if not db.empty:
+        have = db.dropna(subset=C.VAR_COLS, how="all")[["run_date", "model"]] \
+                 .drop_duplicates()
+        keys_have = {(pd.Timestamp(r.run_date), r.model)
+                     for r in have.itertuples(index=False)}
+        mask = leg.apply(
+            lambda r: (pd.Timestamp(r["run_date"]), r["model"]) not in keys_have,
+            axis=1)
+        leg = leg[mask]
+
+    if leg.empty:
+        return leg
+    leg = (leg.sort_values(["last_vt", "scrape_date"])
+              .drop_duplicates(subset=["run_date", "model"], keep="last"))
+    return leg.sort_values(["run_date", "model"],
+                           ascending=[False, True]).reset_index(drop=True)
+
+
+def import_legacy_run(fname, model_label, expected_run_date):
+    """Importe UN run d'UN modèle depuis un xlsx legacy vers le parquet.
+    Retourne (ok, message). Garde-fous, dans l'ordre :
+      1. relecture du xlsx au moment de l'import (lecture seule) et re-parse du
+         run_date d'en-tête : s'il diffère du couple sélectionné (fichier changé
+         entre-temps), abandon ;
+      2. contrôle d'absence AU MOMENT de l'écriture (le dropdown peut être
+         périmé) : la moindre valeur valide déjà en base pour ce couple → refus ;
+      3. sauvegarde datée du parquet AVANT toute écriture ;
+      4. fusion via Forecast.persist (jamais d'écriture directe)."""
+    path = os.path.join(C.LEGACY_FORECASTS_DIR, fname)
+    sheet = C.LEGACY_MODELS.get(model_label)
+    if sheet is None:
+        return False, f"Modèle {model_label} sans feuille legacy déclarée (config)."
+
+    df, det_col, member_cols = V._read_legacy_sheet(path, sheet)
+    if df is None or (det_col is None and not member_cols):
+        return False, f"Feuille « {sheet} » illisible dans {fname}."
+    run_date = V._parse_legacy_run_date(path, sheet)
+    if run_date is None or pd.Timestamp(run_date) != pd.Timestamp(expected_run_date):
+        return False, ("Le run_date lu dans le xlsx ne correspond plus à la "
+                       "sélection (fichier modifié entre-temps ?) — import abandonné.")
+
+    # xlsx large → schéma plat. Le legacy Météociel ne publie que la T850 :
+    # les autres variables éventuelles du schéma restent NaN.
+    frames = []
+    if det_col is not None:
+        d = df[["valid_time", det_col]].rename(columns={det_col: "t850"})
+        d["member"] = 0
+        frames.append(d)
+    for col in member_cols:
+        mid = _member_id_from_col(col)
+        if mid is None:
+            continue
+        d = df[["valid_time", col]].rename(columns={col: "t850"})
+        d["member"] = mid
+        frames.append(d)
+    if not frames:
+        return False, "Aucune colonne membre exploitable dans la feuille."
+
+    tidy = pd.concat(frames, ignore_index=True)
+    tidy["t850"] = pd.to_numeric(tidy["t850"], errors="coerce")
+    tidy = tidy.dropna(subset=["t850"])
+    if tidy.empty:
+        return False, "Aucune valeur valide dans le xlsx — rien à importer."
+    tidy["run_date"] = pd.Timestamp(run_date)  # UTC tz-naïf, comme le parquet
+    tidy["model"] = model_label
+    tidy["member"] = tidy["member"].astype(int)
+    for c in C.VAR_COLS:
+        if c not in tidy.columns:
+            tidy[c] = np.nan
+    tidy = tidy.drop_duplicates(subset=["run_date", "model", "member", "valid_time"])
+    tidy = tidy[C.SCHEMA]
+
+    existing = F.load_existing()
+    if not existing.empty:
+        pair = existing[(existing["run_date"] == tidy["run_date"].iloc[0])
+                        & (existing["model"] == model_label)]
+        if not pair.dropna(subset=C.VAR_COLS, how="all").empty:
+            return False, ("Ce couple (run, modèle) contient déjà des données "
+                           "valides dans le parquet — import refusé (le module "
+                           "ne comble que des absences, jamais d'écrasement).")
+
+    backup = None
+    if os.path.exists(C.DB_PATH):
+        backup = C.DB_PATH.replace(
+            ".parquet", f"_backup_{datetime.now():%Y%m%d_%H%M%S}.parquet")
+        shutil.copy2(C.DB_PATH, backup)
+
+    combined = F.persist(tidy, existing)
+    msg = (f"{len(tidy):,} lignes importées — {model_label}, run "
+           f"{run_date:%d/%m/%Y} {run_date.hour}Z, {tidy['member'].nunique()} "
+           f"membres, dernière échéance {tidy['valid_time'].max():%d/%m %Hh} UTC. "
+           f"Base : {len(combined):,} lignes.")
+    if backup:
+        msg += f" Sauvegarde préalable : {os.path.basename(backup)}."
+    return True, msg
 
 
 def _cell_text(lead_days, members):

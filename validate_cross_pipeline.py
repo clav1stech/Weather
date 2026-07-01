@@ -5,8 +5,10 @@ Météociel (legacy), échéance par échéance, pour ECMWF/AIFS/GEFS.
 Limité aux runs 0Z/12Z — les seuls publiés en intégralité par Météociel, et les
 seuls que le legacy scraper sait produire proprement. N'exécute aucun
 fetch/scrape lui-même : consomme les sorties déjà produites par Forecast.py
-(parquet) et Forecast_legacy.py (xlsx) pour le run demandé. Orchestré par
-run_dual.py.
+(parquet) et Forecast_legacy.py (xlsx) pour le run demandé. Invocable en CLI
+(`python validate_cross_pipeline.py 0Z|12Z`) — le workflow GitHub Actions
+l'appelle juste après le scrape legacy, seule méthode dont la publication du
+run 0Z/12Z arrive structurellement en dernier (cf. Forecast_legacy.py).
 
 Comparaison médiane-vs-médiane pour TOUS les modèles (cf.
 config.LEGACY_COMPARE_STRATEGY) : la colonne « DET »/« GFS » scrapée sur
@@ -257,3 +259,11 @@ def cross_check(run_label, now_utc=None):
         print(worst.head(5).to_string(index=False))
     print(f"   → log : {C.CROSS_CHECK_LOG_PATH}")
     return report
+
+
+if __name__ == "__main__":
+    import sys
+    # Priorité : argument CLI (ex: `python validate_cross_pipeline.py 12Z`), puis
+    # variable d'env, sinon "0Z" — même convention que Forecast_legacy.py.
+    _run_arg = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("0Z", "12Z") else None
+    cross_check(_run_arg or os.environ.get("FORECAST_RUN", "0Z"))

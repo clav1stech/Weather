@@ -14,7 +14,12 @@ import os
 # --------------------------------------------------------------------------- #
 LATITUDE = 48.86
 LONGITUDE = 2.33
-TIMEZONE = "auto"              # l'API renvoie l'heure locale + utc_offset_seconds
+TIMEZONE = "UTC"               # jamais "auto" : "auto" applique un unique offset
+                                # local (Europe/Paris) à toute la fenêtre de 16 j,
+                                # ce qui décale d'1 h les échéances après un
+                                # changement d'heure (DST) tombant dans la fenêtre —
+                                # bug confirmé empiriquement sur l'API. En UTC pur,
+                                # aucune notion de DST : alignement toujours correct.
 FORECAST_DAYS = 16             # horizon (résolution horaire native)
 API_URL = "https://ensemble-api.open-meteo.com/v1/ensemble"
 # Metadata API : renvoie last_run_initialisation_time exact par modèle,

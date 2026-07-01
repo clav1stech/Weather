@@ -252,8 +252,10 @@ def parse_payload(payload, now_utc=None):
     run stocké (cf. mask_stale_tail).
     """
     hourly = payload["hourly"]
+    # C.TIMEZONE="UTC" → utc_offset_seconds vaut toujours 0 (pas de notion de DST
+    # à soustraire). On le lit quand même depuis le payload plutôt que de le
+    # supposer nul en dur, au cas où l'appel serait un jour reconfiguré.
     utc_offset = int(payload.get("utc_offset_seconds", 0))
-    # Heure locale renvoyée par l'API → UTC tz-naïf (comparable aux run_date).
     valid_time = pd.to_datetime(hourly["time"]) - pd.Timedelta(seconds=utc_offset)
 
     # Récupération parallèle des métadonnées avant la boucle modèle.

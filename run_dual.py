@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
 """Orchestre le pipeline Open-Meteo (Forecast.py) et, aux runs 0Z/12Z, le scrape
 legacy Météociel (Forecast_legacy.py) + le contrôle croisé entre les deux
-(cf. validate_cross_pipeline.py). Point d'entrée du workflow GitHub Actions.
+(cf. validate_cross_pipeline.py). Sert au lancement manuel (bouton « Double
+run » du dashboard) — le workflow GitHub Actions, lui, appelle désormais
+Forecast.py (toutes les 2h) et Forecast_legacy.py/validate_cross_pipeline.py
+(aux créneaux 0Z/12Z) séparément, sur des cadences propres à chaque source.
 
 Météociel ne publie ses runs 0Z/12Z en intégralité qu'avec un net retard (0Z
 complet vers midi heure de Paris, 12Z complet vers minuit) : le scrape legacy
-n'est donc déclenché qu'aux polls 10:15 UTC (0Z) et 22:15 UTC (12Z) du cron —
-pas à 04:15/16:15, où Open-Meteo a déjà son propre 0Z/12Z mais Météociel pas
-encore. Le contrôle croisé compare alors le scrape frais à la donnée Open-Meteo
-déjà archivée ~6h plus tôt sous le même run_date.
+n'est donc déclenché ici qu'aux appels proches de 10:15 UTC (0Z) et 22:15 UTC
+(12Z), où Open-Meteo a déjà son propre 0Z/12Z mais Météociel vient tout juste
+de finir de publier. Le contrôle croisé compare alors le scrape frais à la
+donnée Open-Meteo déjà archivée sous le même run_date.
 """
 
 import datetime as dt
@@ -21,7 +24,9 @@ import config as C
 
 # Heure de cron (UTC) où Météociel a fini de publier le run 0Z/12Z correspondant.
 LEGACY_SLOT_BY_CRON_HOUR = {10: "0Z", 22: "12Z"}
-CRON_HOURS = (4, 10, 16, 22)
+# Cadence réelle du workflow GitHub Actions pour Open-Meteo (Forecast.py, toutes
+# les 2h) — sert de repère d'affichage/gating ici, pas de config du workflow lui-même.
+CRON_HOURS = tuple(range(0, 24, 2))
 
 
 def _nearest_cron_hour(now_utc, max_dist_h=1.5):

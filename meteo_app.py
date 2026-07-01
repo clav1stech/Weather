@@ -31,7 +31,7 @@ import config as C
 import run_dual
 import validate_cross_pipeline as V  # helpers de lecture des xlsx legacy (Météociel)
 
-APP_VERSION = "2.0.8"
+APP_VERSION = "2.1.0"
 LOCAL_TZ = ZoneInfo("Europe/Paris")
 VAR = C.PRIMARY_VAR  # variable principale affichée (t850)
 
@@ -168,9 +168,14 @@ FULL_HORIZON_TOLERANCE_H = 24
 
 
 @st.cache_data(show_spinner=False)
-def latest_complete_run_sub(_sig):
+def latest_complete_run_sub(_sig, as_of=None):
     """Pool multi-modèles où CHAQUE modèle est représenté par son dernier run à
     HORIZON PLEIN — base des vues combinées (super-ensemble global).
+
+    `as_of` (run_date local, optionnel) : rejoue la sélection telle qu'elle
+    était à ce cycle — seuls les runs `run_date ≤ as_of` sont considérés, la
+    logique de complétude reste identique. Sert au sélecteur « Vu depuis » de
+    la Vue d'ensemble (versions antérieures du super-ensemble).
 
     La complétude se mesure EMPIRIQUEMENT sur la portée réelle du run stocké
     (max valid_time − run_date ≥ horizon_h − tolérance), jamais par une règle
@@ -189,6 +194,8 @@ def latest_complete_run_sub(_sig):
       - sources : {label → run_date retenu} ;
       - partial : modèles principaux sans aucun run à horizon plein récent."""
     df = load_db(_sig)
+    if as_of is not None:
+        df = df[df["run_date"] <= pd.Timestamp(as_of)]
     if df.empty:
         return df, {}, []
     frames, sources, partial = [], {}, []
@@ -615,7 +622,12 @@ def daily_aggregate(se):
 
 
 def daily_risk(sub, seuil):
-    """Risque canicule/jour : pool des membres de la journée, proba de dépasser seuil."""
+    """Risque canicule/jour : pool des membres de la journée, proba de dépasser seuil.
+
+    `exces` = dépassement attendu E[max(T − seuil, 0)] sur les membres poolés du
+    jour — c'est exactement probabilité × sévérité moyenne des dépassements : un
+    jour à proba modeste mais à queue très chaude y pèse autant qu'un jour à
+    proba forte et dépassement léger (cf. KPI « Jours à risque »)."""
     piv = member_matrix(sub)
     if piv is None or piv.empty:
         return None
@@ -632,6 +644,7 @@ def daily_risk(sub, seuil):
             "P75": float(np.quantile(vals, 0.75)),
             "P90": float(np.quantile(vals, 0.90)),
             "prob": float((vals >= seuil).mean()),
+            "exces": float(np.maximum(vals - seuil, 0).mean()),
         })
     return pd.DataFrame(rows)
 
@@ -788,12 +801,20 @@ CANICULE_SCALE = [
 ]
 
 
+# Paliers de probabilité de canicule PARTAGÉS entre le calendrier du risque
+# (_canicule_label) et le KPI « Statut canicule » (statut gradué) — une seule
+# échelle pour toute la page, jamais deux jugements différents du même chiffre.
+PROB_CANICULE_QUASI = 0.50
+PROB_RISQUE_MARQUE = 0.25
+PROB_RISQUE_MODERE = 0.10
+
+
 def _canicule_label(prob):
-    if prob >= 0.50:
+    if prob >= PROB_CANICULE_QUASI:
         return "🔴 Canicule quasi-certaine"
-    if prob >= 0.25:
+    if prob >= PROB_RISQUE_MARQUE:
         return "🟠 Risque marqué"
-    if prob >= 0.10:
+    if prob >= PROB_RISQUE_MODERE:
         return "🟡 Risque modéré"
     return "🟢 Pas de signal de canicule"
 
@@ -816,9 +837,126 @@ def calendrier_risques(jours, seuil):
     return fig
 
 
-def _kpi_card(label, value, help_txt="", value_point=None, valid_time=None):
+# Indice de tendance récente (grand public) : fenêtre de runs considérée et
+# seuils (°C) de qualification des révisions. |Δ| < STABLE = stable ;
+# ≥ STRONG = révision nette. La fenêtre ~66 h ≈ les runs des 3 derniers jours
+# (0Z/12Z + cycles récents), assez large pour lisser un run isolé.
+TREND_WINDOW_H = 66
+TREND_STABLE_C = 0.5
+TREND_STRONG_C = 1.5
+
+
+def tendance_recente(trend, window_h=TREND_WINDOW_H):
+    """Indice de variation PAR JOURNÉE cible : écart entre ce que prévoit le
+    dernier run et ce que prévoyait le plus ancien run de la fenêtre (médiane
+    journalière du super-ensemble complété, cf. trend_daily_medians). Positif =
+    les calculs récents ont réchauffé la prévision pour ce jour. Une journée
+    n'est notée que si ≥ 2 runs de la fenêtre la couvrent."""
+    if trend.empty:
+        return pd.DataFrame(columns=["target", "delta"])
+    latest = trend["run_dt"].max()
+    win = trend[trend["run_dt"] >= latest - pd.Timedelta(hours=window_h)]
+    rows = []
+    for target, grp in win.groupby("target"):
+        grp = grp.sort_values("run_dt")
+        if grp["run_dt"].nunique() < 2:
+            continue
+        rows.append({"target": pd.Timestamp(target),
+                     "delta": float(grp.iloc[-1]["median"] - grp.iloc[0]["median"])})
+    return pd.DataFrame(rows)
+
+
+def _tendance_label(delta):
+    """(flèche, libellé vulgarisé) d'une révision — jamais de valeur brute."""
+    if delta >= TREND_STRONG_C:
+        return "⬆", "nette révision à la hausse"
+    if delta >= TREND_STABLE_C:
+        return "↗", "légère révision à la hausse"
+    if delta <= -TREND_STRONG_C:
+        return "⬇", "nette révision à la baisse"
+    if delta <= -TREND_STABLE_C:
+        return "↘", "légère révision à la baisse"
+    return "＝", "prévision stable"
+
+
+def tendance_heatmap(tend):
+    """Une case par jour à venir : couleur (rouge = revu à la hausse, bleu = à
+    la baisse, blanc = stable) + flèche. Lecture en un coup d'œil de la tendance
+    récente des modèles sur toute la période — aucune valeur brute affichée."""
+    arrows, hovers = [], []
+    for _, r in tend.iterrows():
+        arrow, lib = _tendance_label(r["delta"])
+        arrows.append(arrow)
+        hovers.append(f"{r['target']:%a %d %b}<br>Ces derniers jours : {lib}")
+    zmax = max(float(tend["delta"].abs().max()), TREND_STRONG_C)
+    fig = go.Figure(go.Heatmap(
+        x=tend["target"], y=["Tendance récente"], z=[tend["delta"].tolist()],
+        colorscale="RdBu_r", zmid=0, zmin=-zmax, zmax=zmax, xgap=3, ygap=0,
+        text=[arrows], texttemplate="%{text}", textfont=dict(size=16),
+        customdata=[hovers], hovertemplate="%{customdata}<extra></extra>",
+        showscale=False))
+    fig.update_layout(height=150, template=_plotly_template(),
+                      xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
+                      yaxis=dict(visible=False), margin=dict(t=10, l=10, r=10, b=10))
+    return fig
+
+
+# Seuils (°C) sur le spread journalier P90−P10 pour le libellé grand public de
+# confiance : scénarios groupés / partagés / très dispersés. Ordres de grandeur
+# T850 : < 3 °C = bon accord, ≥ 6 °C = fourchette trop large pour trancher.
+CONF_SPREAD_BON_C = 3.0
+CONF_SPREAD_FAIBLE_C = 6.0
+
+
+def _confiance_label(spread):
+    if spread < CONF_SPREAD_BON_C:
+        return "🟢 bonne (scénarios groupés)", "#2ECC71"
+    if spread < CONF_SPREAD_FAIBLE_C:
+        return "🟡 moyenne (scénarios partagés)", "#F1C40F"
+    return "🟠 faible (scénarios très dispersés)", "#E67E22"
+
+
+def confiance_chart(daily, seuil_chaleur, seuil_canicule):
+    """Grand public : fourchette probable (P10–P90) par journée, barre colorée
+    selon l'accord des scénarios (spread journalier), + scénario médian en trait
+    foncé. Une barre courte et verte = les modèles sont d'accord ; longue et
+    orange = le chiffre du jour est à prendre avec des pincettes."""
+    labels_colors = [_confiance_label(s) for s in daily["Spread"]]
+    texts = [
+        f"{d:%a %d %b}<br>Fourchette probable : {p10:.0f} à {p90:.0f} °C"
+        f"<br>Scénario médian : {m:.1f} °C<br>Confiance : {lab}"
+        for d, p10, p90, m, (lab, _) in zip(daily["date"], daily["P10"], daily["P90"],
+                                            daily["Médiane"], labels_colors)
+    ]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=daily["date"], y=daily["P90"] - daily["P10"], base=daily["P10"],
+        marker_color=[_rgba(c, 0.55) for _, c in labels_colors],
+        name="Fourchette probable (P10–P90)",
+        customdata=texts, hovertemplate="%{customdata}<extra></extra>"))
+    fig.add_trace(go.Scatter(
+        x=daily["date"], y=daily["Médiane"], mode="lines+markers",
+        name="Scénario médian", line=dict(color=_ink(), width=2.5),
+        marker=dict(size=6), hoverinfo="skip"))
+    fig.add_hline(y=seuil_chaleur, line=dict(color="#F39C12", width=1.5, dash="dash"),
+                  annotation_text=f"Chaleur — {seuil_chaleur:.0f} °C",
+                  annotation_position="top left", annotation_font=dict(color="#E67E22", size=11))
+    fig.add_hline(y=seuil_canicule, line=dict(color="#E74C3C", width=1.5, dash="dash"),
+                  annotation_text=f"Canicule — {seuil_canicule:.0f} °C",
+                  annotation_position="top left", annotation_font=dict(color="#C0392B", size=11))
+    fig.update_layout(height=400, hovermode="x unified", template=_plotly_template(),
+                      xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
+                      yaxis_title="Température à 850 hPa (°C)",
+                      legend=dict(orientation="h", y=1.12), barmode="overlay",
+                      margin=dict(t=40, l=10, r=10, b=10))
+    return fig
+
+
+def _kpi_card(label, value, help_txt="", value_point=None, valid_time=None, sub=""):
     """Carte KPI ; si value_point + valid_time fournis, affiche l'anomalie vs la
-    normale climatique saisonnière (cosinus) à cette date."""
+    normale climatique saisonnière (cosinus) à cette date. `sub` : ligne de
+    détail visible sous la valeur (date, probabilité…) — contrairement à
+    help_txt qui n'apparaît qu'au survol."""
     anomalie_html = ""
     if value_point is not None and valid_time is not None:
         delta = value_point - float(clim_normal(pd.Timestamp(valid_time)))
@@ -832,12 +970,15 @@ def _kpi_card(label, value, help_txt="", value_point=None, valid_time=None):
                          f"margin-left:8px;white-space:nowrap;'>"
                          f"({signe}{abs(delta):.1f} °C norm.)</span>")
     title_attr = f' title="{help_txt}"' if help_txt else ""
+    sub_html = (f"<div style='font-size:0.78rem;opacity:0.65;margin-top:2px;"
+                f"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{sub}</div>"
+                if sub else "")
     return (f"<div{title_attr} style='background:rgba(128,138,157,0.10);"
             "border:1px solid rgba(128,138,157,0.25);"
             "border-radius:12px;padding:12px 16px;height:100%;'>"
             f"<div style='font-size:0.8rem;opacity:0.7;'>{label}</div>"
             f"<div style='font-size:1.85rem;font-weight:600;color:inherit;line-height:1.3;'>"
-            f"{value}{anomalie_html}</div></div>")
+            f"{value}{anomalie_html}</div>{sub_html}</div>")
 
 
 # --------------------------------------------------------------------------- #
@@ -848,11 +989,26 @@ def page_overview(runs, sig):
     if runs.empty:
         st.warning("Base vide. Lancez le pipeline `Forecast.py` pour la remplir.")
         return
-    sub, sources, partial = latest_complete_run_sub(sig)
+    # Sélecteur « Vu depuis » : rejoue la page telle qu'elle était après un cycle
+    # antérieur (base filtrée run_date ≤ cycle, même logique de complétude par
+    # modèle). La carte « Tendance » se compare alors au jeu précédent RELATIF à
+    # la version affichée — on peut dérouler l'évolution d'un épisode a posteriori.
+    opts = runs["run_date"].tolist()[:C.KPI_MAX_VERSIONS]
+    opt_labels = [run_label_text(rd) for rd in opts]
+    col_sel, _ = st.columns([1, 3])
+    choice = col_sel.selectbox(
+        "Vu depuis", ["Dernier état"] + opt_labels,
+        help="Rejoue la vue avec les derniers runs complets disponibles à ce cycle.")
+    as_of = None if choice == "Dernier état" else opts[opt_labels.index(choice)]
+
+    sub, sources, partial = latest_complete_run_sub(sig, as_of)
     refreshed_at, _, _ = latest_refresh_status(runs, sig)
     missing = [m for m in C.MAIN_LABELS if m not in sources]
-    refresh_txt = (f" · rafraîchi le {refreshed_at.strftime('%d/%m/%Y à %Hh%M')}"
-                   if refreshed_at is not None else "")
+    if as_of is not None:
+        refresh_txt = f" · vue reconstituée au cycle {run_label_text(as_of)}"
+    else:
+        refresh_txt = (f" · rafraîchi le {refreshed_at.strftime('%d/%m/%Y à %Hh%M')}"
+                       if refreshed_at is not None else "")
     if missing:
         statut_txt = f"partiel ⚠️ (aucun run pour {', '.join(missing)})"
     elif partial:
@@ -870,24 +1026,111 @@ def page_overview(runs, sig):
         st.error("Aucune donnée exploitable pour ce run.")
         return
 
-    c1, c2, c3, c4 = st.columns(4)
-    first = syn.iloc[0]
-    c1.markdown(_kpi_card("Prochaine échéance (médiane)", f"{first['Médiane']:.1f} °C",
-                          "Scénario central pour la première échéance",
-                          value_point=first["Médiane"], valid_time=first["valid_time"]),
-                unsafe_allow_html=True)
-    c2.markdown(_kpi_card("Dispersion moyenne", f"{syn['Spread'].mean():.1f} °C",
-                          "Largeur moyenne P90−P10 sur toutes les échéances"),
-                unsafe_allow_html=True)
-    peak = syn.loc[syn["Médiane"].idxmax()]
-    c3.markdown(_kpi_card("Pic de chaleur (médiane)", f"{peak['Médiane']:.1f} °C",
-                          f"Maximum du scénario central · {peak['valid_time']:%d %b %Hh}",
-                          value_point=peak["Médiane"], valid_time=peak["valid_time"]),
-                unsafe_allow_html=True)
-    c4.markdown(_kpi_card("Échéances > seuil (médiane)",
-                          f"{int((syn['Médiane'] > C.SEUIL_CANICULE_850).sum())}",
-                          f"Échéances où la médiane dépasse {C.SEUIL_CANICULE_850:.0f} °C"),
-                unsafe_allow_html=True)
+    # Référence « présent » des KPI : l'instant réel pour le dernier état, le
+    # cycle choisi pour une version reconstituée (l'horloge n'y a aucun sens).
+    ref_now = (pd.Timestamp(as_of) if as_of is not None
+               else pd.Timestamp(datetime.now(LOCAL_TZ)).tz_localize(None))
+    # KPI calculés sur les échéances À VENIR uniquement : les heures passées
+    # (rebouchées par l'API depuis 00:00 local) fausseraient prochaine échéance,
+    # pic, tendance et anomalie. Les graphiques, eux, gardent le panache complet.
+    fut = syn[syn["valid_time"] >= ref_now]
+    if fut.empty:
+        fut = syn
+    first = fut.iloc[0]
+    peak = fut.loc[fut["Médiane"].idxmax()]
+
+    # Tendance : Δ de la médiane du super-ensemble vs le pool des runs précédents
+    # (recul PAR MODÈLE, cf. previous_runs_sub — jamais de cycle global partagé).
+    delta_txt, delta_sub = "—", "aucun run antérieur en base"
+    prev = previous_runs_sub(sig, sub)
+    if prev is not None:
+        syn_prev = super_ensemble(prev)
+        if syn_prev is not None and not syn_prev.empty:
+            both = fut.merge(syn_prev[["valid_time", "Médiane"]], on="valid_time",
+                             suffixes=("", "_prev")).dropna(subset=["Médiane", "Médiane_prev"])
+            if not both.empty:
+                d = both["Médiane"] - both["Médiane_prev"]
+                at_peak = both[both["valid_time"] == peak["valid_time"]]
+                pic_txt = (f" · au pic {(at_peak.iloc[0]['Médiane'] - at_peak.iloc[0]['Médiane_prev']):+.1f} °C"
+                           if not at_peak.empty else "")
+                delta_txt = f"{d.mean():+.1f} °C"
+                delta_sub = f"sur {len(both)} échéances communes{pic_txt}"
+
+    # Horizon de confiance : première échéance où le spread P90−P10 dépasse le
+    # seuil config — au-delà, le scénario central seul n'est plus exploitable.
+    over = fut[fut["Spread"] > C.KPI_SPREAD_CONF_MAX_C]
+    if over.empty:
+        conf_txt = "Plein horizon"
+        conf_sub = f"spread P90−P10 < {C.KPI_SPREAD_CONF_MAX_C:.0f} °C sur toute la fenêtre"
+    else:
+        t_lim = over.iloc[0]["valid_time"]
+        conf_txt = f"J+{max((t_lim - ref_now) / pd.Timedelta(days=1), 0):.0f}"
+        conf_sub = (f"spread > {C.KPI_SPREAD_CONF_MAX_C:.0f} °C dès {t_lim:%a %d %b} · "
+                    f"au pic {peak['Spread']:.1f} °C")
+
+    # Jours à risque = probabilité × sévérité (cf. daily_risk / seuils KPI_RISK_*) :
+    # un jour compte si la proba journalière atteint PROB_MIN OU si le dépassement
+    # attendu atteint EXCESS_MIN (queue chaude à proba modeste).
+    risk = daily_risk(sub[sub["valid_time"] >= ref_now.normalize()], C.SEUIL_CANICULE_850)
+    risk_txt, risk_sub = "0 j", "aucune donnée exploitable"
+    if risk is not None and not risk.empty:
+        flag = risk[(risk["prob"] >= C.KPI_RISK_PROB_MIN) |
+                    (risk["exces"] >= C.KPI_RISK_EXCESS_MIN_C)]
+        if flag.empty:
+            worst = risk.loc[risk["exces"].idxmax()]
+            risk_txt = "0 j"
+            risk_sub = (f"max : {worst['date']:%a %d %b} · P {worst['prob']:.0%} · "
+                        f"+{worst['exces']:.1f} °C attendu")
+        else:
+            f0 = flag.iloc[0]
+            sev = f0["exces"] / f0["prob"] if f0["prob"] > 0 else 0.0
+            risk_txt = f"{len(flag)} j"
+            risk_sub = (f"1er : {f0['date']:%a %d %b} · P {f0['prob']:.0%} · "
+                        f"+{sev:.1f} °C si dépassé")
+
+    # Anomalie moyenne de la médiane vs la normale cosinus sur la fenêtre courte :
+    # caractérise le régime (semaine chaude/froide) indépendamment du pic ponctuel.
+    win = fut[fut["valid_time"] <= ref_now + pd.Timedelta(days=C.KPI_ANOMALIE_FENETRE_J)]
+    if win.empty:
+        win = fut
+    anom = (win["Médiane"] - clim_normal(win["valid_time"])).mean()
+
+    r1c1, r1c2, r1c3 = st.columns(3)
+    r1c1.markdown(_kpi_card("Prochaine échéance (médiane)", f"{first['Médiane']:.1f} °C",
+                            "Scénario central pour la première échéance à venir",
+                            value_point=first["Médiane"], valid_time=first["valid_time"],
+                            sub=f"{first['valid_time']:%a %d %b %Hh}"),
+                  unsafe_allow_html=True)
+    r1c2.markdown(_kpi_card("Pic de chaleur (médiane)", f"{peak['Médiane']:.1f} °C",
+                            "Maximum du scénario central ; P90 = scénario chaud "
+                            "plausible à la même échéance",
+                            value_point=peak["Médiane"], valid_time=peak["valid_time"],
+                            sub=f"{peak['valid_time']:%a %d %b %Hh} · P90 {peak['P90']:.1f} °C"),
+                  unsafe_allow_html=True)
+    r1c3.markdown(_kpi_card("Tendance vs runs précédents", delta_txt,
+                            "Δ moyen de la médiane du super-ensemble vs le run "
+                            "précédent de CHAQUE modèle (échéances communes à venir)",
+                            sub=delta_sub),
+                  unsafe_allow_html=True)
+
+    r2c1, r2c2, r2c3 = st.columns(3)
+    r2c1.markdown(_kpi_card("Horizon de confiance", conf_txt,
+                            f"Première échéance où le spread P90−P10 du super-ensemble "
+                            f"dépasse {C.KPI_SPREAD_CONF_MAX_C:.0f} °C",
+                            sub=conf_sub),
+                  unsafe_allow_html=True)
+    r2c2.markdown(_kpi_card("Jours à risque canicule", risk_txt,
+                            f"Jours où P(≥ {C.SEUIL_CANICULE_850:.0f} °C) ≥ "
+                            f"{C.KPI_RISK_PROB_MIN:.0%} OU dépassement attendu ≥ "
+                            f"{C.KPI_RISK_EXCESS_MIN_C:.1f} °C (probabilité × sévérité)",
+                            sub=risk_sub),
+                  unsafe_allow_html=True)
+    r2c3.markdown(_kpi_card(f"Anomalie {C.KPI_ANOMALIE_FENETRE_J} j vs normale",
+                            f"{anom:+.1f} °C",
+                            f"Écart moyen de la médiane à la normale climatique sur "
+                            f"les {C.KPI_ANOMALIE_FENETRE_J} prochains jours",
+                            sub="médiane du super-ensemble vs normale saisonnière"),
+                  unsafe_allow_html=True)
 
     st.caption("**Panache de dispersion** : ligne rouge = médiane ; bandes = part "
                "croissante des scénarios (Min–Max, P10–P90, P25–P75).")
@@ -1024,6 +1267,40 @@ def _convergence_runs(runs):
     recent = runs.index < 2
     main_cycle = runs["run_date"].apply(lambda d: utc_cycle(d).hour in (0, 12))
     return runs[recent | main_cycle].reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def trend_daily_medians(_sig, n_runs=8):
+    """Médiane/P10/P90 JOURNALIÈRES des `n_runs` derniers runs affichables —
+    format long (run_dt / target / median / p10 / p90), pour la section grand
+    public « évolution au fil des runs ».
+
+    Mêmes règles de comparabilité que la page Convergence : chaque run est
+    recalculé comme super-ensemble COMPLÉTÉ (backfill échéance par échéance des
+    modèles principaux, cf. completed_pooled_sub) pour ne jamais comparer
+    « 4 modèles vs 1 » ; les cycles 6Z/18Z anciens, partiels par construction,
+    sont écartés via _convergence_runs (le backfill, lui, cherche dans TOUS les
+    runs). Seules les journées À VENIR de chaque run sont gardées (target ≥ jour
+    du cycle) — le passé rebouché par l'API fausserait la comparaison."""
+    runs_full = list_runs(_sig).reset_index(drop=True)
+    shown = _convergence_runs(runs_full).head(n_runs)
+    full_pos = {rd: i for i, rd in enumerate(runs_full["run_date"])}
+    records = []
+    for rd in shown["run_date"]:
+        syn, _ = completed_super_ensemble_daily(runs_full, full_pos[rd], _sig)
+        if syn is None or syn.empty:
+            continue
+        run_day = pd.Timestamp(rd).normalize()
+        for _, row in syn.iterrows():
+            target = pd.Timestamp(row["valid_time"]).normalize()
+            if target < run_day:
+                continue
+            records.append({"run_dt": rd, "target": target,
+                            "median": row.get("Médiane"),
+                            "p10": row.get("P10"), "p90": row.get("P90")})
+    if not records:
+        return pd.DataFrame(columns=["run_dt", "target", "median", "p10", "p90"])
+    return pd.DataFrame(records).dropna(subset=["median"]).reset_index(drop=True)
 
 
 def page_convergence(runs, sig):
@@ -1353,15 +1630,49 @@ def page_grand_public(runs, sig):
         st.error("Risque non calculable.")
         return
 
-    eleve = jours["prob"] >= 0.50
+    eleve = jours["prob"] >= PROB_CANICULE_QUASI
     high_dates = jours.loc[eleve, "date"].sort_values().tolist()
     high_set = set(high_dates)
     today = pd.Timestamp(datetime.now().date())
     pic = jours.loc[jours["prob"].idxmax()]
     c1, c2, c3 = st.columns(3)
     if not high_dates:
-        c1.metric("Statut canicule", "Aucune en vue")
-        c2.metric("Durée prévue", "—")
+        # Statut GRADUÉ (mêmes paliers que le calendrier) : « aucune canicule
+        # probable » ne veut pas dire « rien à signaler » — un pic à 37 % ou une
+        # semaine de chaleur notable doivent apparaître, pas un statut vide.
+        avenir = jours[jours["date"] >= today]
+        chauds = avenir[avenir["Médiane"] >= seuil_chaleur]
+        pic_av = avenir.loc[avenir["prob"].idxmax()] if not avenir.empty else None
+        if pic_av is not None and pic_av["prob"] >= PROB_RISQUE_MARQUE:
+            c1.metric("Statut canicule", "🟠 Risque à surveiller",
+                      help=f"Pas de canicule probable (≥ {PROB_CANICULE_QUASI:.0%}) à ce "
+                           f"stade, mais le risque monte à {pic_av['prob']:.0%} "
+                           f"le {pic_av['date']:%a %d %b}.")
+        elif pic_av is not None and pic_av["prob"] >= PROB_RISQUE_MODERE:
+            c1.metric("Statut canicule", "🟡 Signal faible",
+                      help=f"Quelques scénarios voient une canicule (jusqu'à "
+                           f"{pic_av['prob']:.0%} le {pic_av['date']:%a %d %b}) — "
+                           f"minoritaires, à suivre.")
+        elif not chauds.empty:
+            c1.metric("Statut canicule", "🌡️ Chaleur sans canicule",
+                      help=f"Pas de canicule en vue, mais de la chaleur notable "
+                           f"(≥ {seuil_chaleur:.0f} °C @850) est prévue autour du "
+                           f"{chauds.iloc[0]['date']:%a %d %b}.")
+        else:
+            c1.metric("Statut canicule", "🟢 Aucune en vue")
+        # 2e carte adaptée au niveau d'alerte : jours à surveiller (risque marqué),
+        # sinon jours de chaleur notable, sinon rien à quantifier.
+        n_watch = int((avenir["prob"] >= PROB_RISQUE_MARQUE).sum()) if not avenir.empty else 0
+        if n_watch:
+            c2.metric("Jours à surveiller", f"{n_watch} jour{'s' if n_watch > 1 else ''}",
+                      help=f"Jours avec au moins {PROB_RISQUE_MARQUE:.0%} de risque de canicule.")
+        elif not chauds.empty:
+            n_ch = len(chauds)
+            c2.metric("Chaleur notable", f"{n_ch} jour{'s' if n_ch > 1 else ''}",
+                      help=f"Jours dont la médiane atteint {seuil_chaleur:.0f} °C @850 "
+                           f"(≈ 30 °C au sol), sans franchir le seuil canicule.")
+        else:
+            c2.metric("Durée prévue", "—")
     else:
         duree = 1
         dts = sorted(high_dates)
@@ -1393,6 +1704,81 @@ def page_grand_public(runs, sig):
     st.subheader("🗓️ Calendrier du risque de canicule")
     st.caption(f"Chaque case = un jour, coloré selon P(≥ {seuil_canicule:.0f} °C @850).")
     st.plotly_chart(calendrier_risques(jours, seuil_canicule), width="stretch")
+
+    # ── Tendance récente des runs (vulgarisé, en un coup d'œil) ──────────────
+    st.subheader("🧭 Les modèles changent-ils d'avis ?")
+    st.markdown(
+        "Les modèles recalculent la prévision plusieurs fois par jour. La ligne ci-dessous "
+        "compare les **calculs des ~3 derniers jours** : pour chaque jour à venir, elle dit "
+        "si la prévision a été **revue à la hausse** (🔴, l'épisode se confirme ou "
+        "s'intensifie), **à la baisse** (🔵, il se dégonfle) ou si elle est **stable** "
+        "(⚪, prévision mûre, plus fiable).")
+    trend = trend_daily_medians(sig)  # `today` déjà défini plus haut (KPI)
+    tend = tendance_recente(trend)
+    tend = tend[tend["target"] >= today] if not tend.empty else tend
+    if tend.empty:
+        st.info("Pas encore assez de runs en base pour mesurer une tendance.")
+    else:
+        # Verdict global qualitatif : moyenne des révisions sur la période à venir
+        # (seuil plus bas que par jour : une dérive d'ensemble se voit sur la moyenne).
+        d_moy = float(tend["delta"].mean())
+        if d_moy >= 0.3:
+            st.markdown("📈 **Tendance récente : vers plus chaud** — les derniers calculs "
+                        "renforcent globalement la chaleur prévue.")
+        elif d_moy <= -0.3:
+            st.markdown("📉 **Tendance récente : vers moins chaud** — les derniers calculs "
+                        "revoient globalement la chaleur à la baisse.")
+        else:
+            st.markdown("➡️ **Tendance récente : stable** — les derniers calculs confirment "
+                        "globalement la prévision.")
+        st.plotly_chart(tendance_heatmap(tend), width="stretch")
+        st.caption("Pour l'analyse détaillée run par run (avec les valeurs), voir la page "
+                   "*Révisions & convergence*.")
+
+    # ── Confiance : la médiane n'est pas une certitude (vulgarisé) ───────────
+    st.subheader("🎯 Quelle confiance accorder à ces chiffres ?")
+    st.markdown(
+        "**La médiane n'est pas une promesse.** C'est simplement le scénario du milieu : "
+        "un scénario sur deux est plus chaud, un sur deux plus froid. La vraie information "
+        "est la **fourchette** ci-dessous : les modèles jugent très probable (8 chances "
+        "sur 10) que la journée tombe dedans. Plus la barre est courte, plus les scénarios "
+        "sont d'accord — plus elle s'allonge (c'est inévitable au-delà de quelques jours), "
+        "plus il faut lire « ça peut encore bouger », dans un sens comme dans l'autre.")
+    daily = daily_aggregate(syn)
+    daily = daily[daily["date"] >= today] if daily is not None else None
+    if daily is None or daily.empty:
+        st.info("Fourchettes journalières non calculables.")
+    else:
+        st.caption("Couleur de la barre = accord des scénarios : 🟢 groupés (bonne "
+                   "confiance) · 🟡 partagés · 🟠 très dispersés (chiffre indicatif). "
+                   "Trait foncé = scénario médian.")
+        st.plotly_chart(confiance_chart(daily, seuil_chaleur, seuil_canicule),
+                        width="stretch")
+        # Alertes d'asymétrie, RECALCULÉES à chaque affichage depuis la prévision
+        # courante (jamais de contenu figé) : les cas où la médiane, seule,
+        # induirait en erreur — queue chaude (minorité de scénarios caniculaires
+        # sous une médiane sage) et queue froide (médiane chaude mais rechute
+        # possible). Formulation courte, sans valeur brute (« X scénarios sur 10 »).
+        info = daily.merge(jours[["date", "prob"]], on="date", how="left")
+        chauds, froids = [], []
+        for _, r in info.iterrows():
+            up, down = r["P90"] - r["Médiane"], r["Médiane"] - r["P10"]
+            prob = r.get("prob")
+            if pd.notna(prob) and prob >= 0.15 and r["Médiane"] < seuil_canicule:
+                sur10 = max(1, round(prob * 10))
+                chauds.append((prob, f"**{r['date']:%a %d %b}** : la médiane reste sous le "
+                                     f"seuil canicule, mais **{sur10} scénario{'s' if sur10 > 1 else ''} "
+                                     f"sur 10 le dépasse{'nt' if sur10 > 1 else ''}** — "
+                                     f"le risque n'est pas écarté."))
+            elif down - up >= 1.5 and r["Médiane"] >= seuil_chaleur:
+                froids.append((down - up, f"**{r['date']:%a %d %b}** : la médiane est élevée, "
+                                          f"mais une partie des scénarios reste bien plus "
+                                          f"fraîche — la chaleur n'est pas encore acquise."))
+        notes = ([n for _, n in sorted(chauds, reverse=True)[:2]]
+                 + [n for _, n in sorted(froids, reverse=True)[:2]])[:3]
+        if notes:
+            st.markdown("**⚖️ À ne pas manquer derrière la médiane** *(recalculé à chaque "
+                        "mise à jour)* **:**\n" + "\n".join(f"- {n}" for n in notes))
 
 
 def _run_script(*args, timeout=300):

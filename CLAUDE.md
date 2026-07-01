@@ -17,6 +17,12 @@ Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
 
 ## Invariants à NE JAMAIS casser
 
+### Intégrité des données (règle absolue de non-régression)
+- **Tout le projet repose sur ces données** : leur perte est irréversible. Aucune opération ne doit jamais risquer d'altérer, dégrader ou perdre le contenu de `data/database_paris.parquet` ou des xlsx legacy.
+- **Données legacy (xlsx Météociel, `Forecasts/`) : intouchables.** C'est l'assurance-vie du projet, le dernier recours en cas de corruption du parquet. Ne **jamais** les modifier, réécrire, régénérer ni remplacer (y compris par les données d'un autre run) — quelle que soit la raison, même pour « corriger » une incohérence apparente. Lecture seule, toujours.
+- **Le parquet ne peut être corrigé que sur demande explicite de l'utilisateur**, suite à un problème identifié et discuté — jamais de correction spontanée, même évidente. Toute correction commence par une **sauvegarde préalable** du fichier (copie datée avant modification).
+- **Toute édition du parquet doit prouver sa non-régression** : vérifier avant/après que les données existantes ne sont pas altérées et qu'aucun run correctement récupéré n'est remplacé par des données de moindre qualité (portée réduite, valeurs manquantes, run fantôme). En cas de doute sur l'effet d'une écriture → ne pas écrire, demander.
+
 ### Historique des runs (ne pas écraser)
 - **Jamais de perte d'historique.** La fusion (`persist`) se déduplique par couple **(run_date, modèle)**, jamais par `run_date` seul. Un modèle absent d'un fetch **conserve** son run antérieur intact.
 - **Écriture atomique obligatoire** : écrire dans un `.tmp` puis `os.replace` — jamais d'écriture directe dans le parquet (pas d'état partiel sur le disque).
@@ -38,6 +44,9 @@ Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
 
 ### Vues combinées (super-ensemble global)
 - Les vues **combinées** (Vue d'ensemble, Indicateur de canicule — **pas** *Explorer un run* ni *Convergence*) poolent, pour **chaque modèle, son dernier run à HORIZON PLEIN** (`latest_complete_run_sub`), chacun gardant son propre cycle. La complétude se mesure **empiriquement** sur la portée réelle du run stocké (`max valid_time − run_date ≥ horizon_h − FULL_HORIZON_TOLERANCE_H`) — **jamais** par une règle codée en dur sur l'heure de cycle : un 6Z/18Z réellement long est éligible, un 0Z/12Z anormalement court est écarté. Modèle sans `horizon_h` (GEM) → dernier run non vide ; aucun run à horizon plein → repli sur le dernier non vide, signalé « horizon réduit ».
+- La Vue d'ensemble peut être **rejouée à un cycle antérieur** (sélecteur « Vu depuis », param `as_of` de `latest_complete_run_sub`) : base filtrée `run_date ≤ cycle` puis même logique de sélection — la carte Tendance se compare toujours au jeu précédent **relatif à la version affichée**. La référence « présent » des KPI est alors le cycle choisi, jamais l'horloge.
+- Exception voulue sur la page canicule : ses sections vulgarisées « évolution au fil des runs » et « confiance » (`trend_daily_medians`) réutilisent la **mécanique de la page Convergence** (super-ensembles complétés `completed_super_ensemble_daily`, filtre `_convergence_runs`), pas `latest_complete_run_sub` — comparer des runs entre eux exige des pools à modèles équivalents (backfill), ce que la sélection « dernier run complet » ne garantit pas. Ne pas « unifier » les deux.
+- Les **KPI de la Vue d'ensemble** sont config-driven (`KPI_*` dans config.py) et calculés sur les **échéances à venir uniquement** (les heures passées rebouchées par l'API fausseraient prochaine échéance, pic, tendance, anomalie). Le « jour à risque » mêle **probabilité × sévérité** : proba journalière ≥ `KPI_RISK_PROB_MIN` OU dépassement attendu E[max(T − seuil, 0)] ≥ `KPI_RISK_EXCESS_MIN_C` (colonne `exces` de `daily_risk`) — ne pas le réduire à un seuil de proba seul, le second critère capte les queues chaudes à proba modeste.
 
 ### Explorer un run : « Dernier run » et tableaux d'export
 - L'option « Dernier run » du sélecteur (`latest_run_sub`) poole le **dernier run non vide de chaque modèle, quel que soit son cycle et sans exigence d'horizon plein** — c'est voulu (fraîcheur maximale, même partielle) ; ne pas la confondre avec `latest_complete_run_sub` (vues combinées, horizon plein requis).

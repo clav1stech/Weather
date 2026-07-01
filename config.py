@@ -181,6 +181,24 @@ SEUIL_CHALEUR_850 = 14.0   # °C — ligne de repère « chaleur notable »
 SEUIL_CANICULE_850 = 18.0  # °C — seuil de canicule exceptionnelle (pilote le risque)
 
 # --------------------------------------------------------------------------- #
+#  KPI de la Vue d'ensemble (cartes en tête de page)
+# --------------------------------------------------------------------------- #
+# Horizon de confiance : première échéance où le spread P90−P10 du super-ensemble
+# dépasse ce seuil — au-delà, les scénarios divergent trop pour être exploités
+# individuellement (le panache reste informatif, pas le scénario central seul).
+KPI_SPREAD_CONF_MAX_C = 6.0
+# Jour « à risque » = probabilité × sévérité, deux portes d'entrée :
+#   • proba journalière (membres poolés du jour ≥ SEUIL_CANICULE_850) ≥ PROB_MIN ;
+#   • OU dépassement attendu E[max(T − seuil, 0)] ≥ EXCESS_MIN — capte les queues
+#     chaudes (proba modeste mais sévérité forte) qu'un seuil de proba seul rate.
+KPI_RISK_PROB_MIN = 0.50       # probabilité journalière qualifiante
+KPI_RISK_EXCESS_MIN_C = 1.0    # °C — dépassement attendu qualifiant
+# Fenêtre (jours) de l'anomalie moyenne vs la normale climatique (cosinus).
+KPI_ANOMALIE_FENETRE_J = 7
+# Nb de cycles proposés par le sélecteur « Vu depuis » (versions antérieures).
+KPI_MAX_VERSIONS = 12
+
+# --------------------------------------------------------------------------- #
 #  Contrôle croisé Open-Meteo vs legacy (Météociel) — cf. validate_cross_pipeline.py
 # --------------------------------------------------------------------------- #
 # Objectif du contrôle : détecter un BUG pipeline (offset constant, corruption,

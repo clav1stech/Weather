@@ -225,6 +225,30 @@ def latest_complete_run_sub(_sig):
     return pd.concat(frames, ignore_index=True), sources, partial
 
 
+@st.cache_data(show_spinner=False)
+def latest_run_sub(_sig):
+    """Pool « dernier run » : pour CHAQUE modèle, son dernier run non vide, quel
+    que soit son cycle (0/6/12/18Z) — contrairement aux vues combinées
+    (latest_complete_run_sub), AUCUNE exigence d'horizon plein : on montre
+    l'information la plus fraîche disponible, même partielle. Chaque modèle
+    garde son propre run_date/cycle. Retourne (sub, sources)."""
+    df = load_db(_sig)
+    if df.empty:
+        return df, {}
+    frames, sources = [], {}
+    for label in C.MODEL_LABELS:
+        mdf = df[df["model"] == label]
+        valid = mdf.dropna(subset=[VAR])
+        if valid.empty:
+            continue
+        rd = valid["run_date"].max()
+        frames.append(mdf[mdf["run_date"] == rd])
+        sources[label] = rd
+    if not frames:
+        return df.iloc[0:0], sources
+    return pd.concat(frames, ignore_index=True), sources
+
+
 def complete_runs_caption(sources):
     """Légende « Modèle cycle » listant, par modèle, le run retenu (ordre config)."""
     parts = [f"{label} {run_label_text(sources[label])}"
@@ -240,13 +264,28 @@ def main_labels_expected_at(run_date):
     return [m for m in C.MAIN_LABELS if h in C.EXPECTED_CYCLES_BY_LABEL.get(m, [])]
 
 
+def user_tz():
+    """Fuseau horaire du NAVIGATEUR de l'utilisateur (st.context), repli sur
+    l'heure de Paris. Sert aux horodatages « temps réel » (rafraîchissement) —
+    les données météo, elles, restent affichées en heure de Paris (LOCAL_TZ)."""
+    try:
+        tz = st.context.timezone
+        if tz:
+            return ZoneInfo(tz)
+    except Exception:  # noqa: BLE001
+        pass
+    return LOCAL_TZ
+
+
 def latest_refresh_status(runs, sig):
-    """Heure du dernier rafraîchissement (mtime du parquet) et complétude (tous
-    les modèles principaux ATTENDUS À CE CYCLE présents ou non) du dernier run."""
+    """Heure du dernier rafraîchissement (mtime du parquet, dans le fuseau de
+    l'utilisateur — jamais l'heure du serveur, qui est UTC sur le cloud) et
+    complétude (tous les modèles principaux ATTENDUS À CE CYCLE présents ou
+    non) du dernier run."""
     if runs.empty:
         return None, True, []
     try:
-        refreshed_at = datetime.fromtimestamp(os.path.getmtime(C.DB_PATH))
+        refreshed_at = datetime.fromtimestamp(os.path.getmtime(C.DB_PATH), tz=user_tz())
     except OSError:
         refreshed_at = None
     last_rd = runs.iloc[0]["run_date"]
@@ -354,6 +393,85 @@ def model_medians(sub):
     if not meds:
         return None
     return pd.concat(meds, axis=1).sort_index()
+
+
+def previous_runs_sub(sig, sub):
+    """Pool « run précédent » : pour chaque couple (modèle, run) présent dans
+    `sub`, les lignes du dernier run STRICTEMENT antérieur de CE modèle — chaque
+    modèle recule vers son propre cycle précédent, jamais de cycle global
+    partagé (un 6Z peut ainsi être comparé au 0Z pour ECMWF et au 6Z−6h pour
+    GEFS). Sert de référence aux colonnes Δ des tableaux d'export. None si
+    aucun modèle n'a d'antécédent."""
+    df = load_db(sig)
+    frames = []
+    for (model, rd), _ in sub.groupby(["model", "run_date"]):
+        prior = df[(df["model"] == model) & (df["run_date"] < rd)].dropna(subset=[VAR])
+        if prior.empty:
+            continue
+        prev_rd = prior["run_date"].max()
+        frames.append(df[(df["model"] == model) & (df["run_date"] == prev_rd)])
+    if not frames:
+        return None
+    return pd.concat(frames, ignore_index=True)
+
+
+def _model_median(sub, model):
+    """Médiane d'UN modèle (tous membres, contrôle inclus), indexée valid_time."""
+    s = sub[sub["model"] == model]
+    if s.empty:
+        return None
+    return s.pivot_table(index="valid_time", columns="member", values=VAR).median(axis=1)
+
+
+def enriched_super_table(sub, prev_sub=None):
+    """Table d'export du super-ensemble, enrichie par modèle : médiane, contrôle
+    (member 0), nb de membres actifs et Δ de médiane vs le run précédent de CE
+    modèle (cf. previous_runs_sub). Volontairement large : pensée pour l'export
+    vers une analyse externe (IA), pas pour la lecture à l'écran."""
+    se = super_ensemble(sub)
+    if se is None or se.empty:
+        return se
+    out = se.set_index("valid_time")
+    if prev_sub is not None:
+        prev_se = super_ensemble(prev_sub)
+        if prev_se is not None and not prev_se.empty:
+            prev_med = prev_se.set_index("valid_time")["Médiane"]
+            out["Δ Médiane vs préc."] = (out["Médiane"] - prev_med.reindex(out.index)).round(2)
+    for model in C.MODEL_LABELS:
+        s = sub[sub["model"] == model]
+        if s.empty:
+            continue
+        piv = s.pivot_table(index="valid_time", columns="member", values=VAR).sort_index()
+        med = piv.median(axis=1).reindex(out.index)
+        out[f"{model} médiane"] = med.round(2)
+        if 0 in piv.columns:
+            out[f"{model} contrôle"] = piv[0].reindex(out.index).round(2)
+        out[f"{model} n membres"] = (piv.notna().sum(axis=1)
+                                     .reindex(out.index).fillna(0).astype(int))
+        if prev_sub is not None:
+            pmed = _model_median(prev_sub, model)
+            if pmed is not None:
+                out[f"{model} Δ médiane"] = (med - pmed.reindex(out.index)).round(2)
+    return out.reset_index()
+
+
+def model_table(sub, model, prev_sub=None):
+    """Table d'export d'UN modèle : mêmes stats d'ensemble que le super-ensemble
+    mais restreintes à ses seuls membres, plus le contrôle (member 0) et le Δ de
+    médiane vs le run précédent de CE modèle."""
+    s = sub[sub["model"] == model]
+    se = super_ensemble(s)
+    if se is None or se.empty:
+        return se
+    out = se.drop(columns=["n_models"]).set_index("valid_time")
+    piv = s.pivot_table(index="valid_time", columns="member", values=VAR).sort_index()
+    if 0 in piv.columns:
+        out["Contrôle"] = piv[0].reindex(out.index).round(2)
+    if prev_sub is not None:
+        pmed = _model_median(prev_sub, model)
+        if pmed is not None:
+            out["Δ médiane vs préc."] = (out["Médiane"] - pmed.reindex(out.index)).round(2)
+    return out.reset_index()
 
 
 def divergence(sub):
@@ -786,22 +904,40 @@ def page_overview(runs, sig):
 def page_explore(runs, sig):
     st.title("📊 Explorer une prévision (run)")
     st.caption(
-        "Vue détaillée d'un même run sous plusieurs angles : panache de dispersion, "
+        "Vue détaillée d'un run sous plusieurs angles : panache de dispersion, "
         "scénarios individuels, comparaison des modèles, divergence, incertitude et "
-        "tableaux de données.")
+        "tableaux de données. « Dernier run » poole le run le plus récent de chaque "
+        "modèle, même à cycles différents.")
     if runs.empty:
         st.warning("Aucun run disponible.")
         return
 
-    idx = st.selectbox("Choisir un run", runs.index,
-                       format_func=lambda i: runs.loc[i, "label"])
-    run = runs.loc[idx]
-    sub = run_slice(sig, run["run_date"])
+    # Sentinelle « dernier run » : pool du dernier run de CHAQUE modèle, quel que
+    # soit son cycle (cf. latest_run_sub) — les vrais runs restent listés ensuite.
+    LATEST = -1
+    idx = st.selectbox(
+        "Choisir un run", [LATEST] + list(runs.index),
+        format_func=lambda i: ("🕐 Dernier run (le plus récent de chaque modèle, "
+                               "tous cycles)" if i == LATEST else runs.loc[i, "label"]))
+    if idx == LATEST:
+        sub, sources = latest_run_sub(sig)
+        run_label = "derniers runs par modèle"
+        file_tag = "dernier"
+        st.caption("Dernier run disponible de chaque modèle, même partiel (aucune "
+                   f"exigence d'horizon plein) : {complete_runs_caption(sources)}")
+        manquants = [m for m in C.MAIN_LABELS if m not in sources]
+    else:
+        run = runs.loc[idx]
+        sub = run_slice(sig, run["run_date"])
+        run_label = run["label"]
+        u = utc_cycle(run["run_date"])
+        file_tag = f"{u:%Y%m%d}_{u.hour:02d}Z"
+        manquants = [m for m in main_labels_expected_at(run["run_date"])
+                     if m not in sub["model"].unique()]
     syn = super_ensemble(sub)
     present = sorted(sub["model"].unique())
     cutoff = multimodel_cutoff(sub)
 
-    manquants = [m for m in main_labels_expected_at(run["run_date"]) if m not in present]
     if manquants:
         st.warning(f"⚠️ Modèle(s) principal(aux) absent(s) : **{', '.join(manquants)}**. "
                    "Super-ensemble appauvri (dispersion possiblement sous-estimée).")
@@ -811,7 +947,7 @@ def page_explore(runs, sig):
 
     with tab_fan:
         if syn is not None and not syn.empty:
-            st.plotly_chart(fan_chart(syn, f"Super-ensemble — {run['label']}"), width="stretch")
+            st.plotly_chart(fan_chart(syn, f"Super-ensemble — {run_label}"), width="stretch")
         else:
             st.info("Aucune donnée exploitable dans ce run.")
 
@@ -843,14 +979,24 @@ def page_explore(runs, sig):
             st.info("Pas de données d'incertitude.")
 
     with tab_tbl:
+        st.caption("Tableaux larges, pensés pour l'export vers une analyse externe "
+                   "(IA) : stats du super-ensemble enrichies, par modèle, de la "
+                   "médiane, du contrôle (member 0), du nombre de membres actifs et "
+                   "du Δ de médiane vs le run précédent de chaque modèle — plus une "
+                   "table détaillée par modèle.")
+        prev_sub = previous_runs_sub(sig, sub)
         tables = {
-            "Super-ensemble (infra-journalier)": lambda: syn,
-            "Super-ensemble (journalier 12h)": lambda: daily_aggregate(syn),
+            "Super-ensemble (infra-journalier)":
+                lambda: enriched_super_table(sub, prev_sub),
+            "Super-ensemble (journalier 12h)":
+                lambda: daily_aggregate(enriched_super_table(sub, prev_sub)),
         }
+        for m in present:
+            tables[f"Modèle — {m}"] = (lambda m=m: model_table(sub, m, prev_sub))
         choice = st.selectbox("Table", list(tables), key="tbl_sheet")
         raw = tables[choice]()
         if raw is not None:
-            raw = raw.drop(columns=["date"], errors="ignore")
+            raw = raw.drop(columns=["date"], errors="ignore").round(2)
         if raw is None or raw.empty:
             st.info("Table indisponible.")
         else:
@@ -861,10 +1007,9 @@ def page_explore(runs, sig):
                       .format(precision=1)
                       if len(num_cols) else raw)
             st.dataframe(styler, width="stretch", height=520)
-            u = utc_cycle(run["run_date"])
             st.download_button("⬇️ Télécharger (CSV)",
                                raw.to_csv(index=False).encode("utf-8-sig"),
-                               file_name=f"run_{u:%Y%m%d}_{u.hour:02d}Z_{choice[:20]}.csv",
+                               file_name=f"run_{file_tag}_{choice[:20]}.csv",
                                mime="text/csv")
 
 

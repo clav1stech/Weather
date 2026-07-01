@@ -39,6 +39,11 @@ Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
 ### Vues combinées (super-ensemble global)
 - Les vues **combinées** (Vue d'ensemble, Indicateur de canicule — **pas** *Explorer un run* ni *Convergence*) poolent, pour **chaque modèle, son dernier run à HORIZON PLEIN** (`latest_complete_run_sub`), chacun gardant son propre cycle. La complétude se mesure **empiriquement** sur la portée réelle du run stocké (`max valid_time − run_date ≥ horizon_h − FULL_HORIZON_TOLERANCE_H`) — **jamais** par une règle codée en dur sur l'heure de cycle : un 6Z/18Z réellement long est éligible, un 0Z/12Z anormalement court est écarté. Modèle sans `horizon_h` (GEM) → dernier run non vide ; aucun run à horizon plein → repli sur le dernier non vide, signalé « horizon réduit ».
 
+### Explorer un run : « Dernier run » et tableaux d'export
+- L'option « Dernier run » du sélecteur (`latest_run_sub`) poole le **dernier run non vide de chaque modèle, quel que soit son cycle et sans exigence d'horizon plein** — c'est voulu (fraîcheur maximale, même partielle) ; ne pas la confondre avec `latest_complete_run_sub` (vues combinées, horizon plein requis).
+- Les tableaux de l'onglet 🧾 sont **volontairement larges** (destinés à l'export pour analyse par IA) : stats du super-ensemble + par modèle médiane, contrôle (member 0), nb de membres, Δ médiane vs run précédent — ne pas les « alléger » pour la lisibilité écran.
+- Le « run précédent » des colonnes Δ (`previous_runs_sub`) se calcule **par modèle** (dernier run strictement antérieur de CE modèle), jamais via un cycle global partagé.
+
 ### Robustesse NaN / horizon 16 j
 - Toutes les statistiques restent **tolérantes aux NaN** (`skipna`) : l'horizon 16 j doit s'afficher proprement même quand les membres se raréfient (~7,5 j).
 

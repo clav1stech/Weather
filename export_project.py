@@ -7,8 +7,8 @@ from datetime import datetime
 project_dir = pathlib.Path(__file__).parent
 export_dir = project_dir / "Export"
 ENABLE_ZIP_EXPORT = False
-VERSION_X = 1
-VERSION_Y = 1
+VERSION_X = 2
+VERSION_Y = 0
 
 # Dossiers ignorés (noms de dossier, appliqués à tous les niveaux)
 EXCLUDED_DIRS = {

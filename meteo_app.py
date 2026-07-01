@@ -31,7 +31,7 @@ import config as C
 import run_dual
 import validate_cross_pipeline as V  # helpers de lecture des xlsx legacy (Météociel)
 
-APP_VERSION = "2.0.4"
+APP_VERSION = "2.0.5"
 LOCAL_TZ = ZoneInfo("Europe/Paris")
 VAR = C.PRIMARY_VAR  # variable principale affichée (t850)
 
@@ -232,17 +232,27 @@ def complete_runs_caption(sources):
     return " · ".join(parts)
 
 
+def main_labels_expected_at(run_date):
+    """Modèles principaux attendus au cycle synoptique de `run_date`.
+    Utilise `expected_cycles` (config) — ex. ECMWF attendu seulement à 0Z/12Z,
+    donc absent à 6Z/18Z sans déclencher d'alerte."""
+    h = utc_cycle(run_date).hour
+    return [m for m in C.MAIN_LABELS if h in C.EXPECTED_CYCLES_BY_LABEL.get(m, [])]
+
+
 def latest_refresh_status(runs, sig):
     """Heure du dernier rafraîchissement (mtime du parquet) et complétude (tous
-    les modèles principaux présents ou non) du dernier run."""
+    les modèles principaux ATTENDUS À CE CYCLE présents ou non) du dernier run."""
     if runs.empty:
         return None, True, []
     try:
         refreshed_at = datetime.fromtimestamp(os.path.getmtime(C.DB_PATH))
     except OSError:
         refreshed_at = None
-    present = set(run_slice(sig, runs.iloc[0]["run_date"])["model"].unique())
-    missing = [m for m in C.MAIN_LABELS if m not in present]
+    last_rd = runs.iloc[0]["run_date"]
+    present = set(run_slice(sig, last_rd)["model"].unique())
+    expected = main_labels_expected_at(last_rd)
+    missing = [m for m in expected if m not in present]
     return refreshed_at, not missing, missing
 
 
@@ -766,7 +776,7 @@ def page_explore(runs, sig):
     present = sorted(sub["model"].unique())
     cutoff = multimodel_cutoff(sub)
 
-    manquants = [m for m in C.MAIN_LABELS if m not in present]
+    manquants = [m for m in main_labels_expected_at(run["run_date"]) if m not in present]
     if manquants:
         st.warning(f"⚠️ Modèle(s) principal(aux) absent(s) : **{', '.join(manquants)}**. "
                    "Super-ensemble appauvri (dispersion possiblement sous-estimée).")
@@ -893,13 +903,29 @@ def page_convergence(runs, sig):
     # ancien (plusieurs si un run partiel a été complété par un run antérieur).
     runs_affiches = set(long["run_dt"].unique())
     label_par_dt = {r["run_date"]: r["label"] for _, r in runs.iterrows()}
+    # first_seen_utc : garde symétrique avec _missing_by_run — on ne signale « manque »
+    # que si le modèle avait déjà été collecté à cette date (évite les faux positifs
+    # pour les runs antérieurs à la 1re collecte d'un modèle, ex. ECMWF 17 Jun).
+    _om_pres = openmeteo_presence(sig)
+    first_seen_utc = (_om_pres.groupby("model")["run_utc"].min().to_dict()
+                      if not _om_pres.empty else {})
     backfilled, manquants = {}, {}
     for run_dt, sources in backfill_src.items():
         if run_dt not in runs_affiches:
             continue
+        expected_at = set(main_labels_expected_at(run_dt))
+        # On ne signale "repris" que pour les modèles attendus à ce cycle ET totalement
+        # absents du run courant (srcs[0] != run_dt). Les cas où le run courant a des
+        # données mais avec quelques trous comblés silencieusement ne sont PAS alertés :
+        # si la donnée a été trouvée pour ce run, le contrôle des modèles le montre, et
+        # l'alerte "complété par" serait incohérente avec le fait d'avoir un run présent.
         bf = {m: srcs for m, srcs in sources.items()
-              if srcs and (len(srcs) > 1 or srcs[0] != run_dt)}
-        miss = [m for m in C.MAIN_LABELS if not sources.get(m)]
+              if m in expected_at and srcs and srcs[0] != run_dt}
+        run_utc_val = _run_utc_naive(run_dt)
+        miss = [m for m in expected_at
+                if not sources.get(m)
+                and m in first_seen_utc
+                and run_utc_val >= first_seen_utc[m]]
         if bf:
             backfilled[run_dt] = bf
         if miss:
@@ -920,21 +946,16 @@ def page_convergence(runs, sig):
                 if not extra:
                     continue
                 extra_txt = ", ".join(f"{utc_cycle(s):%d %b} {utc_cycle(s).hour:02d}Z" for s in extra)
-                tag = "complété" if run_dt in srcs else "repris"
-                notes.append(f"{m} {tag} par {extra_txt}")
+                notes.append(f"{m} repris par {extra_txt}")
             if run_dt in manquants:
                 notes.append(f"manque {', '.join(manquants[run_dt])}")
             parts.append(f"{label_par_dt[run_dt]} ({' ; '.join(notes)})")
         st.warning(
-            "⚠️ Certains runs affichés n'avaient pas tous les modèles sur toute la période. "
-            "Les échéances manquantes (modèle absent, ou run partiel — ex. 6Z/18Z arrêté en "
-            "cours de période) sont **complétées, échéance par échéance, par le run antérieur "
-            "le plus proche** qui les couvre (jusqu'à n-3, soit ~1 jour) afin de comparer des "
-            "super-ensembles équivalents. Quand aucun run récent ne couvre une échéance, elle "
-            "reste manquante et le super-ensemble y est appauvri. Les modèles d'appoint (ex. "
-            "GEM) ne sont jamais ainsi complétés — ils n'apparaissent qu'à leurs propres "
-            "cycles réels (0Z/12Z). "
-            "Ces runs sont notés en *italique* avec un astérisque (\\*).\n\n"
+            "⚠️ Certains runs affichés ont un modèle principal **absent** : son dernier run "
+            "disponible est repris à sa place (jusqu'à n-3, soit ~1 jour) pour comparer des "
+            "super-ensembles à nombre de modèles équivalent. Les modèles d'appoint (ex. GEM) "
+            "ne sont jamais ainsi repris — ils n'apparaissent qu'à leurs propres cycles réels "
+            "(0Z/12Z). Ces runs sont notés en *italique* avec un astérisque (\\*).\n\n"
             + " · ".join(parts))
 
     # ── 1. Révisions vs runs précédents ──
@@ -1375,7 +1396,15 @@ def openmeteo_presence(sig):
         n_members=("member", "nunique"),
         first_vt=("valid_time", "min"),
         last_vt=("valid_time", "max"))
-    g["lead_h"] = (g["last_vt"] - g["run_date"]).dt.total_seconds() / 3600
+    # lead_h = horizon mesuré uniquement sur les échéances post-cycle (valid_time ≥ run_date).
+    # Les données antérieures (rebouchage API depuis 00h local) ne reflètent pas l'horizon
+    # réel du cycle. NaN si aucune échéance post-cycle valide → affiché comme ✗ absent.
+    v_fut = v[v["valid_time"] >= v["run_date"]]
+    g_fut = (v_fut.groupby(["run_date", "model"])["valid_time"]
+             .max().rename("last_vt_fut").reset_index())
+    g = g.merge(g_fut, on=["run_date", "model"], how="left")
+    g["lead_h"] = (g["last_vt_fut"] - g["run_date"]).dt.total_seconds() / 3600
+    g = g.drop(columns=["last_vt_fut"])
     g["run_utc"] = g["run_date"].map(_run_utc_naive)
     g["cycle_h"] = g["run_utc"].map(lambda t: t.hour)
     g["expected"] = g.apply(
@@ -1474,13 +1503,17 @@ def _missing_by_run(om):
     cale automatiquement l'attente sur le go-live de chaque modèle — ex. GEM n'est
     jamais signalé « absent » avant sa première collecte (30/06) — sans date en dur."""
     first_seen = om.groupby("model")["run_utc"].min().to_dict()
-    present_by_rd = om.groupby("run_date")["model"].agg(set)
+    # Un modèle avec lead_h NaN ou ≤ 0 (données uniquement pré-cycle, pur rebouchage)
+    # est équivalent à une absence : ses données post-cycle seront prises ailleurs.
+    _has_fut = om[om["lead_h"].fillna(0) > 0]
+    present_by_rd = (_has_fut.groupby("run_date")["model"].agg(set)
+                     if not _has_fut.empty else pd.Series(dtype=object))
     out = {}
     for rd in om["run_date"].unique():
         ru = _run_utc_naive(rd)
         pres = present_by_rd.get(rd, set())
         out[rd] = {m for m in C.MODEL_LABELS
-                   if ru.hour in _CYCLES_BY_LABEL.get(m, [])
+                   if ru.hour in C.EXPECTED_CYCLES_BY_LABEL.get(m, [])
                    and m in first_seen and ru >= first_seen[m]
                    and m not in pres}
     return out
@@ -1562,9 +1595,10 @@ def page_diagnostic(runs, sig):
     st.markdown("---")
     st.subheader("🛰️ Open-Meteo — présence & horizon par run")
     st.caption(
-        "Chaque case : **horizon réel** (dernière échéance non-NaN − cycle) en jours et "
-        "**nombre de membres**. Couleur = horizon. ✗ rouge = attendu mais absent — un "
-        "modèle n'est attendu qu'à partir de sa 1re collecte réelle (GEM depuis le "
+        "Chaque case : **horizon post-cycle** (dernière échéance non-NaN ≥ cycle − cycle) "
+        "en jours et **nombre de membres**. Couleur = horizon. ✗ rouge = attendu mais absent "
+        "ou données uniquement pré-cycle (rebouchage) — un modèle n'est attendu qu'à partir "
+        "de sa 1re collecte réelle (GEM depuis le "
         f"{pd.Timestamp(C.PIPELINE_LIVE_SINCE):%d/%m}, cycles 6Z/18Z de même). Avant cette "
         "bascule, la base est rétro-remplie depuis les xlsx Météociel (migrate.py).")
     if om.empty:
@@ -1703,7 +1737,7 @@ def main():
         if refreshed_at is not None:
             st.sidebar.caption(f"🕐 Rafraîchi le {refreshed_at.strftime('%d/%m/%Y à %Hh%M')}")
         if complete:
-            st.sidebar.caption(f"✅ Données complètes ({len(C.MAIN_LABELS)} modèles principaux)")
+            st.sidebar.caption("✅ Tous les modèles attendus à ce run présents")
         else:
             st.sidebar.caption(f"⚠️ Données partielles — manque : {', '.join(missing)}")
     if st.sidebar.button("🔄 Rafraîchir"):

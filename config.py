@@ -64,7 +64,7 @@ PUBLICATION_LAG_HOURS = 4
 # ne fige rien, il ne fait que lever l'ambiguïté 06Z-servi-comme-12Z.
 MODELS = [
     {"api": "ecmwf_ifs025_ensemble",   "label": "ECMWF", "main": True,  "color": "#1F618D",
-     "cycles": [0, 6, 12, 18], "horizon_h": 360, "meta_slug": "ecmwf_ifs025",
+     "cycles": [0, 6, 12, 18], "expected_cycles": [0, 12], "horizon_h": 360, "meta_slug": "ecmwf_ifs025",
      "desc": "modèle *physique* du Centre européen (Reading, Royaume-Uni), référence "
              "mondiale de la prévision à moyenne échéance"},
     {"api": "ecmwf_aifs025_ensemble",  "label": "AIFS",  "main": True,  "color": "#1E8449",
@@ -194,6 +194,10 @@ LEGACY_COMPARE_STRATEGY = {"ECMWF": "median", "AIFS": "median", "GEFS": "median"
 # --------------------------------------------------------------------------- #
 MODEL_LABELS = [m["label"] for m in MODELS]
 MAIN_LABELS = [m["label"] for m in MODELS if m["main"]]
+# Cycles où chaque modèle est ATTENDU (absence = alerte). Distinct de `cycles`
+# (cycles où il CAN publier) : ex. ECMWF tourne à 0/6/12/18Z mais n'est requis
+# complet qu'à 0Z et 12Z ; une absence à 6Z/18Z n'est pas une anomalie.
+EXPECTED_CYCLES_BY_LABEL = {m["label"]: m.get("expected_cycles", m["cycles"]) for m in MODELS}
 LABEL_BY_API = {m["api"]: m["label"] for m in MODELS}
 COLOR_BY_LABEL = {m["label"]: m["color"] for m in MODELS}
 API_BY_LABEL = {m["label"]: m["api"] for m in MODELS}

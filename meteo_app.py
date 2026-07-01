@@ -31,7 +31,7 @@ import config as C
 import run_dual
 import validate_cross_pipeline as V  # helpers de lecture des xlsx legacy (Météociel)
 
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 LOCAL_TZ = ZoneInfo("Europe/Paris")
 VAR = C.PRIMARY_VAR  # variable principale affichée (t850)
 
@@ -158,6 +158,78 @@ def list_runs(_sig):
 def run_slice(_sig, run_date):
     df = load_db(_sig)
     return df[df["run_date"] == run_date]
+
+
+# Tolérance (heures) entre la portée RÉELLE d'un run stocké (max valid_time −
+# run_date) et l'horizon nominal du modèle (config `horizon_h`), pour juger qu'un
+# run atteint « l'horizon plein ». Assez large pour absorber le pas d'échéance et
+# une légère avance de coupure, assez serré pour écarter les cycles courts.
+FULL_HORIZON_TOLERANCE_H = 24
+
+
+@st.cache_data(show_spinner=False)
+def latest_complete_run_sub(_sig):
+    """Pool multi-modèles où CHAQUE modèle est représenté par son dernier run à
+    HORIZON PLEIN — base des vues combinées (super-ensemble global).
+
+    La complétude se mesure EMPIRIQUEMENT sur la portée réelle du run stocké
+    (max valid_time − run_date ≥ horizon_h − tolérance), jamais par une règle
+    codée en dur sur l'heure de cycle : un 6Z/18Z qui atteint réellement le plein
+    horizon est donc éligible, et un 0Z/12Z anormalement court est écarté (cf.
+    invariant : l'horizon réel d'un cycle varie d'un jour à l'autre). Chaque
+    modèle garde son propre run_date/cycle — aucun cycle global partagé.
+
+    Modèles sans `horizon_h` déclaré (ex. GEM) : complétude non jugeable → on
+    retient leur dernier run non vide (à leurs cycles réels, jamais backfillé).
+    Repli général : si aucun run n'atteint l'horizon plein, on prend le dernier
+    run non vide (le modèle reste présent, signalé « horizon réduit »).
+
+    Retourne (sub, sources, partial) :
+      - sub     : lignes poolées (mêmes colonnes que la base) ;
+      - sources : {label → run_date retenu} ;
+      - partial : modèles principaux sans aucun run à horizon plein récent."""
+    df = load_db(_sig)
+    if df.empty:
+        return df, {}, []
+    frames, sources, partial = [], {}, []
+    for model in C.MODELS:
+        label = model["label"]
+        mdf = df[df["model"] == label]
+        if mdf.empty:
+            continue
+        horizon = model.get("horizon_h")
+        chosen, fallback = None, None
+        for rd in sorted(mdf["run_date"].unique(), reverse=True):
+            valid = mdf[(mdf["run_date"] == rd)].dropna(subset=[VAR])
+            if valid.empty:
+                continue
+            if fallback is None:
+                fallback = rd  # dernier run non vide, quel que soit son horizon
+            if horizon is None:
+                chosen = rd   # complétude non jugeable → plus récent non vide
+                break
+            reach_h = (valid["valid_time"].max() - pd.Timestamp(rd)) / pd.Timedelta(hours=1)
+            if reach_h >= horizon - FULL_HORIZON_TOLERANCE_H:
+                chosen = rd
+                break
+        if chosen is None:
+            chosen = fallback
+            if chosen is not None and horizon is not None:
+                partial.append(label)  # aucun run à horizon plein → repli signalé
+        if chosen is None:
+            continue
+        frames.append(mdf[mdf["run_date"] == chosen])
+        sources[label] = chosen
+    if not frames:
+        return df.iloc[0:0], sources, partial
+    return pd.concat(frames, ignore_index=True), sources, partial
+
+
+def complete_runs_caption(sources):
+    """Légende « Modèle cycle » listant, par modèle, le run retenu (ordre config)."""
+    parts = [f"{label} {run_label_text(sources[label])}"
+             for label in C.MODEL_LABELS if label in sources]
+    return " · ".join(parts)
 
 
 def latest_refresh_status(runs, sig):
@@ -623,16 +695,22 @@ def page_overview(runs, sig):
     if runs.empty:
         st.warning("Base vide. Lancez le pipeline `Forecast.py` pour la remplir.")
         return
-    latest = runs.iloc[0]
-    sub = run_slice(sig, latest["run_date"])
-    refreshed_at, complete, missing = latest_refresh_status(runs, sig)
+    sub, sources, partial = latest_complete_run_sub(sig)
+    refreshed_at, _, _ = latest_refresh_status(runs, sig)
+    missing = [m for m in C.MAIN_LABELS if m not in sources]
     refresh_txt = (f" · rafraîchi le {refreshed_at.strftime('%d/%m/%Y à %Hh%M')}"
                    if refreshed_at is not None else "")
-    statut_txt = ("complet ✅" if complete
-                  else f"partiel ⚠️ (manque {', '.join(missing)})")
-    st.caption(f"Dernière prévision : **{latest['label']}** · "
+    if missing:
+        statut_txt = f"partiel ⚠️ (aucun run pour {', '.join(missing)})"
+    elif partial:
+        statut_txt = (f"horizon réduit ⚠️ pour {', '.join(partial)} "
+                      "(pas de run à horizon plein récent)")
+    else:
+        statut_txt = "complet ✅"
+    st.caption(f"Super-ensemble des **derniers runs complets** par modèle · "
                f"{len(runs)} prévisions (runs) archivées · températures à 850 hPa"
                f"{refresh_txt} · {statut_txt}")
+    st.caption(f"Runs retenus (horizon plein, par modèle) : {complete_runs_caption(sources)}")
 
     syn = super_ensemble(sub)
     if syn is None or syn.empty:
@@ -660,7 +738,7 @@ def page_overview(runs, sig):
 
     st.caption("**Panache de dispersion** : ligne rouge = médiane ; bandes = part "
                "croissante des scénarios (Min–Max, P10–P90, P25–P75).")
-    st.plotly_chart(fan_chart(syn, f"Panache du super-ensemble — {latest['label']}"),
+    st.plotly_chart(fan_chart(syn, "Panache du super-ensemble — derniers runs complets par modèle"),
                     width="stretch")
 
     present = sorted(sub["model"].unique())
@@ -975,9 +1053,9 @@ def page_grand_public(runs, sig):
     if runs.empty:
         st.warning("Base vide.")
         return
-    latest = runs.iloc[0]
-    sub = run_slice(sig, latest["run_date"])
-    st.caption(f"Dernière prévision : **{latest['label']}** · super-ensemble multi-modèles")
+    sub, sources, _ = latest_complete_run_sub(sig)
+    st.caption("Super-ensemble des **derniers runs complets** par modèle · "
+               f"{complete_runs_caption(sources)}")
 
     with st.expander("❓ Comment lire cet indicateur — la température à 850 hPa (T850)"):
         st.markdown(
@@ -1032,7 +1110,9 @@ def page_grand_public(runs, sig):
             "plus solide.\n\n"
             "**Ce qu'affichent les graphiques :**\n"
             "- *Indicateur de canicule* et *Vue d'ensemble* → le **super-ensemble** "
-            "(tous les modèles réunis).\n"
+            "combinant, pour **chaque modèle, son dernier run à horizon plein** "
+            "(les cycles trop courts sont écartés) — pas forcément le même cycle "
+            "d'un modèle à l'autre.\n"
             "- *Explorer un run* → au choix : le super-ensemble (onglet **Panache**), "
             "**un seul modèle** détaillé scénario par scénario (onglet **Spaghetti**), ou la "
             "**comparaison des médianes** de chaque modèle (onglet **Modèles**).")
@@ -1150,8 +1230,11 @@ def page_run(sig):
     now_utc = datetime.now(ZoneInfo("UTC"))
     nearest = run_dual._nearest_cron_hour(now_utc)
     legacy_slot = run_dual.LEGACY_SLOT_BY_CRON_HOUR.get(nearest)
-    st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}** · poll de référence le plus proche : "
-               f"**{nearest:02d}:15 UTC**")
+    if nearest is not None:
+        poll_info = f"poll de référence le plus proche : **{nearest:02d}:15 UTC**"
+    else:
+        poll_info = "hors créneau cron (aucun poll dans la fenêtre ±1h30)"
+    st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}** · {poll_info}")
 
     st.markdown("**Horaires conseillés (cron du workflow) :**")
     rows = []

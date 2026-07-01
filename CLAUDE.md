@@ -32,6 +32,9 @@ Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
 - Les modèles d'appoint (`main: False`, ex. GEM) ne sont **jamais backfillés** et n'existent qu'à leurs cycles réels (`cycles` dans config). Comparaison cycle-à-cycle uniquement.
 - Le backfill inter-runs du dashboard (`completed_pooled_sub`) ne concerne que les modèles **principaux**, échéance par échéance, jusqu'à `n-3`. Il ne comble QUE les échéances **à venir** (`valid_time ≥ cycle du run`) : les heures antérieures au cycle (rebouchées par l'API depuis 00:00 local, aussi servies par le run précédent) sont du passé, jetées par la convergence — les backfiller ferait apparaître à tort presque tous les runs comme « complétés » par un ancien (bruit massif en grille horaire OM).
 
+### Vues combinées (super-ensemble global)
+- Les vues **combinées** (Vue d'ensemble, Indicateur de canicule — **pas** *Explorer un run* ni *Convergence*) poolent, pour **chaque modèle, son dernier run à HORIZON PLEIN** (`latest_complete_run_sub`), chacun gardant son propre cycle. La complétude se mesure **empiriquement** sur la portée réelle du run stocké (`max valid_time − run_date ≥ horizon_h − FULL_HORIZON_TOLERANCE_H`) — **jamais** par une règle codée en dur sur l'heure de cycle : un 6Z/18Z réellement long est éligible, un 0Z/12Z anormalement court est écarté. Modèle sans `horizon_h` (GEM) → dernier run non vide ; aucun run à horizon plein → repli sur le dernier non vide, signalé « horizon réduit ».
+
 ### Robustesse NaN / horizon 16 j
 - Toutes les statistiques restent **tolérantes aux NaN** (`skipna`) : l'horizon 16 j doit s'afficher proprement même quand les membres se raréfient (~7,5 j).
 

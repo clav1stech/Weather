@@ -160,6 +160,13 @@ CROSS_CHECK_MIN_MEMBERS = 5
 # représentent pas le même cycle — le modèle est ignoré dans ce contrôle.
 CROSS_CHECK_RUN_ALIGN_TOL_H = 3
 CROSS_CHECK_LOG_PATH = os.path.join(DATA_DIR, "cross_check_log.csv")
+# Date de bascule « pipeline réel » (UTC). AVANT cette date, la base Open-Meteo a
+# été rétro-remplie depuis les xlsx Météociel (migrate.py) : la comparer au legacy
+# est circulaire (mêmes données) et GEM / les cycles 6Z-18Z n'existent pas encore.
+# La page « Contrôle des runs » ne confronte donc OM ↔ legacy qu'à partir d'ici.
+# (La détection d'absence de modèle, elle, se cale sur la 1re apparition réelle de
+# CHAQUE modèle — pas besoin de dater GEM en dur.)
+PIPELINE_LIVE_SINCE = "2026-06-30"
 LEGACY_MODELS = {"ECMWF": "ECMWF", "AIFS": "AIFS", "GEFS": "GEFS"}  # label -> feuille xlsx
 LEGACY_DET_NAMES = {"DET", "GFS"}  # nom de la colonne contrôle selon le modèle
 LEGACY_FORECASTS_DIR = os.path.join(BASE_DIR, "Forecasts")

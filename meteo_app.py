@@ -14,7 +14,9 @@ Config-driven : modèles, variables, climatologie et seuils vivent dans config.p
 """
 
 import os
+import re
 import sys
+import glob
 import subprocess
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -27,8 +29,9 @@ from plotly.subplots import make_subplots
 
 import config as C
 import run_dual
+import validate_cross_pipeline as V  # helpers de lecture des xlsx legacy (Météociel)
 
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.3"
 LOCAL_TZ = ZoneInfo("Europe/Paris")
 VAR = C.PRIMARY_VAR  # variable principale affichée (t850)
 
@@ -326,6 +329,7 @@ def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
     a contribué, puis les runs antérieurs ayant comblé des échéances manquantes ;
     liste vide si le modèle est introuvable dans toute la fenêtre)."""
     n = len(runs)
+    run_start = runs.iloc[pos]["run_date"]  # cycle (heure locale) du run analysé
     frames, sources = [], {}
     for model in C.MAIN_LABELS:
         used, covered_vt = [], set()
@@ -335,19 +339,27 @@ def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
             cand = cand[cand["model"] == model]
             if cand.empty:
                 continue
-            # Ne garde que les échéances valides ET pas déjà couvertes par un run
-            # plus récent (priorité au plus frais, échéance par échéance).
+            # On ne considère que les échéances À VENIR (≥ cycle du run) : les heures
+            # antérieures au cycle sont du passé, rebouchées par l'API depuis 00:00
+            # local (et souvent aussi servies par le run précédent). La convergence
+            # les jette de toute façon (filtre target ≥ run) ; les compter ici
+            # faisait apparaître QUASI TOUS les runs comme « complétés » par un
+            # ancien alors qu'ils sont pleins — bruit massif. On garde ensuite les
+            # échéances valides et pas déjà couvertes (priorité au plus frais).
             valid = cand.dropna(subset=[VAR])
-            valid = valid[~valid["valid_time"].isin(covered_vt)]
+            valid = valid[(valid["valid_time"] >= run_start)
+                          & (~valid["valid_time"].isin(covered_vt))]
             if valid.empty:
                 continue
             frames.append(valid)
             covered_vt.update(valid["valid_time"].unique())
             used.append(cand_run_date)
         sources[model] = used
-    # Modèles d'appoint (non principaux) : jamais backfillés, uniquement si présents au run courant.
-    current = run_slice(sig, runs.iloc[pos]["run_date"])
-    extra = current[~current["model"].isin(C.MAIN_LABELS)]
+    # Modèles d'appoint (non principaux) : jamais backfillés, uniquement si présents
+    # au run courant (mêmes échéances à venir, pour rester cohérent avec ci-dessus).
+    current = run_slice(sig, run_start)
+    extra = current[(~current["model"].isin(C.MAIN_LABELS))
+                    & (current["valid_time"] >= run_start)]
     if not extra.empty:
         frames.append(extra)
     if not frames:
@@ -1245,6 +1257,348 @@ def page_run(sig):
 
 
 # --------------------------------------------------------------------------- #
+#  Contrôle de présence des modèles — diagnostic du pipeline (Open-Meteo vs legacy)
+# --------------------------------------------------------------------------- #
+# Objectif : pendant la phase de double run (Open-Meteo + Météociel), voir d'un
+# coup d'œil QUEL modèle est présent sur CHAQUE run, JUSQU'À QUELLE échéance, et
+# avec combien de membres — des DEUX côtés — pour repérer une incohérence (modèle
+# absent, run tronqué anormalement, cycles désalignés, horizon divergent). Vue
+# purement DIAGNOSTIQUE : elle n'écrit rien et ne pilote aucune persistance —
+# l'horizon n'est comparé au nominal (`horizon_h`) que comme repère informatif,
+# jamais comme une troncature (cf. invariants CLAUDE.md).
+_CYCLES_BY_LABEL = {m["label"]: m["cycles"] for m in C.MODELS}
+_LEGACY_FILE_RE = re.compile(r"Forecast-(\d{8})-(.+)\.xlsx$", re.IGNORECASE)
+
+
+def _run_utc_naive(local_run_date):
+    """Cycle synoptique UTC (0/6/12/18Z), tz-naïf — même convention que le
+    run_date legacy parsé depuis l'en-tête Météociel, donc directement comparable."""
+    return utc_cycle(local_run_date).replace(tzinfo=None)
+
+
+def openmeteo_presence(sig):
+    """Une ligne par (run_date, modèle) présent dans le parquet Open-Meteo :
+    nb de membres, première/dernière échéance RÉELLE (valeur non-NaN), horizon
+    (lead, en heures) et cycle synoptique. `expected` = ce modèle publie-t-il à ce
+    cycle (config `cycles`) — sert à distinguer une absence anormale d'un cycle où
+    le modèle ne tourne simplement pas (ex. GEM à 6Z/18Z)."""
+    df = load_db(sig)
+    cols = ["run_date", "model", "n_members", "first_vt", "last_vt",
+            "lead_h", "run_utc", "cycle_h", "expected"]
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    v = df.dropna(subset=[VAR])
+    g = v.groupby(["run_date", "model"], as_index=False).agg(
+        n_members=("member", "nunique"),
+        first_vt=("valid_time", "min"),
+        last_vt=("valid_time", "max"))
+    g["lead_h"] = (g["last_vt"] - g["run_date"]).dt.total_seconds() / 3600
+    g["run_utc"] = g["run_date"].map(_run_utc_naive)
+    g["cycle_h"] = g["run_utc"].map(lambda t: t.hour)
+    g["expected"] = g.apply(
+        lambda r: r["cycle_h"] in _CYCLES_BY_LABEL.get(r["model"], []), axis=1)
+    return g
+
+
+def legacy_signature():
+    """Signature (nom, mtime) des xlsx legacy — invalide le cache dès qu'un fichier
+    change ou qu'un nouveau scrape apparaît."""
+    out = []
+    for f in sorted(glob.glob(os.path.join(C.LEGACY_FORECASTS_DIR, "Forecast-*.xlsx"))):
+        try:
+            out.append((os.path.basename(f), os.path.getmtime(f)))
+        except OSError:
+            continue
+    return tuple(out)
+
+
+@st.cache_data(show_spinner=False)
+def legacy_presence(_sig):
+    """Présence/horizon côté Météociel (legacy), une ligne par (fichier, modèle).
+
+    run_date = celui déclaré par Météociel dans l'en-tête du xlsx (source fiable,
+    pas la date du nom de fichier qui est la date de scrape) ; last_vt = dernière
+    échéance réellement renseignée (≥ 1 membre non-NaN) ; n_members = membres
+    d'ensemble effectivement remplis. Réutilise les helpers de
+    validate_cross_pipeline pour ne pas dupliquer le parsing legacy."""
+    cols = ["run_label", "scrape_date", "file", "model", "run_date",
+            "n_members", "last_vt", "lead_h", "n_ech"]
+    rows = []
+    for fname, _ in _sig:
+        m = _LEGACY_FILE_RE.search(fname)
+        if not m:
+            continue
+        scrape_date = pd.to_datetime(m.group(1), format="%d%m%Y", errors="coerce")
+        run_label = m.group(2)
+        path = os.path.join(C.LEGACY_FORECASTS_DIR, fname)
+        for label, sheet in C.LEGACY_MODELS.items():
+            df, _det, member_cols = V._read_legacy_sheet(path, sheet)
+            if df is None or not member_cols:
+                continue
+            run_date = V._parse_legacy_run_date(path, sheet)
+            members = df[member_cols].apply(pd.to_numeric, errors="coerce")
+            valid = df[members.notna().any(axis=1)]
+            if valid.empty:
+                continue
+            last_vt = valid["valid_time"].max()
+            lead_h = ((last_vt - run_date).total_seconds() / 3600
+                      if run_date is not None else np.nan)
+            rows.append({
+                "run_label": run_label, "scrape_date": scrape_date, "file": fname,
+                "model": label, "run_date": run_date,
+                "n_members": int(members.notna().any(axis=0).sum()),
+                "last_vt": last_vt, "lead_h": lead_h, "n_ech": len(valid)})
+    return pd.DataFrame(rows, columns=cols)
+
+
+def _cell_text(lead_days, members):
+    """Contenu d'une cellule de matrice de présence : « 13.0 j · 51 m »."""
+    if pd.isna(lead_days):
+        return ""
+    txt = f"{lead_days:.1f} j"
+    if not pd.isna(members):
+        txt += f"<br>{int(members)} m"
+    return txt
+
+
+def _presence_heatmap(mat, txt, missing, title, height):
+    """Heatmap de présence : lignes = runs (plus récent en haut), colonnes =
+    modèles, couleur = horizon en jours, texte = « horizon · membres ». Les
+    cellules attendues mais absentes (`missing`) sont marquées d'une croix rouge."""
+    fig = go.Figure(go.Heatmap(
+        z=mat.values.astype(float), x=list(mat.columns), y=list(mat.index),
+        text=txt.values, texttemplate="%{text}", textfont=dict(size=11),
+        colorscale="YlGnBu", zmin=0, zmax=16.5, xgap=3, ygap=3,
+        hoverongaps=False,
+        colorbar=dict(title="Horizon<br>(jours)", thickness=12, len=0.9),
+        hovertemplate="Run %{y}<br>Modèle %{x}<br>%{text}<extra></extra>"))
+    for i, run in enumerate(mat.index):
+        for j, model in enumerate(mat.columns):
+            if bool(missing.iloc[i, j]):
+                fig.add_annotation(x=model, y=run, text="✗", showarrow=False,
+                                   font=dict(color="#C0392B", size=16, family="Arial Black"))
+    fig.update_layout(title=title, height=height, template=_plotly_template(),
+                      xaxis=dict(side="top"), yaxis=dict(autorange="reversed"),
+                      margin=dict(t=90, l=10, r=10, b=10))
+    return fig
+
+
+def _missing_by_run(om):
+    """{run_date -> set des modèles attendus à ce cycle mais ABSENTS du run}.
+
+    Un modèle n'est « attendu » qu'à partir de sa PREMIÈRE apparition réelle dans la
+    base (min run_utc), et seulement aux cycles où il publie (config `cycles`). Cela
+    cale automatiquement l'attente sur le go-live de chaque modèle — ex. GEM n'est
+    jamais signalé « absent » avant sa première collecte (30/06) — sans date en dur."""
+    first_seen = om.groupby("model")["run_utc"].min().to_dict()
+    present_by_rd = om.groupby("run_date")["model"].agg(set)
+    out = {}
+    for rd in om["run_date"].unique():
+        ru = _run_utc_naive(rd)
+        pres = present_by_rd.get(rd, set())
+        out[rd] = {m for m in C.MODEL_LABELS
+                   if ru.hour in _CYCLES_BY_LABEL.get(m, [])
+                   and m in first_seen and ru >= first_seen[m]
+                   and m not in pres}
+    return out
+
+
+def _build_matrices(pres, run_order, models, missing_by_key):
+    """(mat, txt, missing) pour _presence_heatmap, à partir d'une table de présence
+    [run_key, model, lead_days, n_members] déjà agrégée. `missing_by_key` : run_key
+    → set des modèles attendus mais absents (marqués d'une croix rouge)."""
+    mat = pres.pivot_table(index="run_key", columns="model", values="lead_days",
+                           aggfunc="max").reindex(index=run_order, columns=models)
+    mem = pres.pivot_table(index="run_key", columns="model", values="n_members",
+                           aggfunc="max").reindex(index=run_order, columns=models)
+    txt = pd.DataFrame("", index=run_order, columns=models)
+    missing = pd.DataFrame(False, index=run_order, columns=models)
+    for r in run_order:
+        miss = missing_by_key.get(r, set())
+        for mo in models:
+            txt.loc[r, mo] = _cell_text(mat.loc[r, mo], mem.loc[r, mo])
+            if mo in miss:
+                missing.loc[r, mo] = True
+    return mat, txt, missing
+
+
+def _nearest_om_run(om, model, ref_utc, window_h=12):
+    """Ligne de présence Open-Meteo du modèle dont le cycle UTC est le plus proche
+    de `ref_utc` (run legacy), dans une fenêtre de ±window_h. None si aucun."""
+    sub = om[om["model"] == model]
+    if sub.empty:
+        return None
+    gap = sub["run_utc"].map(lambda t: abs((t - ref_utc).total_seconds()) / 3600)
+    cand = sub[gap <= window_h]
+    if cand.empty:
+        return None
+    return sub.loc[gap.idxmin()]
+
+
+def page_diagnostic(runs, sig):
+    st.title("🩺 Contrôle de présence des modèles")
+    st.caption(
+        "Vue de fiabilisation du **double run** (Open-Meteo vs legacy/Météociel) : "
+        "pour chaque run, quel modèle est présent, **jusqu'à quelle échéance** et avec "
+        "combien de membres. Une croix rouge ✗ = modèle **attendu à ce cycle** mais "
+        "absent. Objectif : repérer d'un coup d'œil les incohérences (modèle manquant, "
+        "run anormalement tronqué, cycles désalignés, horizon divergent).")
+
+    om = openmeteo_presence(sig)
+    lg_raw = legacy_presence(legacy_signature())
+
+    if om.empty and lg_raw.empty:
+        st.warning("Aucune donnée : ni parquet Open-Meteo, ni fichier legacy exploitable.")
+        return
+
+    # ── Synthèse des anomalies (Open-Meteo) ────────────────────────────────── #
+    st.subheader("⚠️ Anomalies détectées (Open-Meteo)")
+    alerts = []
+    om_missing = _missing_by_run(om) if not om.empty else {}
+    if not om.empty:
+        # Absences : à chaque run, un modèle attendu à ce cycle ET collecté à cette
+        # époque (cf. _missing_by_run) mais introuvable dans le run.
+        for run_date in sorted(om["run_date"].unique(), reverse=True):
+            attendus = sorted(om_missing.get(run_date, set()))
+            if attendus:
+                alerts.append(f"🔴 **{run_label_text(run_date)}** — modèle(s) attendu(s) "
+                              f"absent(s) : **{', '.join(attendus)}**.")
+        # Horizon quasi nul / négatif : la fenêtre réellement fraîche est vide ou
+        # avant le cycle (souvent une queue entièrement NaN-ifiée par mask_stale_tail).
+        for _, r in om[om["lead_h"] <= 24].iterrows():
+            alerts.append(f"🟠 **{run_label_text(r['run_date'])} · {r['model']}** — horizon "
+                          f"anormalement court ({r['lead_h']:.0f} h de données fraîches "
+                          "seulement). Run partiel/tronqué ou queue masquée ?")
+    if alerts:
+        st.markdown("\n\n".join(alerts))
+    else:
+        st.success("✅ Aucun modèle attendu manquant et aucun horizon anormalement court "
+                   "sur les runs Open-Meteo archivés.")
+
+    # ── Matrice Open-Meteo ─────────────────────────────────────────────────── #
+    st.markdown("---")
+    st.subheader("🛰️ Open-Meteo — présence & horizon par run")
+    st.caption(
+        "Chaque case : **horizon réel** (dernière échéance non-NaN − cycle) en jours et "
+        "**nombre de membres**. Couleur = horizon. ✗ rouge = attendu mais absent — un "
+        "modèle n'est attendu qu'à partir de sa 1re collecte réelle (GEM depuis le "
+        f"{pd.Timestamp(C.PIPELINE_LIVE_SINCE):%d/%m}, cycles 6Z/18Z de même). Avant cette "
+        "bascule, la base est rétro-remplie depuis les xlsx Météociel (migrate.py).")
+    if om.empty:
+        st.info("Base Open-Meteo vide.")
+    else:
+        om_disp = om.copy()
+        om_disp["run_key"] = om_disp["run_date"].map(run_label_text)
+        om_disp["lead_days"] = om_disp["lead_h"] / 24
+        order_df = (om_disp[["run_key", "run_date"]].drop_duplicates()
+                    .sort_values("run_date", ascending=False))
+        run_order = order_df["run_key"].tolist()
+        missing_by_key = {run_label_text(rd): om_missing.get(rd, set())
+                          for rd in om_disp["run_date"].unique()}
+        mat, txt, missing = _build_matrices(om_disp, run_order, C.MODEL_LABELS, missing_by_key)
+        st.plotly_chart(
+            _presence_heatmap(mat, txt, missing,
+                              "Open-Meteo — horizon (jours) & membres par run",
+                              height=max(320, 30 * len(run_order) + 120)),
+            width="stretch")
+
+    # ── Matrice legacy / Météociel ─────────────────────────────────────────── #
+    st.markdown("---")
+    st.subheader("📄 Legacy / Météociel — présence & horizon par run")
+    st.caption("Runs scrapés sur Météociel (0Z/12Z uniquement). run_date = celui déclaré "
+               "dans l'en-tête du xlsx ; en cas de re-scrape, seul le plus récent est retenu.")
+    if lg_raw.empty:
+        st.info("Aucun fichier legacy exploitable dans " + C.LEGACY_FORECASTS_DIR + ".")
+        lg = lg_raw
+    else:
+        # Dédup : un même (run_date, modèle) peut avoir été scrapé plusieurs jours →
+        # on garde le scrape le plus récent (le plus complet en principe).
+        lg = (lg_raw.dropna(subset=["run_date"])
+              .sort_values("scrape_date", ascending=False)
+              .drop_duplicates(subset=["run_date", "model"], keep="first"))
+        lg_disp = lg.copy()
+        lg_disp["run_key"] = lg_disp["run_date"].map(
+            lambda t: f"{t:%d %b %Y} — {t.hour:02d}Z")
+        lg_disp["lead_days"] = lg_disp["lead_h"] / 24
+        order_df = (lg_disp[["run_key", "run_date"]].drop_duplicates()
+                    .sort_values("run_date", ascending=False))
+        run_order = order_df["run_key"].tolist()
+        leg_models = list(C.LEGACY_MODELS)
+        # Météociel publie 0Z/12Z avec les 3 modèles legacy : tout modèle absent
+        # d'un fichier est une anomalie (croix rouge).
+        present_by_key = lg_disp.groupby("run_key")["model"].agg(set).to_dict()
+        missing_by_key = {rk: set(leg_models) - present_by_key.get(rk, set())
+                          for rk in run_order}
+        mat, txt, missing = _build_matrices(lg_disp, run_order, leg_models, missing_by_key)
+        st.plotly_chart(
+            _presence_heatmap(mat, txt, missing,
+                              "Météociel — horizon (jours) & membres par run",
+                              height=max(320, 30 * len(run_order) + 120)),
+            width="stretch")
+
+    # ── Confrontation Open-Meteo ↔ legacy ──────────────────────────────────── #
+    st.markdown("---")
+    st.subheader("🔀 Confrontation Open-Meteo ↔ legacy (runs alignés)")
+    live = pd.Timestamp(C.PIPELINE_LIVE_SINCE)
+    st.caption(
+        "Pour chaque run legacy, on cherche le run Open-Meteo du **même modèle** au cycle "
+        "le plus proche (±12 h) et on confronte cycle, horizon et membres. Un ⚠️ signale "
+        "une incohérence à investiguer : cycles désalignés "
+        f"(> {C.CROSS_CHECK_RUN_ALIGN_TOL_H} h), écart d'horizon > 1 j, ou run Open-Meteo "
+        f"introuvable côté modèle. Limitée aux runs **à partir du {live:%d/%m/%Y}** : avant, "
+        "la base Open-Meteo est rétro-remplie depuis les xlsx Météociel (comparaison "
+        "circulaire). Météociel ne publiant ni 6Z ni 18Z, ces cycles Open-Meteo n'ont "
+        "légitimement aucun équivalent legacy et ne sont pas confrontés.")
+    lg_live = lg[lg["run_date"] >= live] if not lg.empty else lg
+    if om.empty or lg_live.empty:
+        st.info(f"Aucun run legacy à partir du {live:%d/%m/%Y} à confronter "
+                "(ou base Open-Meteo vide).")
+    else:
+        rows = []
+        for _, lr in lg_live.iterrows():
+            ref = lr["run_date"]
+            om_row = _nearest_om_run(om, lr["model"], ref)
+            gap_h = (abs((om_row["run_utc"] - ref).total_seconds()) / 3600
+                     if om_row is not None else np.nan)
+            lead_om = om_row["lead_h"] / 24 if om_row is not None else np.nan
+            lead_lg = lr["lead_h"] / 24 if not pd.isna(lr["lead_h"]) else np.nan
+            flags = []
+            if om_row is None:
+                flags.append("OM absent")
+            else:
+                if gap_h > C.CROSS_CHECK_RUN_ALIGN_TOL_H:
+                    flags.append("cycles désalignés")
+                if not pd.isna(lead_om) and not pd.isna(lead_lg) and abs(lead_om - lead_lg) > 1:
+                    flags.append("horizon divergent")
+            rows.append({
+                "_sort": ref,
+                "Run legacy": f"{ref:%d %b} {ref.hour:02d}Z",
+                "Modèle": lr["model"],
+                "Cycle OM": (f"{om_row['run_utc']:%d %b %HZ}" if om_row is not None else "—"),
+                "Δ cycle (h)": round(gap_h, 1) if not pd.isna(gap_h) else np.nan,
+                "Horizon OM (j)": round(lead_om, 1) if not pd.isna(lead_om) else np.nan,
+                "Horizon legacy (j)": round(lead_lg, 1) if not pd.isna(lead_lg) else np.nan,
+                "Membres OM": (int(om_row["n_members"]) if om_row is not None else np.nan),
+                "Membres legacy": int(lr["n_members"]),
+                "Alerte": " · ".join(f"⚠️ {f}" for f in flags),
+            })
+        comp = (pd.DataFrame(rows).sort_values(["_sort", "Modèle"], ascending=[False, True])
+                .drop(columns="_sort"))
+        n_flag = int((comp["Alerte"] != "").sum())
+        if n_flag:
+            st.warning(f"⚠️ {n_flag} ligne(s) présentent une incohérence — voir colonne « Alerte ».")
+        else:
+            st.success("✅ Tous les runs legacy s'alignent proprement sur un run Open-Meteo "
+                       "(cycle et horizon cohérents).")
+        styler = comp.style.apply(
+            lambda r: ["background-color:#fdecea;color:#611a15" if r["Alerte"] else ""
+                       for _ in r], axis=1
+        ).format({"Δ cycle (h)": "{:.1f}", "Horizon OM (j)": "{:.1f}",
+                  "Horizon legacy (j)": "{:.1f}", "Membres OM": "{:.0f}"}, na_rep="—")
+        st.dataframe(styler, width="stretch", height=460, hide_index=True)
+
+
+# --------------------------------------------------------------------------- #
 #  Routage
 # --------------------------------------------------------------------------- #
 def main():
@@ -1253,7 +1607,7 @@ def main():
 
     st.sidebar.title("🌦️ Navigation")
     pages = ["Indicateur de canicule", "Vue d'ensemble", "Explorer un run",
-             "Convergence des runs"]
+             "Convergence des runs", "Contrôle des runs"]
     if IS_LOCAL:
         pages.append("Lancer le pipeline")
     page = st.sidebar.radio("Aller à", pages)
@@ -1289,6 +1643,8 @@ def main():
         page_explore(runs, sig)
     elif page == "Convergence des runs":
         page_convergence(runs, sig)
+    elif page == "Contrôle des runs":
+        page_diagnostic(runs, sig)
     elif page == "Lancer le pipeline" and IS_LOCAL:
         page_run(sig)
 

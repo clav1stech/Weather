@@ -1,7 +1,8 @@
 # Instructions Claude
 
-## Langue
+## Général
 - Toujours répondre en **français**, sauf si l'utilisateur demande explicitement une autre langue.
+- Développement avec Claude Code dans VSC sur PC ou Mac.
 
 ## Tenir ce fichier à jour
 - Dès que tu **détectes une règle générale** du projet (invariant, convention, contrainte, préférence récurrente de l'utilisateur, piège à éviter), **ajoute-la ici** dans la section adéquate — ne la laisse pas seulement dans un commentaire de code ou dans l'échange.
@@ -29,7 +30,7 @@ Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
 
 ### Modèles principaux vs modèles d'appoint
 - Les modèles d'appoint (`main: False`, ex. GEM) ne sont **jamais backfillés** et n'existent qu'à leurs cycles réels (`cycles` dans config). Comparaison cycle-à-cycle uniquement.
-- Le backfill inter-runs du dashboard (`completed_pooled_sub`) ne concerne que les modèles **principaux**, échéance par échéance, jusqu'à `n-3`.
+- Le backfill inter-runs du dashboard (`completed_pooled_sub`) ne concerne que les modèles **principaux**, échéance par échéance, jusqu'à `n-3`. Il ne comble QUE les échéances **à venir** (`valid_time ≥ cycle du run`) : les heures antérieures au cycle (rebouchées par l'API depuis 00:00 local, aussi servies par le run précédent) sont du passé, jetées par la convergence — les backfiller ferait apparaître à tort presque tous les runs comme « complétés » par un ancien (bruit massif en grille horaire OM).
 
 ### Robustesse NaN / horizon 16 j
 - Toutes les statistiques restent **tolérantes aux NaN** (`skipna`) : l'horizon 16 j doit s'afficher proprement même quand les membres se raréfient (~7,5 j).
@@ -41,5 +42,6 @@ Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
 - **Config-driven** : tout réglage variable (modèle, variable, seuil, climato) se déclare dans `config.py` — une ligne suffit, sans toucher la logique de parsing/stockage/affichage.
 - **Préserver la densité de commentaires** : le code est richement documenté en français (le *pourquoi*, pas seulement le *quoi*). Maintenir ce niveau, et expliquer les invariants subtils.
 - **Schéma parquet stable** : ne pas casser la compatibilité de `C.SCHEMA` (`load_db` filtre déjà les modèles legacy orphelins).
-- **Contrôle croisé legacy** : médiane-vs-médiane (pas det-vs-det), limité aux runs 0Z/12Z (cf. `validate_cross_pipeline.py`).
+- **Contrôle croisé legacy** : médiane-vs-médiane (pas det-vs-det), limité aux runs 0Z/12Z (cf. `validate_cross_pipeline.py`). **Météociel ne publie QUE 0Z/12Z** — les cycles 6Z/18Z d'Open-Meteo n'ont légitimement aucun équivalent legacy (ne jamais les traiter comme une absence anormale).
+- **Bascule pipeline (`config.PIPELINE_LIVE_SINCE`)** : avant cette date, la base Open-Meteo est **rétro-remplie depuis les xlsx Météociel** (`migrate.py`) → toute comparaison OM↔legacy y est circulaire, et GEM / les cycles 6Z-18Z n'y existent pas. Ne confronter les deux sources qu'à partir de cette date. La détection d'absence d'un modèle se cale, elle, sur sa **1re apparition réelle** dans la base (pas de date en dur par modèle).
 - **Git / fichiers** : ne pas committer sans demande explicite. `Export/`, `.venv/`, `__pycache__/` ne sont jamais versionnés.

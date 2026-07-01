@@ -31,7 +31,7 @@ import config as C
 import run_dual
 import validate_cross_pipeline as V  # helpers de lecture des xlsx legacy (Météociel)
 
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.6"
 LOCAL_TZ = ZoneInfo("Europe/Paris")
 VAR = C.PRIMARY_VAR  # variable principale affichée (t850)
 
@@ -400,6 +400,18 @@ def multimodel_cutoff(sub):
 # toujours se faire cycle identique à cycle identique — pas de « GEM 6Z » fabriqué.
 BACKFILL_MAX_LOOKBACK = 3
 
+# Tolérance (heures) sous l'horizon nominal pour qu'un run CANDIDAT au backfill
+# soit jugé valide (portée réelle = dernière échéance − SON PROPRE run_date).
+# Plus large que FULL_HORIZON_TOLERANCE_H (vues combinées) : on veut ici juste
+# écarter les runs franchement périmés (queue recollée de l'ancien cycle, cf.
+# Forecast.mask_stale_tail — portée nulle ou négative), pas exiger un horizon
+# quasi complet. Sans ce filtre, un run comme GEFS 12Z entièrement périmé
+# (aucune échéance ≥ son propre cycle) est certes ignoré comme source, mais
+# silencieusement — et la recherche saute alors un run 18Z pourtant valide
+# situé plus loin si celui-ci n'est plus dans la liste examinée.
+BACKFILL_HORIZON_TOLERANCE_H = 40
+MODEL_HORIZON_H = {m["label"]: m.get("horizon_h") for m in C.MODELS}
+
 
 def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
     """Lignes du run `pos` (index dans `runs`, trié du plus récent au plus
@@ -415,12 +427,26 @@ def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
     frames, sources = [], {}
     for model in C.MAIN_LABELS:
         used, covered_vt = [], set()
+        horizon = MODEL_HORIZON_H.get(model)
         for j in range(pos, min(pos + max_lookback + 1, n)):
             cand_run_date = runs.iloc[j]["run_date"]
             cand = run_slice(sig, cand_run_date)
             cand = cand[cand["model"] == model]
             if cand.empty:
                 continue
+            cand_valid = cand.dropna(subset=[VAR])
+            if cand_valid.empty:
+                continue
+            # Run candidat invalide (queue périmée du cycle précédent) : sa portée
+            # réelle depuis SON PROPRE run_date n'atteint pas l'horizon nominal
+            # (à BACKFILL_HORIZON_TOLERANCE_H près) → on l'écarte explicitement de
+            # la recherche, plutôt que de compter sur le fait qu'il ne recouvrira
+            # par coïncidence aucune échéance utile du run analysé.
+            if horizon is not None:
+                reach_h = ((cand_valid["valid_time"].max() - pd.Timestamp(cand_run_date))
+                           / pd.Timedelta(hours=1))
+                if reach_h < horizon - BACKFILL_HORIZON_TOLERANCE_H:
+                    continue
             # On ne considère que les échéances À VENIR (≥ cycle du run) : les heures
             # antérieures au cycle sont du passé, rebouchées par l'API depuis 00:00
             # local (et souvent aussi servies par le run précédent). La convergence
@@ -428,9 +454,8 @@ def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
             # faisait apparaître QUASI TOUS les runs comme « complétés » par un
             # ancien alors qu'ils sont pleins — bruit massif. On garde ensuite les
             # échéances valides et pas déjà couvertes (priorité au plus frais).
-            valid = cand.dropna(subset=[VAR])
-            valid = valid[(valid["valid_time"] >= run_start)
-                          & (~valid["valid_time"].isin(covered_vt))]
+            valid = cand_valid[(cand_valid["valid_time"] >= run_start)
+                                & (~cand_valid["valid_time"].isin(covered_vt))]
             if valid.empty:
                 continue
             frames.append(valid)
@@ -863,6 +888,7 @@ def page_convergence(runs, sig):
         "prévision d'une même date a évolué d'un run à l'autre** : si elle se stabilise, "
         "on peut s'y fier ; si elle bouge encore beaucoup, l'incertitude reste forte.")
 
+    runs_full = runs.reset_index(drop=True)  # historique complet, AVANT le filtre d'affichage
     runs = _convergence_runs(runs)
     if len(runs) < 2:
         st.warning("Il faut au moins 2 runs pour analyser la convergence.")
@@ -872,11 +898,15 @@ def page_convergence(runs, sig):
     # Un modèle principal absent d'un run est backfillé depuis le run antérieur le plus
     # proche qui le contient (jusqu'à n-3) : on compare ainsi des super-ensembles à
     # modèles comparables, pas « 4 modèles vs 1 ». backfill_src : {run_date -> sources}.
+    # La recherche se fait sur `runs_full` (tous les cycles, pas seulement 0Z/12Z) : le
+    # filtre d'affichage de `_convergence_runs` allège l'axe des runs tracés mais ne doit
+    # pas faire disparaître un run 6Z/18Z par ailleurs valide de la recherche de backfill.
+    full_pos = {rd: i for i, rd in enumerate(runs_full["run_date"])}
     records = []
     backfill_src = {}
     for pos in range(len(runs)):
         r = runs.iloc[pos]
-        syn, sources = completed_super_ensemble_daily(runs, pos, sig)
+        syn, sources = completed_super_ensemble_daily(runs_full, full_pos[r["run_date"]], sig)
         backfill_src[r["run_date"]] = sources
         if syn is None or syn.empty:
             continue

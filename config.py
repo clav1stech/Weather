@@ -127,6 +127,30 @@ RUN_INFER_MAX_SHIFT_H = 9  # …et à ≤ 9 h du cycle horloge : l'inférence ne
                            # corriger vers un cycle VOISIN (ex. 12Z→06Z), jamais
                            # téléporter. Au-delà (run tronqué, off-cycle court) → repli.
 
+# --- Garde-fou de persistance : ne stocker un run frais que s'il est COMPLET -- #
+# Un cycle fraîchement détecté (mask_stale_tail dit « a_du_neuf ») peut rester
+# court pour deux raisons bien distinctes, et dans les deux cas on ne veut PAS
+# le persister comme dernier run du modèle (il écraserait, dans l'usage — ex.
+# Explorer un run, qui prend le run le plus récent par modèle sans revérifier sa
+# portée —, un run PLEIN déjà en base par un run tronqué non comparable) :
+#   1. Modèle qui tourne à horizon plein 4×/j (AIFS, GEFS) : un run court au
+#      moment du poll est simplement ENCORE EN COURS DE CALCUL côté Open-Meteo ;
+#      il finira par atteindre son horizon_h nominal → on retente au poll suivant.
+#   2. Modèle dont certains cycles sont NATIVEMENT plus courts par construction
+#      (ex. ECMWF ENS à 6Z/18Z ≈ 144 h, contre 360 h à 0Z/12Z — cf.
+#      `expected_cycles` en commentaire de MODELS) : ce n'est pas un calcul en
+#      cours, ce run ne dépassera JAMAIS ~150 h — il ne sera donc simplement
+#      jamais persisté (cohérent avec la volonté de ne comparer les modèles
+#      principaux qu'à horizon plein).
+# Dans les deux cas le traitement est identique : on exige que la portée réelle
+# du run frais (dernière échéance valide − run_date) atteigne un seuil minimal
+# avant persistance ; sinon il est laissé de côté (comme un cycle inchangé :
+# l'ancien run complet reste en base).
+#   • modèle avec `horizon_h` connu (ECMWF/AIFS/GEFS) : seuil = horizon_h − tolérance ;
+#   • modèle sans `horizon_h` (ex. GEM) : seuil fixe MIN_PERSIST_HORIZON_H.
+PERSIST_HORIZON_TOLERANCE_H = 24
+MIN_PERSIST_HORIZON_H = 360  # °h — ~15 jours, portée minimale pour être comparable
+
 # --------------------------------------------------------------------------- #
 #  Climatologie & seuils (à 850 hPa)
 # --------------------------------------------------------------------------- #

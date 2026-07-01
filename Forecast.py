@@ -377,18 +377,64 @@ def mask_stale_tail(model_label, candidate, existing):
     return candidate, a_du_neuf
 
 
+_MODEL_BY_LABEL = {m["label"]: m for m in C.MODELS}
+
+
+def _persist_horizon_reach_h(group):
+    """Portée réelle (h) du run frais : dernière échéance à valeur valide −
+    run_date. None si aucune valeur valide (rien à mesurer)."""
+    valid = group.dropna(subset=C.VAR_COLS)
+    if valid.empty:
+        return None
+    run_date = group["run_date"].iloc[0]
+    return (valid["valid_time"].max() - pd.Timestamp(run_date)) / pd.Timedelta(hours=1)
+
+
+def _meets_persist_horizon(model_label, group):
+    """Le run frais de ce modèle est-il assez avancé pour être persisté ?
+
+    cf. config.PERSIST_HORIZON_TOLERANCE_H / MIN_PERSIST_HORIZON_H : deux causes
+    distinctes peuvent rendre un run frais court, dans les deux cas on ne veut PAS
+    l'écrire comme dernier run du modèle (il masquerait un run PLEIN déjà en base) :
+      1. modèle à horizon plein 4×/j (AIFS, GEFS) : run encore en cours de calcul
+         côté Open-Meteo au moment du poll → retentera de lui-même au poll suivant ;
+      2. cycle nativement plus court par construction (ex. ECMWF ENS 6Z/18Z
+         ≈ 144 h contre 360 h à 0Z/12Z) → ne dépassera JAMAIS le seuil, ce run ne
+         sera donc simplement jamais persisté (voulu : comparaison à horizon plein
+         entre modèles principaux).
+    On attend qu'il atteigne son horizon nominal (à tolérance près), ou un seuil
+    fixe si le modèle n'a pas d'horizon_h connu (ex. GEM)."""
+    reach_h = _persist_horizon_reach_h(group)
+    if reach_h is None:
+        return False
+    horizon = _MODEL_BY_LABEL.get(model_label, {}).get("horizon_h")
+    threshold = (horizon - C.PERSIST_HORIZON_TOLERANCE_H) if horizon is not None \
+        else C.MIN_PERSIST_HORIZON_H
+    return reach_h >= threshold
+
+
 def filter_fresh_rows(fresh, existing):
-    """Applique mask_stale_tail à chaque modèle ; écarte entièrement les modèles
-    sans la moindre échéance renouvelée (cf. mask_stale_tail)."""
-    kept, stale_labels = [], []
+    """Applique mask_stale_tail à chaque modèle, puis n'accepte à la persistance
+    que les modèles dont le run frais atteint une portée suffisante (cf.
+    _meets_persist_horizon) — que ce soit un calcul encore en cours (AIFS/GEFS,
+    se résout au poll suivant) ou un cycle nativement court (ECMWF 6Z/18Z, ne se
+    résoudra jamais) est laissé de côté, comme un cycle inchangé : l'ancien run
+    complet reste en base.
+
+    Écarte entièrement les modèles sans la moindre échéance renouvelée (cf.
+    mask_stale_tail), et ceux dont le run renouvelé reste trop court pour être
+    comparable aux autres modèles."""
+    kept, stale_labels, partial_labels = [], [], []
     for model_label, candidate in fresh.groupby("model"):
         masked, a_du_neuf = mask_stale_tail(model_label, candidate, existing)
-        if a_du_neuf:
+        if not a_du_neuf:
+            stale_labels.append(model_label)
+        elif _meets_persist_horizon(model_label, masked):
             kept.append(masked)
         else:
-            stale_labels.append(model_label)
+            partial_labels.append(model_label)
     out = pd.concat(kept, ignore_index=True) if kept else fresh.iloc[0:0]
-    return out, stale_labels
+    return out, stale_labels, partial_labels
 
 
 # --------------------------------------------------------------------------- #
@@ -404,6 +450,47 @@ def _validate(df):
         raise ValueError("Aucune valeur valide dans le run frais.")
 
 
+def _reach_h_by_key(df):
+    """{(modèle, run_date) → portée réelle en heures} sur les lignes à valeur
+    valide de `df` (dernière échéance valide − run_date). Clés sans la moindre
+    valeur valide absentes du dict."""
+    valid = df.dropna(subset=C.VAR_COLS)
+    if valid.empty:
+        return {}
+    last_valid = valid.groupby(["model", "run_date"])["valid_time"].max()
+    return {key: (v - key[1]) / pd.Timedelta(hours=1) for key, v in last_valid.items()}
+
+
+def _drop_regressions(fresh, existing):
+    """Dernier rempart avant écriture, indépendant de filter_fresh_rows : retire de
+    `fresh` tout (run_date, modèle) qui RÉGRESSERAIT un run déjà persisté sous ce
+    même couple (glitch API renvoyant, pour un cycle déjà en base, moins
+    d'échéances valides qu'avant — ex. réponse tronquée d'un poll). On ne compare
+    que les couples présents des DEUX côtés : un `run_date` nouveau pour ce modèle
+    n'a rien à régresser, c'est un cycle différent (cf. filter_fresh_rows pour sa
+    propre complétude)."""
+    overlap = existing[["model", "run_date"]].drop_duplicates().merge(
+        fresh[["model", "run_date"]].drop_duplicates(), on=["model", "run_date"])
+    if overlap.empty:
+        return fresh
+
+    existing_reach = _reach_h_by_key(existing)
+    fresh_reach = _reach_h_by_key(fresh)
+    regressed = [
+        (row.model, row.run_date) for row in overlap.itertuples()
+        if existing_reach.get((row.model, row.run_date), -1)
+        > fresh_reach.get((row.model, row.run_date), -1)
+    ]
+    if not regressed:
+        return fresh
+
+    labels = ", ".join(f"{m} {run_label(rd)} ({rd.date()})" for m, rd in regressed)
+    print(f"   🛡️  Run existant plus complet conservé (fresh régressif ignoré) : {labels}")
+    idx = pd.MultiIndex.from_tuples(regressed, names=["model", "run_date"])
+    keep = ~fresh.set_index(["model", "run_date"]).index.isin(idx)
+    return fresh[keep].reset_index(drop=True)
+
+
 def persist(fresh, existing=None):
     """Fusion atomique : retire, pour chaque (run_date, modèle) présent dans
     `fresh`, les lignes déjà stockées sous ce même couple, puis append. Comme
@@ -412,6 +499,10 @@ def persist(fresh, existing=None):
     Les modèles absents de `fresh` (cycle pas encore renouvelé, cf.
     filter_fresh_models) gardent leur run antérieur intact — jamais de perte
     d'historique.
+
+    Avant tout remplacement, `_drop_regressions` écarte les couples où `fresh`
+    serait MOINS complet que ce qui est déjà en base sous ce même (run_date,
+    modèle) : on ne remplace jamais un run complet par une version régressive.
 
     L'écrasement du fichier persistant n'a lieu qu'une fois le DataFrame complet
     validé et écrit dans un fichier temporaire (os.replace = remplacement atomique).
@@ -425,6 +516,9 @@ def persist(fresh, existing=None):
     if existing.empty:
         combined = fresh.copy()
     else:
+        fresh = _drop_regressions(fresh, existing)
+        if fresh.empty:
+            return existing
         fresh_keys = fresh[["run_date", "model"]].drop_duplicates()
         merged = existing.merge(fresh_keys, on=["run_date", "model"],
                                 how="left", indicator=True)
@@ -459,9 +553,13 @@ def main():
               for m in C.MODELS if m["label"] in rd_by_model.index))
 
     existing = load_existing()
-    fresh, stale = filter_fresh_rows(candidate, existing)
+    fresh, stale, partial = filter_fresh_rows(candidate, existing)
     if stale:
         print(f"   ⏸️  Cycle inchangé (run déjà en stock conservé) : {', '.join(stale)}")
+    if partial:
+        print(f"   ⏳ Cycle détecté mais trop court pour être persisté (calcul en cours "
+              f"ou cycle nativement partiel, ex. ECMWF 6Z/18Z — run complet précédent "
+              f"conservé) : {', '.join(partial)}")
     if fresh.empty:
         print("ℹ️  Aucun modèle renouvelé à ce poll — base laissée telle quelle.")
         return

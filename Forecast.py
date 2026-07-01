@@ -2,18 +2,19 @@
 """Pipeline de données météo — API d'ensembles Open-Meteo → base plate unifiée.
 
 Un seul appel HTTP couvre tous les modèles à la fois, mais chaque modèle cycle à
-son propre rythme (cf. config.MODELS `cycles`) : l'API ne publie pas l'heure
-d'initialisation réelle par modèle, donc à chaque exécution :
-  1. pour CHAQUE modèle, on estime SON cycle le plus récent (0/6/12/18Z) d'après
-     l'heure UTC et sa propre liste de cycles — ex. à un poll « 6Z », GEM (qui ne
-     cycle qu'à 0Z/12Z) est étiqueté 0Z, pas 6Z ;
-  2. interroge l'API Open-Meteo (tous les modèles / variables de config.py) ;
+son propre rythme (cf. config.MODELS `cycles`). À chaque exécution :
+  1. pour CHAQUE modèle, on interroge en parallèle la Metadata API officielle
+     d'Open-Meteo (config.META_API_URL_TPL) — ces requêtes ne sont pas comptées
+     dans le quota — afin d'obtenir le `last_run_initialisation_time` exact.
+     En cas d'indisponibilité (réseau, endpoint inconnu, JSON invalide), on replie
+     sur l'heuristique infer_run_date() (cf. §Détection du run) ;
+  2. interroge l'API ensembles (tous les modèles / variables de config.py) ;
   3. normalise le JSON en table plate « tidy »
      [run_date, model, member, valid_time, <variables...>], run_date variant donc
      d'un modèle à l'autre dans un même fetch ;
   4. ne conserve, par modèle, que les données réellement renouvelées par rapport
-     au dernier run stocké (cf. _is_fresh) — garde-fou si un modèle n'a pas encore
-     publié son cycle attendu au moment du poll ;
+     au dernier run stocké (cf. mask_stale_tail) — garde-fou si un modèle n'a pas
+     encore publié son cycle attendu au moment du poll ;
   5. fusionne dans data/database_paris.parquet sans jamais perdre l'historique
      (remplace, par (run_date, modèle), le run identique éventuel, append le run
      frais, écriture atomique).
@@ -25,6 +26,7 @@ import os
 import re
 import sys
 import datetime as dt
+import concurrent.futures
 
 import requests
 import numpy as np
@@ -105,6 +107,64 @@ def infer_run_date(model, last_valid, now_utc=None):
 
 
 # --------------------------------------------------------------------------- #
+#  Metadata API — run_date officiel par modèle
+# --------------------------------------------------------------------------- #
+def fetch_model_metadata(meta_slug):
+    """Interroge la Metadata API Open-Meteo pour un modèle donné.
+
+    Retourne un dict {run_date, availability_time, modification_time,
+    update_interval_h, temporal_resolution_h} avec des datetime UTC tz-naïfs,
+    ou None si le slug est absent, l'endpoint inaccessible, ou le JSON invalide.
+
+    Ces requêtes ne sont pas comptées dans le quota Open-Meteo (cf. doc officielle).
+    """
+    if not meta_slug:
+        return None
+    url = C.META_API_URL_TPL.format(slug=meta_slug)
+    try:
+        resp = requests.get(url, timeout=C.HTTP_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.exceptions.RequestException, ValueError):
+        return None
+
+    try:
+        init_ts = data.get("last_run_initialisation_time")
+        if init_ts is None:
+            return None
+
+        def _ts(key):
+            # fromtimestamp(tz=UTC).replace(tzinfo=None) → datetime UTC tz-naïf,
+            # cohérent avec toutes les autres datetime du pipeline.
+            v = data.get(key)
+            return (dt.datetime.fromtimestamp(v, tz=dt.timezone.utc).replace(tzinfo=None)
+                    if v is not None else None)
+
+        return {
+            "run_date":           _ts("last_run_initialisation_time"),
+            "availability_time":  _ts("last_run_availability_time"),
+            "modification_time":  _ts("last_run_modification_time"),
+            "update_interval_h":  data.get("update_interval_seconds", 0) / 3600,
+            "temporal_resolution_h": data.get("temporal_resolution_seconds", 0) / 3600,
+        }
+    except (TypeError, OSError, ValueError):
+        return None
+
+
+def _fetch_all_metadata(models):
+    """Interroge en parallèle la Metadata API pour tous les modèles.
+
+    Retourne un dict {label → meta_dict | None}. Un modèle sans meta_slug ou dont
+    l'endpoint échoue reçoit None (repli sur infer_run_date dans parse_payload).
+    """
+    def _fetch_one(model):
+        return model["label"], fetch_model_metadata(model.get("meta_slug"))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(models)) as pool:
+        return dict(pool.map(_fetch_one, models))
+
+
+# --------------------------------------------------------------------------- #
 #  Requête API
 # --------------------------------------------------------------------------- #
 def fetch_payload():
@@ -176,10 +236,11 @@ def parse_payload(payload, now_utc=None):
     """JSON Open-Meteo → DataFrame plat. Grille horaire uniforme conservée jusqu'à
     16 j ; un modèle qui s'arrête tôt laisse simplement des NaN en queue.
 
-    Chaque modèle reçoit SA propre `run_date` (cf. infer_run_date : déduit de la
-    dernière échéance publiée, repli horloge si ambigu) — un même fetch peut donc
-    mélanger des modèles étiquetés à des cycles différents (ex. GEM en 0Z pendant
-    que ECMWF/AIFS/GEFS sont en 6Z).
+    Chaque modèle reçoit SA propre `run_date` — source prioritaire : la Metadata
+    API officielle (last_run_initialisation_time, cf. _fetch_all_metadata), qui
+    donne le cycle réel sans heuristique. Repli sur infer_run_date() si l'endpoint
+    est absent ou inaccessible. Un même fetch peut donc mélanger des modèles à des
+    cycles différents (ex. GEM en 0Z pendant que ECMWF/AIFS/GEFS sont en 6Z).
 
     Aucune troncature par horizon nominal ici : l'horizon réel d'un cycle (combien
     d'échéances un modèle a effectivement recalculées) varie d'un jour à l'autre et
@@ -194,11 +255,30 @@ def parse_payload(payload, now_utc=None):
     # Heure locale renvoyée par l'API → UTC tz-naïf (comparable aux run_date).
     valid_time = pd.to_datetime(hourly["time"]) - pd.Timedelta(seconds=utc_offset)
 
+    # Récupération parallèle des métadonnées avant la boucle modèle.
+    all_meta = _fetch_all_metadata(C.MODELS)
+
     frames = []
+    source_by_model = {}   # {label → "meta" | "heuristique"} — exposé à main()
     for model in C.MODELS:
         members = _members_of(hourly, model["api"])
         last_valid = _model_last_valid(hourly, valid_time, model["api"], members)
-        model_run_date = infer_run_date(model, last_valid, now_utc)
+
+        meta = all_meta.get(model["label"])
+        if meta is not None and meta["run_date"] is not None:
+            model_run_date = meta["run_date"]
+            source_by_model[model["label"]] = "meta"
+            # Audit croisé : avertir si metadata et heuristique s'écartent
+            # significativement (bug de slug, endpoint périmé…).
+            heuristic = infer_run_date(model, last_valid, now_utc)
+            diff_h = abs((model_run_date - heuristic).total_seconds()) / 3600
+            if diff_h > C.META_HEURISTIC_DIVERGENCE_WARN_H:
+                print(f"   ⚠️  {model['label']} : metadata run_date={model_run_date} "
+                      f"diverge de {diff_h:.1f} h vs heuristique ({heuristic}) — "
+                      "vérifier le meta_slug dans config.py")
+        else:
+            model_run_date = infer_run_date(model, last_valid, now_utc)
+            source_by_model[model["label"]] = "heuristique"
 
         for member in members:
             frame = pd.DataFrame({"valid_time": valid_time})
@@ -215,7 +295,7 @@ def parse_payload(payload, now_utc=None):
             frames.append(frame)
 
     if not frames:
-        return pd.DataFrame(columns=C.SCHEMA)
+        return pd.DataFrame(columns=C.SCHEMA), source_by_model
 
     df = pd.concat(frames, ignore_index=True)
 
@@ -226,7 +306,7 @@ def parse_payload(payload, now_utc=None):
             lambda s: s.notna().any())
         df = df[non_empty.any(axis=1)].reset_index(drop=True)
 
-    return df[C.SCHEMA]
+    return df[C.SCHEMA], source_by_model
 
 
 # --------------------------------------------------------------------------- #
@@ -367,12 +447,15 @@ def main():
     print("⏳ Requête Open-Meteo…")
     payload = fetch_payload()
 
-    candidate = parse_payload(payload, now_utc)
-    # run_date réellement retenu par modèle (inférence donnée + repli horloge).
+    candidate, sources = parse_payload(payload, now_utc)
     rd_by_model = candidate.drop_duplicates("model").set_index("model")["run_date"]
+    _src_tag = {"meta": "📡", "heuristique": "~"}
     print("   Cycle retenu par modèle : " +
-          ", ".join(f"{m['label']} {run_label(rd_by_model[m['label']])}"
-                    for m in C.MODELS if m["label"] in rd_by_model.index))
+          ", ".join(
+              f"{m['label']} {run_label(rd_by_model[m['label']])} "
+              f"({_src_tag.get(sources.get(m['label'], ''), '?')} "
+              f"{sources.get(m['label'], '?')})"
+              for m in C.MODELS if m["label"] in rd_by_model.index))
 
     existing = load_existing()
     fresh, stale = filter_fresh_rows(candidate, existing)

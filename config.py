@@ -17,7 +17,13 @@ LONGITUDE = 2.33
 TIMEZONE = "auto"              # l'API renvoie l'heure locale + utc_offset_seconds
 FORECAST_DAYS = 16             # horizon (résolution horaire native)
 API_URL = "https://ensemble-api.open-meteo.com/v1/ensemble"
+# Metadata API : renvoie last_run_initialisation_time exact par modèle,
+# sans quota. Slug différent du paramètre `api` (cf. champ meta_slug de MODELS).
+META_API_URL_TPL = "https://api.open-meteo.com/data/{slug}/static/meta.json"
 HTTP_TIMEOUT = 60              # secondes
+# Seuil d'audit : si metadata et heuristique divergent de plus de N heures,
+# un avertissement est loggé (le pipeline n'est pas bloqué pour autant).
+META_HEURISTIC_DIVERGENCE_WARN_H = 6
 
 # Décalage entre l'heure synoptique d'un run (0/6/12/18Z) et le moment où il est
 # publié/exploitable. Le workflow tourne à 04:15/10:15/16:15/22:15 UTC pour
@@ -27,16 +33,20 @@ PUBLICATION_LAG_HOURS = 4
 # --------------------------------------------------------------------------- #
 #  Modèles d'ensemble
 # --------------------------------------------------------------------------- #
-# api    : identifiant Open-Meteo (paramètre `models`)
-# label  : nom court affiché / stocké dans la colonne `model`
-# main   : modèle « principal » attendu à chaque run (sert au contrôle de
-#          divergence inter-modèles). Mettre False pour un modèle d'appoint.
-# color  : couleur d'affichage (dashboard)
-# cycles : heures UTC où le modèle publie RÉELLEMENT un run (fait connu, propre
-#          à chaque modèle — pas une heuristique). Ex. GEM ne tourne qu'à
-#          0Z/12Z ; à 6Z/18Z son « run » n'existe pas.
-# desc   : description courte affichée dans le dashboard (page « Indicateur de
-#          canicule » → expander explicatif).
+# api       : identifiant Open-Meteo (paramètre `models`)
+# label     : nom court affiché / stocké dans la colonne `model`
+# main      : modèle « principal » attendu à chaque run (sert au contrôle de
+#             divergence inter-modèles). Mettre False pour un modèle d'appoint.
+# color     : couleur d'affichage (dashboard)
+# cycles    : heures UTC où le modèle publie RÉELLEMENT un run (fait connu, propre
+#             à chaque modèle — pas une heuristique). Ex. GEM ne tourne qu'à
+#             0Z/12Z ; à 6Z/18Z son « run » n'existe pas.
+# meta_slug : slug de la Metadata API (GET META_API_URL_TPL.format(slug=…)), qui
+#             renvoie last_run_initialisation_time exact — peut différer du param
+#             `api` (ex. ncep_gefs_seamless → ncep_gefs025). None = pas d'endpoint
+#             connu ; le pipeline replie sur l'heuristique infer_run_date.
+# desc      : description courte affichée dans le dashboard (page « Indicateur de
+#             canicule » → expander explicatif).
 # horizon_h (OPTIONNEL) : horizon nominal du cycle PRINCIPAL (0Z/12Z), en heures.
 #          Sert UNIQUEMENT à désambiguïser l'étiquette de run à partir de la
 #          dernière échéance publiée (cf. Forecast.infer_run_date) — ce n'est PAS
@@ -52,18 +62,18 @@ PUBLICATION_LAG_HOURS = 4
 # ne fige rien, il ne fait que lever l'ambiguïté 06Z-servi-comme-12Z.
 MODELS = [
     {"api": "ecmwf_ifs025_ensemble",   "label": "ECMWF", "main": True,  "color": "#1F618D",
-     "cycles": [0, 6, 12, 18], "horizon_h": 360,
+     "cycles": [0, 6, 12, 18], "horizon_h": 360, "meta_slug": "ecmwf_ifs025",
      "desc": "modèle *physique* du Centre européen (Reading, Royaume-Uni), référence "
              "mondiale de la prévision à moyenne échéance"},
     {"api": "ecmwf_aifs025_ensemble",  "label": "AIFS",  "main": True,  "color": "#1E8449",
-     "cycles": [0, 6, 12, 18], "horizon_h": 360,
+     "cycles": [0, 6, 12, 18], "horizon_h": 360, "meta_slug": "ecmwf_aifs025_ensemble",
      "desc": "le modèle d'**intelligence artificielle** du même Centre européen, récent, "
              "très rapide et désormais très performant"},
     {"api": "ncep_gefs_seamless",      "label": "GEFS",  "main": True,  "color": "#B9770E",
-     "cycles": [0, 6, 12, 18], "horizon_h": 384,
+     "cycles": [0, 6, 12, 18], "horizon_h": 384, "meta_slug": "ncep_gefs025",
      "desc": "l'ensemble américain de la **NOAA** (États-Unis)"},
     {"api": "gem_global_ensemble",     "label": "GEM",   "main": False, "color": "#16A085",
-     "cycles": [0, 12],
+     "cycles": [0, 12], "meta_slug": None,
      "desc": "l'ensemble canadien d'**Environnement Canada** (ECCC)"},
 ]
 

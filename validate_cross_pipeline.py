@@ -29,6 +29,31 @@ import pandas as pd
 import config as C
 
 
+# Regex pour extraire le run_date dans la ligne d'info du xlsx Météociel.
+# Ex : 'Informations : Run ECMWF-ENS du 01/07/2026 00Z'
+_LEGACY_RUN_DATE_RE = re.compile(r"du\s+(\d{2}/\d{2}/\d{4})\s+(\d{1,2})Z", re.IGNORECASE)
+
+
+def _parse_legacy_run_date(path, sheet):
+    """Run_date déclaré par Météociel dans l'en-tête du xlsx (row 1), datetime
+    UTC tz-naïf. Retourne None si la ligne est absente ou illisible.
+
+    C'est LA source fiable pour savoir quel run le xlsx représente ; la date dans
+    le nom de fichier est la date de scrape, pas le run_date."""
+    try:
+        cell = pd.read_excel(path, sheet_name=sheet, header=None, nrows=2).iloc[1, 0]
+    except Exception:
+        return None
+    m = _LEGACY_RUN_DATE_RE.search(str(cell))
+    if not m:
+        return None
+    try:
+        base = dt.datetime.strptime(m.group(1), "%d/%m/%Y")
+        return base.replace(hour=int(m.group(2)))
+    except ValueError:
+        return None
+
+
 def _latest_legacy_file(run_label):
     """Fichier legacy le plus récent pour ce run (DDMMYYYY le plus grand)."""
     pattern = os.path.join(C.LEGACY_FORECASTS_DIR, f"Forecast-*-{run_label}.xlsx")
@@ -118,6 +143,22 @@ def _openmeteo_metric(db, model_label, run_date, strategy):
     return agg.drop(columns="_n").reset_index()
 
 
+def _nearest_run_date(db, model_label, reference, window_h=24):
+    """run_date effectif le plus récent pour ce modèle dans la base, à ±window_h
+    de `reference`. Renvoie None si le modèle est absent ou hors fenêtre.
+
+    Nécessaire car chaque modèle a son propre cycle synoptique (AIFS peut être
+    06Z, GEFS 18Z…) alors que le run_label '0Z'/'12Z' est une convention legacy."""
+    sub = db[db["model"] == model_label]
+    if sub.empty:
+        return None
+    candidates = [
+        r for r in sub["run_date"].unique()
+        if abs((pd.Timestamp(r) - pd.Timestamp(reference)).total_seconds()) <= window_h * 3600
+    ]
+    return max(candidates) if candidates else None
+
+
 def cross_check(run_label, now_utc=None):
     """Compare, pour le run `run_label` ('0Z' ou '12Z') du jour courant, la
     métrique Open-Meteo à son équivalent legacy pour ECMWF/AIFS/GEFS sur les
@@ -128,7 +169,7 @@ def cross_check(run_label, now_utc=None):
     parquet absent, ou aucune échéance commune)."""
     now_utc = now_utc or dt.datetime.now(dt.timezone.utc)
     cycle_hour = 0 if run_label == "0Z" else 12
-    run_date = dt.datetime(now_utc.year, now_utc.month, now_utc.day, cycle_hour)
+    reference_date = dt.datetime(now_utc.year, now_utc.month, now_utc.day, cycle_hour)
 
     legacy_file = _latest_legacy_file(run_label)
     if legacy_file is None:
@@ -146,6 +187,28 @@ def cross_check(run_label, now_utc=None):
         legacy = _legacy_metric(legacy_file, sheet, strategy)
         if legacy.empty:
             continue
+
+        # Référence prioritaire : run_date déclaré par Météociel dans le xlsx.
+        # Repli sur la date calendaire si l'en-tête est illisible.
+        legacy_run_date = _parse_legacy_run_date(legacy_file, sheet)
+        reference = legacy_run_date if legacy_run_date is not None else reference_date
+        if legacy_run_date is None:
+            print(f"   ⚠️  {model_label} : run_date Météociel illisible dans {os.path.basename(legacy_file)}, "
+                  "repli sur date calendaire.")
+
+        run_date = _nearest_run_date(db, model_label, reference)
+        if run_date is None:
+            print(f"   ℹ️  {model_label} : aucun run dans la base à ±24h de {reference:%Y-%m-%d %HZ}, ignoré.")
+            continue
+
+        # Audit d'alignement : si le parquet et le xlsx ne pointent pas sur le
+        # même cycle, le contrôle croisé serait trompeur.
+        if legacy_run_date is not None:
+            gap_h = abs((pd.Timestamp(run_date) - pd.Timestamp(legacy_run_date)).total_seconds()) / 3600
+            if gap_h > C.META_HEURISTIC_DIVERGENCE_WARN_H:
+                print(f"   ⚠️  {model_label} : run xlsx={legacy_run_date:%Y-%m-%d %HZ} "
+                      f"≠ run parquet={pd.Timestamp(run_date):%Y-%m-%d %HZ} "
+                      f"(écart {gap_h:.0f} h) — résultats potentiellement non comparables.")
         om = _openmeteo_metric(db, model_label, run_date, strategy)
         if om.empty:
             continue

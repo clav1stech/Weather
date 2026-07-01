@@ -24,8 +24,19 @@ LEGACY_SLOT_BY_CRON_HOUR = {10: "0Z", 22: "12Z"}
 CRON_HOURS = (4, 10, 16, 22)
 
 
-def _nearest_cron_hour(now_utc):
-    return min(CRON_HOURS, key=lambda h: min(abs(now_utc.hour - h), 24 - abs(now_utc.hour - h)))
+def _nearest_cron_hour(now_utc, max_dist_h=1.5):
+    """Créneau cron le plus proche, ou None si l'écart dépasse max_dist_h.
+
+    Utilise les minutes pour éviter qu'un run à 08h21 UTC (10h21 Paris) soit
+    rattaché au créneau 10h UTC (écart réel = 1h39, inférieur à 2h entières)."""
+    frac_h = now_utc.hour + now_utc.minute / 60
+
+    def dist(h):
+        d = abs(frac_h - h)
+        return min(d, 24 - d)
+
+    best = min(CRON_HOURS, key=dist)
+    return best if dist(best) <= max_dist_h else None
 
 
 def _run_legacy_scrape(run_label):

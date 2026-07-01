@@ -45,6 +45,8 @@ PUBLICATION_LAG_HOURS = 4
 #             renvoie last_run_initialisation_time exact — peut différer du param
 #             `api` (ex. ncep_gefs_seamless → ncep_gefs025). None = pas d'endpoint
 #             connu ; le pipeline replie sur l'heuristique infer_run_date.
+# meta_base_url : domaine de base pour la Metadata API si différent de
+#             META_API_URL_TPL (ex. ensemble-api.open-meteo.com pour GEM/GEPS).
 # desc      : description courte affichée dans le dashboard (page « Indicateur de
 #             canicule » → expander explicatif).
 # horizon_h (OPTIONNEL) : horizon nominal du cycle PRINCIPAL (0Z/12Z), en heures.
@@ -73,7 +75,8 @@ MODELS = [
      "cycles": [0, 6, 12, 18], "horizon_h": 384, "meta_slug": "ncep_gefs025",
      "desc": "l'ensemble américain de la **NOAA** (États-Unis)"},
     {"api": "gem_global_ensemble",     "label": "GEM",   "main": False, "color": "#16A085",
-     "cycles": [0, 12], "meta_slug": None,
+     "cycles": [0, 12], "meta_slug": "cmc_gem_geps",
+     "meta_base_url": "https://ensemble-api.open-meteo.com/data/{slug}/static/meta.json",
      "desc": "l'ensemble canadien d'**Environnement Canada** (ECCC)"},
 ]
 
@@ -152,6 +155,10 @@ CROSS_CHECK_TOLERANCE_CAP_C = 3.0      # °C — plafond (au-delà = vraie anoma
 # Comparaison de médianes : exiger un minimum de membres valides des DEUX côtés,
 # sinon la médiane n'est pas représentative (ex. queue AIFS NaN-ifiée, 1-2 membres).
 CROSS_CHECK_MIN_MEMBERS = 5
+# Tolérance d'alignement run : si le run_date Météociel (xlsx) et le run_date
+# Open-Meteo (parquet) diffèrent de plus de N heures, les deux sources ne
+# représentent pas le même cycle — le modèle est ignoré dans ce contrôle.
+CROSS_CHECK_RUN_ALIGN_TOL_H = 3
 CROSS_CHECK_LOG_PATH = os.path.join(DATA_DIR, "cross_check_log.csv")
 LEGACY_MODELS = {"ECMWF": "ECMWF", "AIFS": "AIFS", "GEFS": "GEFS"}  # label -> feuille xlsx
 LEGACY_DET_NAMES = {"DET", "GFS"}  # nom de la colonne contrôle selon le modèle

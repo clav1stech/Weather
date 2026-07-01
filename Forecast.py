@@ -109,7 +109,7 @@ def infer_run_date(model, last_valid, now_utc=None):
 # --------------------------------------------------------------------------- #
 #  Metadata API — run_date officiel par modèle
 # --------------------------------------------------------------------------- #
-def fetch_model_metadata(meta_slug):
+def fetch_model_metadata(meta_slug, url_tpl=None):
     """Interroge la Metadata API Open-Meteo pour un modèle donné.
 
     Retourne un dict {run_date, availability_time, modification_time,
@@ -120,7 +120,7 @@ def fetch_model_metadata(meta_slug):
     """
     if not meta_slug:
         return None
-    url = C.META_API_URL_TPL.format(slug=meta_slug)
+    url = (url_tpl or C.META_API_URL_TPL).format(slug=meta_slug)
     try:
         resp = requests.get(url, timeout=C.HTTP_TIMEOUT)
         resp.raise_for_status()
@@ -158,7 +158,8 @@ def _fetch_all_metadata(models):
     l'endpoint échoue reçoit None (repli sur infer_run_date dans parse_payload).
     """
     def _fetch_one(model):
-        return model["label"], fetch_model_metadata(model.get("meta_slug"))
+        url_tpl = model.get("meta_base_url") or C.META_API_URL_TPL
+        return model["label"], fetch_model_metadata(model.get("meta_slug"), url_tpl)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(models)) as pool:
         return dict(pool.map(_fetch_one, models))

@@ -201,14 +201,16 @@ def cross_check(run_label, now_utc=None):
             print(f"   ℹ️  {model_label} : aucun run dans la base à ±24h de {reference:%Y-%m-%d %HZ}, ignoré.")
             continue
 
-        # Audit d'alignement : si le parquet et le xlsx ne pointent pas sur le
-        # même cycle, le contrôle croisé serait trompeur.
+        # Alignement obligatoire : si les deux sources représentent des cycles
+        # différents (écart > CROSS_CHECK_RUN_ALIGN_TOL_H), la comparaison
+        # serait trompeuse — on skippe plutôt que de polluer le log.
         if legacy_run_date is not None:
             gap_h = abs((pd.Timestamp(run_date) - pd.Timestamp(legacy_run_date)).total_seconds()) / 3600
-            if gap_h > C.META_HEURISTIC_DIVERGENCE_WARN_H:
-                print(f"   ⚠️  {model_label} : run xlsx={legacy_run_date:%Y-%m-%d %HZ} "
+            if gap_h > C.CROSS_CHECK_RUN_ALIGN_TOL_H:
+                print(f"   ⏭️  {model_label} ignoré : run xlsx={legacy_run_date:%Y-%m-%d %HZ} "
                       f"≠ run parquet={pd.Timestamp(run_date):%Y-%m-%d %HZ} "
-                      f"(écart {gap_h:.0f} h) — résultats potentiellement non comparables.")
+                      f"(écart {gap_h:.0f} h > {C.CROSS_CHECK_RUN_ALIGN_TOL_H} h — runs différents).")
+                continue
         om = _openmeteo_metric(db, model_label, run_date, strategy)
         if om.empty:
             continue

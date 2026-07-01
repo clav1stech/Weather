@@ -1,83 +1,107 @@
-name: Run Forecast
+name: Data Pipeline Weather
 
 on:
   schedule:
-    - cron: '0 10 * * *'
-    - cron: '0 22 * * *'
+    # Open-Meteo (API, source principale) : toutes les 2h.
+    - cron: '15 */2 * * *'
+    # Météociel (legacy, sauvegarde + comparaison) : seulement à ses cycles réels
+    # 0Z/12Z, publiés en intégralité avec retard (~midi / minuit heure de Paris).
+    - cron: '15 10 * * *'   # 0Z
+    - cron: '15 22 * * *'   # 12Z
   workflow_dispatch:
     inputs:
-      run_choice:
-        description: 'Run (0Z ou 12Z)'
-        required: true
-        default: '12Z'
+      target:
+        description: "Job(s) à lancer"
         type: choice
-        options:
-          - '0Z'
-          - '12Z'
+        options: [both, api, legacy]
+        default: both
+      legacy_run:
+        description: "Cycle Météociel (si target=legacy ou both)"
+        type: choice
+        options: ['0Z', '12Z']
+        default: '0Z'
 
 jobs:
-  forecast:
+  fetch-api:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.target == 'both' || github.event.inputs.target == 'api')
+      || github.event.schedule == '15 */2 * * *'
     runs-on: ubuntu-latest
-
+    concurrency:
+      group: weather-data-push
+      cancel-in-progress: false
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install requests pandas numpy beautifulsoup4 openpyxl
+      - name: Install Dependencies
+        run: pip install requests pandas pyarrow
 
-      - name: Determine run argument
-        id: run_arg
+      - name: Fetch Open-Meteo (API)
+        run: python Forecast.py
+
+      - name: Commit and Push Database
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "arg=${{ github.event.inputs.run_choice }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.schedule }}" = "0 10 * * *" ]; then
-            echo "arg=0Z" >> $GITHUB_OUTPUT
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          shopt -s nullglob
+          git add data/*.parquet
+          git diff-index --quiet HEAD || git commit -m "Pipeline: base Open-Meteo synchronisée"
+          git push
+
+  scrape-legacy:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.target == 'both' || github.event.inputs.target == 'legacy')
+      || github.event.schedule == '15 10 * * *'
+      || github.event.schedule == '15 22 * * *'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: weather-data-push
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests pandas pyarrow beautifulsoup4 openpyxl
+
+      - name: Resolve run label
+        id: run_label
+        run: |
+          if [ "${{ github.event.schedule }}" = "15 10 * * *" ]; then
+            LABEL="0Z"
+          elif [ "${{ github.event.schedule }}" = "15 22 * * *" ]; then
+            LABEL="12Z"
           else
-            echo "arg=12Z" >> $GITHUB_OUTPUT
+            LABEL="${{ github.event.inputs.legacy_run }}"
           fi
+          echo "label=$LABEL" >> "$GITHUB_OUTPUT"
 
-      - name: Run Forecast.py
-        run: python Forecast.py ${{ steps.run_arg.outputs.arg }}
+      - name: Scrape Météociel (legacy)
+        run: python Forecast_legacy.py ${{ steps.run_label.outputs.label }}
 
-      - name: Vérifier complétude du run
+      - name: Cross-check legacy vs Open-Meteo
+        run: python validate_cross_pipeline.py ${{ steps.run_label.outputs.label }}
+
+      - name: Commit and Push Legacy Data
         run: |
-          python - <<'EOF'
-          import glob, os, time
-          from openpyxl import load_workbook
-          now = time.time()
-          # Surveille tous les fichiers écrits dans l'heure (run principal + éventuel rattrapage)
-          recent = [f for f in glob.glob("Forecasts/*.xlsx") if now - os.path.getmtime(f) < 3600]
-          if not recent:
-              print("::warning::Aucun fichier xlsx écrit durant ce run")
-          else:
-              incomplets = []
-              for f in recent:
-                  wb = load_workbook(f, read_only=True)
-                  models = [s for s in wb.sheetnames if s in ("ECMWF", "AIFS", "GEFS")]
-                  wb.close()
-                  if len(models) < 3:
-                      missing = [m for m in ("ECMWF", "AIFS", "GEFS") if m not in models]
-                      incomplets.append(f"{os.path.basename(f)}: {len(models)}/3 (manque {', '.join(missing)})")
-                  else:
-                      print(f"Complet 3/3 — {os.path.basename(f)}")
-              if incomplets:
-                  print("::warning::" + " | ".join(incomplets))
-          EOF
-
-      - name: Commit and push results
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "action@github.com"
-          git add Forecasts/*.xlsx
-          if ! git diff --cached --quiet; then
-            git commit -m "MAJ auto données météo"
-            git push
-          else
-            echo "Aucune modification à committer."
-          fi
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          shopt -s nullglob
+          git add Forecasts/*.xlsx data/*.csv
+          git diff-index --quiet HEAD || git commit -m "Pipeline: scrape legacy + contrôle croisé (${{ steps.run_label.outputs.label }})"
+          git push

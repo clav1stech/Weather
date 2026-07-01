@@ -382,14 +382,32 @@ def mask_stale_tail(model_label, candidate, existing):
 _MODEL_BY_LABEL = {m["label"]: m for m in C.MODELS}
 
 
+def _contiguous_reach_h(run_date, valid_times):
+    """Portée réelle CONTIGUË (h) : dernière échéance valide atteignable depuis
+    `run_date` sans trou > PERSIST_MAX_GAP_H entre échéances valides successives
+    (run_date compris comme point de départ). Les échéances antérieures au cycle
+    (passé rebouché par l'API depuis 00:00 local, partagé avec l'ancien cycle)
+    sont ignorées : elles ne disent rien de la fraîcheur du run.
+
+    Sans cette contiguïté, une réponse creuse de l'API — un point parasite isolé
+    en queue au-dessus d'un désert de NaN — simulerait une portée pleine, et le
+    run fantôme passerait le seuil de persistance PUIS bloquerait le vrai run
+    via la garde anti-régression (cf. config.PERSIST_MAX_GAP_H)."""
+    hours = np.sort(((valid_times[valid_times >= run_date] - run_date)
+                     / pd.Timedelta(hours=1)).unique())
+    hours = np.concatenate(([0.0], hours))
+    breaks = np.flatnonzero(np.diff(hours) > C.PERSIST_MAX_GAP_H)
+    return hours[breaks[0]] if breaks.size else hours[-1]
+
+
 def _persist_horizon_reach_h(group):
-    """Portée réelle (h) du run frais : dernière échéance à valeur valide −
-    run_date. None si aucune valeur valide (rien à mesurer)."""
+    """Portée réelle contiguë (h) du run frais (cf. _contiguous_reach_h).
+    None si aucune valeur valide (rien à mesurer)."""
     valid = group.dropna(subset=C.VAR_COLS)
     if valid.empty:
         return None
-    run_date = group["run_date"].iloc[0]
-    return (valid["valid_time"].max() - pd.Timestamp(run_date)) / pd.Timedelta(hours=1)
+    run_date = pd.Timestamp(group["run_date"].iloc[0])
+    return _contiguous_reach_h(run_date, valid["valid_time"])
 
 
 def _meets_persist_horizon(model_label, group):
@@ -404,6 +422,10 @@ def _meets_persist_horizon(model_label, group):
          ≈ 144 h contre 360 h à 0Z/12Z) → ne dépassera JAMAIS le seuil, ce run ne
          sera donc simplement jamais persisté (voulu : comparaison à horizon plein
          entre modèles principaux).
+    Troisième cas couvert par la même mesure : une réponse CREUSE de l'API
+    (désert de NaN percé de quelques points isolés) — la portée étant contiguë
+    (cf. _contiguous_reach_h), un point parasite en queue ne la gonfle pas et le
+    run fantôme reste sous le seuil.
     On attend qu'il atteigne son horizon nominal (à tolérance près), ou un seuil
     fixe si le modèle n'a pas d'horizon_h connu (ex. GEM)."""
     reach_h = _persist_horizon_reach_h(group)
@@ -453,14 +475,15 @@ def _validate(df):
 
 
 def _reach_h_by_key(df):
-    """{(modèle, run_date) → portée réelle en heures} sur les lignes à valeur
-    valide de `df` (dernière échéance valide − run_date). Clés sans la moindre
-    valeur valide absentes du dict."""
+    """{(modèle, run_date) → portée réelle CONTIGUË en heures} sur les lignes à
+    valeur valide de `df` (cf. _contiguous_reach_h — même métrique que le filtre
+    de persistance : un run creux déjà en base ne peut donc pas surclasser un
+    run frais sain). Clés sans la moindre valeur valide absentes du dict."""
     valid = df.dropna(subset=C.VAR_COLS)
     if valid.empty:
         return {}
-    last_valid = valid.groupby(["model", "run_date"])["valid_time"].max()
-    return {key: (v - key[1]) / pd.Timedelta(hours=1) for key, v in last_valid.items()}
+    return {key: _contiguous_reach_h(key[1], g["valid_time"])
+            for key, g in valid.groupby(["model", "run_date"])}
 
 
 def _drop_regressions(fresh, existing):
@@ -559,9 +582,9 @@ def main():
     if stale:
         print(f"   ⏸️  Cycle inchangé (run déjà en stock conservé) : {', '.join(stale)}")
     if partial:
-        print(f"   ⏳ Cycle détecté mais trop court pour être persisté (calcul en cours "
-              f"ou cycle nativement partiel, ex. ECMWF 6Z/18Z — run complet précédent "
-              f"conservé) : {', '.join(partial)}")
+        print(f"   ⏳ Cycle détecté mais portée contiguë trop courte pour être persisté "
+              f"(calcul en cours, cycle nativement partiel — ex. ECMWF 6Z/18Z — ou "
+              f"réponse creuse ; run complet précédent conservé) : {', '.join(partial)}")
     if fresh.empty:
         print("ℹ️  Aucun modèle renouvelé à ce poll — base laissée telle quelle.")
         return

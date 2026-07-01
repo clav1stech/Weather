@@ -156,6 +156,17 @@ RUN_INFER_MAX_SHIFT_H = 9  # …et à ≤ 9 h du cycle horloge : l'inférence ne
 PERSIST_HORIZON_TOLERANCE_H = 24
 MIN_PERSIST_HORIZON_H = 360  # °h — ~15 jours, portée minimale pour être comparable
 
+# La portée réelle se mesure sur la CHAÎNE CONTIGUË d'échéances valides depuis
+# run_date : tout trou entre deux échéances valides successives (ou entre
+# run_date et la première) supérieur à ce seuil termine la chaîne. Sans cela,
+# une réponse creuse de l'API (quelques heures rebouchées en tête + un point
+# parasite isolé en queue) simule une portée pleine : elle passerait le seuil de
+# persistance ET, une fois en base, bloquerait le vrai run via la garde
+# anti-régression (sa « portée » naïve dépassant celle du run sain). Le pas de
+# temps natif le plus lâche observé est 6 h (AIFS en fin d'horizon) : 24 h laisse
+# une marge large sans jamais enjamber un trou d'une journée.
+PERSIST_MAX_GAP_H = 24
+
 # --------------------------------------------------------------------------- #
 #  Climatologie & seuils (à 850 hPa)
 # --------------------------------------------------------------------------- #

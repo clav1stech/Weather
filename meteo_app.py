@@ -28,7 +28,7 @@ from plotly.subplots import make_subplots
 import config as C
 import run_dual
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 LOCAL_TZ = ZoneInfo("Europe/Paris")
 VAR = C.PRIMARY_VAR  # variable principale affichée (t850)
 

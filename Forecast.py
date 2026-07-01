@@ -117,8 +117,18 @@ def fetch_payload():
         "timezone": C.TIMEZONE,
         "forecast_days": C.FORECAST_DAYS,
     }
-    resp = requests.get(C.API_URL, params=params, timeout=C.HTTP_TIMEOUT)
-    resp.raise_for_status()
+    try:
+        resp = requests.get(C.API_URL, params=params, timeout=C.HTTP_TIMEOUT)
+        resp.raise_for_status()
+    except requests.exceptions.Timeout:
+        raise SystemExit(
+            f"❌ Timeout Open-Meteo après {C.HTTP_TIMEOUT} s — "
+            "l'API est lente ou injoignable. Relancer dans quelques minutes."
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise SystemExit(f"❌ Erreur réseau Open-Meteo : {exc}")
+    except requests.exceptions.HTTPError as exc:
+        raise SystemExit(f"❌ Erreur HTTP Open-Meteo {exc.response.status_code} : {exc}")
     return resp.json()
 
 

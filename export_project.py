@@ -7,8 +7,17 @@ from datetime import datetime
 project_dir = pathlib.Path(__file__).parent
 export_dir = project_dir / "Export"
 ENABLE_ZIP_EXPORT = False
-VERSION_X = 2
-VERSION_Y = 0
+
+# Extraire la version depuis meteo_app.py
+def _get_app_version():
+    meteo_app = project_dir / "meteo_app.py"
+    with open(meteo_app, "r", encoding="utf-8") as f:
+        match = re.search(r'APP_VERSION\s*=\s*"(\d+)\.(\d+)\.(\d+)"', f.read())
+        if match:
+            return int(match.group(1)), int(match.group(2)), int(match.group(3))
+        return 2, 0, 0
+
+VERSION_X, VERSION_Y, _ = _get_app_version()
 
 # Dossiers ignorés (noms de dossier, appliqués à tous les niveaux)
 EXCLUDED_DIRS = {

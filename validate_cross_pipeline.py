@@ -2,13 +2,15 @@
 """Contrôle croisé : compare une métrique Open-Meteo à son équivalent scrapé sur
 Météociel (legacy), échéance par échéance, pour ECMWF/AIFS/GEFS.
 
-Limité aux runs 0Z/12Z — les seuls publiés en intégralité par Météociel, et les
-seuls que le legacy scraper sait produire proprement. N'exécute aucun
-fetch/scrape lui-même : consomme les sorties déjà produites par Forecast.py
-(parquet) et Forecast_legacy.py (xlsx) pour le run demandé. Invocable en CLI
-(`python validate_cross_pipeline.py 0Z|12Z`) — le workflow GitHub Actions
-l'appelle juste après le scrape legacy, seule méthode dont la publication du
-run 0Z/12Z arrive structurellement en dernier (cf. Forecast_legacy.py).
+Runs 0Z/12Z : cadence automatique, les 3 modèles. Runs 6Z/18Z : déclenchés
+manuellement (workflow_dispatch), AIFS/GEFS seulement — ECMWF ENS n'y est pas
+scrapé (cf. Forecast_legacy.py) donc simplement absent du rapport pour ces
+cycles. N'exécute aucun fetch/scrape lui-même : consomme les sorties déjà
+produites par Forecast.py (parquet) et Forecast_legacy.py (xlsx) pour le run
+demandé. Invocable en CLI (`python validate_cross_pipeline.py 0Z|6Z|12Z|18Z`)
+— le workflow GitHub Actions l'appelle juste après le scrape legacy, seule
+méthode dont la publication du run arrive structurellement en dernier (cf.
+Forecast_legacy.py).
 
 Comparaison médiane-vs-médiane pour TOUS les modèles (cf.
 config.LEGACY_COMPARE_STRATEGY) : la colonne « DET »/« GFS » scrapée sur
@@ -162,7 +164,7 @@ def _nearest_run_date(db, model_label, reference, window_h=24):
 
 
 def cross_check(run_label, now_utc=None):
-    """Compare, pour le run `run_label` ('0Z' ou '12Z') du jour courant, la
+    """Compare, pour le run `run_label` ('0Z'/'6Z'/'12Z'/'18Z') du jour courant, la
     métrique Open-Meteo à son équivalent legacy pour ECMWF/AIFS/GEFS sur les
     échéances communes (cf. config.LEGACY_COMPARE_STRATEGY). Ajoute le résultat
     à C.CROSS_CHECK_LOG_PATH (append).
@@ -170,7 +172,7 @@ def cross_check(run_label, now_utc=None):
     Renvoie le DataFrame du rapport (vide si rien à comparer — fichier legacy ou
     parquet absent, ou aucune échéance commune)."""
     now_utc = now_utc or dt.datetime.now(dt.timezone.utc)
-    cycle_hour = 0 if run_label == "0Z" else 12
+    cycle_hour = {"0Z": 0, "6Z": 6, "12Z": 12, "18Z": 18}[run_label]
     reference_date = dt.datetime(now_utc.year, now_utc.month, now_utc.day, cycle_hour)
 
     legacy_file = _latest_legacy_file(run_label)
@@ -265,5 +267,5 @@ if __name__ == "__main__":
     import sys
     # Priorité : argument CLI (ex: `python validate_cross_pipeline.py 12Z`), puis
     # variable d'env, sinon "0Z" — même convention que Forecast_legacy.py.
-    _run_arg = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("0Z", "12Z") else None
+    _run_arg = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("0Z", "6Z", "12Z", "18Z") else None
     cross_check(_run_arg or os.environ.get("FORECAST_RUN", "0Z"))

@@ -33,7 +33,7 @@ import run_dual
 import Forecast as F  # persist() : fusion validée, anti-régression, écriture atomique
 import validate_cross_pipeline as V  # helpers de lecture des xlsx legacy (Météociel)
 
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.1.2"
 LOCAL_TZ = ZoneInfo("Europe/Paris")
 VAR = C.PRIMARY_VAR  # variable principale affichée (t850)
 

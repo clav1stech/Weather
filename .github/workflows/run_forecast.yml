@@ -16,9 +16,9 @@ on:
         options: [both, api, legacy]
         default: both
       legacy_run:
-        description: "Cycle Météociel (si target=legacy ou both)"
+        description: "Cycle Météociel (si target=legacy ou both). 6Z/18Z : manuel only, AIFS/GEFS uniquement (ECMWF ENS absent à ces cycles)."
         type: choice
-        options: ['0Z', '12Z']
+        options: ['0Z', '6Z', '12Z', '18Z']
         default: '0Z'
 
 jobs:
@@ -50,10 +50,10 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
           shopt -s nullglob
           git add data/*.parquet
           git diff-index --quiet HEAD || git commit -m "Pipeline: base Open-Meteo synchronisée"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
 
   scrape-legacy:
@@ -100,8 +100,8 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
           shopt -s nullglob
           git add Forecasts/*.xlsx data/*.csv
           git diff-index --quiet HEAD || git commit -m "Pipeline: scrape legacy + contrôle croisé (${{ steps.run_label.outputs.label }})"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push

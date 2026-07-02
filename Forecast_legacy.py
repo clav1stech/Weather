@@ -17,18 +17,25 @@ from openpyxl.utils import get_column_letter
 DOSSIER_SORTIE = "Forecasts"
 os.makedirs(DOSSIER_SORTIE, exist_ok=True)
 
-# Switch du run souhaité : "0Z" ou "12Z"
-# Priorité : argument CLI (ex: `python Forecast.py 12Z`), puis variable d'env, sinon "0Z".
-_run_arg = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("0Z", "12Z") else None
+# Switch du run souhaité : "0Z", "6Z", "12Z" ou "18Z".
+# Priorité : argument CLI (ex: `python Forecast_legacy.py 12Z`), puis variable d'env, sinon "0Z".
+# 0Z/12Z : run principal automatique (les 3 modèles, cf. workflow schedule).
+# 6Z/18Z : run manuel only (workflow_dispatch) — ECMWF ENS n'y est pas publié en
+# intégralité par Météociel (cf. config.EXPECTED_CYCLES_BY_LABEL), on ne scrape
+# donc que AIFS/GEFS, qui tournent réellement 4×/j.
+RUN_HEURES = {"0Z": 0, "6Z": 6, "12Z": 12, "18Z": 18}
+_run_arg = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in RUN_HEURES else None
 CHOIX_RUN = _run_arg or os.environ.get("FORECAST_RUN", "0Z")
-run_param = "0" if CHOIX_RUN == "0Z" else "12"
-heure_attendue = 12 if CHOIX_RUN == "12Z" else 0
+heure_attendue = RUN_HEURES[CHOIX_RUN]
+run_param = str(heure_attendue)
 
 modeles = [
     {"nom": "ECMWF ENS", "sheet": "ECMWF", "url": f"https://www.meteociel.fr/modeles/ecmwfens_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&run={run_param}"},
     {"nom": "AIFS ENS", "sheet": "AIFS", "url": f"https://www.meteociel.fr/modeles/ecmwfens_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&aifs=1&run={run_param}"},
     {"nom": "GEFS", "sheet": "GEFS", "url": f"https://www.meteociel.fr/modeles/gefs_table.php?ext=1&x=&lat=48.8621&lon=2.33936&ville=Paris&run={run_param}"}
 ]
+if CHOIX_RUN in ("6Z", "18Z"):
+    modeles = [m for m in modeles if m["nom"] != "ECMWF ENS"]
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
@@ -47,12 +54,11 @@ SEUIL_COMPLETUDE = 0.9  # fraction du nominal requise pour juger un run « compl
 
 # --- Fonctions Utilitaires ---
 def parse_file_datetime(filepath):
-    match = re.search(r'Forecast-(\d{8})(?:-(0Z|12Z))?\.xlsx', os.path.basename(filepath))
+    match = re.search(r'Forecast-(\d{8})(?:-(0Z|6Z|12Z|18Z))?\.xlsx', os.path.basename(filepath))
     if match:
         dt = datetime.datetime.strptime(match.group(1), "%d%m%Y")
-        run = match.group(2) if match.group(2) else "12Z" 
-        heures = 12 if run == "12Z" else 0
-        return dt + datetime.timedelta(hours=heures)
+        run = match.group(2) if match.group(2) else "12Z"
+        return dt + datetime.timedelta(hours=RUN_HEURES[run])
     return datetime.datetime.min
 
 def parser_tableau_meteociel(html):
@@ -515,7 +521,12 @@ def tenter_rattrapage():
     encore, le télécharge et l'ajoute — uniquement si Météociel sert toujours la
     MÊME date et la MÊME heure de run que le fichier cible (double garde-fou).
     Ne remplace jamais un modèle déjà présent.
+
+    Limité au cycle principal 0Z/12Z (cadence automatique) : les runs 6Z/18Z
+    sont manuels, AIFS/GEFS seulement, et n'ont pas de mécanisme de rattrapage.
     """
+    if CHOIX_RUN not in ("0Z", "12Z"):
+        return
     autre_run = "0Z" if CHOIX_RUN == "12Z" else "12Z"
     autre_run_param = "0" if autre_run == "0Z" else "12"
     autre_heure = 0 if autre_run == "0Z" else 12

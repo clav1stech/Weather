@@ -23,10 +23,10 @@ on:
 
 jobs:
   fetch-api:
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (github.event.inputs.target == 'both' || github.event.inputs.target == 'api')
-      || github.event.schedule == '15 */2 * * *'
+    if: |
+      (github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.target == 'both' || github.event.inputs.target == 'api')) ||
+      github.event.schedule == '15 */2 * * *'
     runs-on: ubuntu-latest
     concurrency:
       group: weather-data-push
@@ -57,11 +57,11 @@ jobs:
           git push
 
   scrape-legacy:
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (github.event.inputs.target == 'both' || github.event.inputs.target == 'legacy')
-      || github.event.schedule == '15 10 * * *'
-      || github.event.schedule == '15 22 * * *'
+    if: |
+      (github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.target == 'both' || github.event.inputs.target == 'legacy')) ||
+      github.event.schedule == '15 10 * * *' ||
+      github.event.schedule == '15 22 * * *'
     runs-on: ubuntu-latest
     concurrency:
       group: weather-data-push

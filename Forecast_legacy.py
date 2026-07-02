@@ -14,7 +14,7 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.utils import get_column_letter
 
 # --- Configuration ---
-DOSSIER_SORTIE = "Forecasts"
+DOSSIER_SORTIE = "legacy"
 os.makedirs(DOSSIER_SORTIE, exist_ok=True)
 
 # Switch du run souhaité : "0Z", "6Z", "12Z" ou "18Z".

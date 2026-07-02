@@ -18,7 +18,7 @@ référence sert donc à comparer l'avant et l'après d'un refactor, tant que le
 NOMS de fonctions sont conservés.
 
 Limite connue : les sorties dépendent du contenu de data/database_paris.parquet
-et des xlsx de Forecasts/. Capture et check doivent donc encadrer un refactor
+et des xlsx de legacy/. Capture et check doivent donc encadrer un refactor
 SANS exécution du pipeline entre les deux (sinon régénérer la référence).
 """
 

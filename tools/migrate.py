@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Script de migration (One-off) : Fichiers Excel (Météociel) → Base Parquet.
 
-Parcourt tous les anciens fichiers Forecast-*.xlsx du dossier `Forecasts/`,
+Parcourt tous les anciens fichiers Forecast-*.xlsx du dossier `legacy/`,
 extrait les onglets modèles (ECMWF, AIFS, GEFS), pivote les données au format
 "Tidy" et les intègre dans `data/database_paris.parquet`.
 
@@ -24,7 +24,7 @@ import pandas as pd
 # le script reste donc lançable depuis n'importe quel répertoire courant.
 # --------------------------------------------------------------------------- #
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OLD_DIR = os.path.join(ROOT, "Forecasts")
+OLD_DIR = os.path.join(ROOT, "legacy")
 NEW_DB_PATH = os.path.join(ROOT, "data", "database_paris.parquet")
 SCHEMA = ['run_date', 'model', 'member', 'valid_time', 't850']
 

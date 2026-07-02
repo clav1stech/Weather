@@ -23,7 +23,7 @@ VERSION_X, VERSION_Y, _ = _get_app_version()
 EXCLUDED_DIRS = {
     "data",
     "Export",
-    "Forecasts",
+    "legacy",
     "tools",  # utilitaires hors périmètre d'analyse (dont ce script)
     "__pycache__",
     ".git",

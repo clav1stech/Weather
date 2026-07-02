@@ -11,14 +11,14 @@ parquet :
 ```
 ┌── PIPELINE (racine, SENSIBLE — collecte des données) ──────────────────┐
 │ Forecast.py            API Open-Meteo → data/database_paris.parquet    │
-│ Forecast_legacy.py     scrape Météociel → Forecasts/*.xlsx (0Z/12Z)    │
+│ Forecast_legacy.py     scrape Météociel → legacy/*.xlsx (0Z/12Z)       │
 │ validate_cross_pipeline.py   contrôle croisé OM ↔ legacy               │
 │ run_dual.py            orchestrateur manuel (bouton dashboard)         │
 │ .github/workflows/run_forecast.yml   cron 2h (API) + 0Z/12Z (legacy)   │
 └─────────────────────────────────────────────────────────────────────────┘
                     │ écrit                         ▲ lit (lecture seule)
                     ▼                               │
-        data/database_paris.parquet          Forecasts/*.xlsx
+        data/database_paris.parquet          legacy/*.xlsx
                     │ lit (lecture seule, sauf import ciblé encadré)
                     ▼
 ┌── DASHBOARD (package app/, refactorable librement) ─────────────────────┐

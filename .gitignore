@@ -16,3 +16,12 @@ Thumbs.db
 
 # Environnement virtuel local (macOS)
 .venv/
+
+# Références de non-régression (dépendent de la base locale au moment de la
+# capture — se régénèrent via tools/*.py capture, cf. docs/CODEMAP.md)
+tools/golden/
+
+# Sauvegardes locales du parquet (copies datées avant import legacy) — restent
+# sur le poste (+ OneDrive), jamais poussées : le workflow ne committe que
+# data/*.parquet de premier niveau, ce dossier n'y entre pas.
+data/backups/

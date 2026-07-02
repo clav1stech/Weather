@@ -3,8 +3,8 @@ import re
 import zipfile
 from datetime import datetime
 
-# Configuration
-project_dir = pathlib.Path(__file__).parent
+# Configuration — le script vit dans tools/, la racine du projet est son parent
+project_dir = pathlib.Path(__file__).parent.parent
 export_dir = project_dir / "Export"
 ENABLE_ZIP_EXPORT = False
 
@@ -24,6 +24,7 @@ EXCLUDED_DIRS = {
     "data",
     "Export",
     "Forecasts",
+    "tools",  # utilitaires hors périmètre d'analyse (dont ce script)
     "__pycache__",
     ".git",
     ".claude",

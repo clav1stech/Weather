@@ -149,7 +149,16 @@ T2M_FORECAST_DAYS = 7
 # Authentification : header "apikey" (pas d'OAuth2), clé lue EXCLUSIVEMENT via
 # la variable d'environnement METEOFRANCE_API_KEY (secret GitHub Actions en CI,
 # .env gitignoré en local) — jamais en dur ici ni ailleurs dans le code.
-OBS_API_BASE = "https://public-api.meteofrance.fr/public/DPObs/v2"
+#
+# Endpoint « Paquet Observation » (contexte DPPaquetObs/v2 — la clé couvre v2,
+# PAS v1 qui répond 403) : un seul GET /paquet/horaire?id-departement=…
+# renvoie les observations horaires de TOUTES les stations du département sur
+# une fenêtre glissante de plusieurs jours (~5 j constatés, ≥ 24 h garantis
+# par la doc). Préféré au mono-station DPObs /station/horaire (une seule obs
+# par appel) : amorçage/réamorçage de l'historique en un poll, et rattrapage
+# automatique des heures manquées si le cron saute (panne CI, quota).
+OBS_API_BASE = "https://public-api.meteofrance.fr/public/DPPaquetObs/v2"
+OBS_DEPARTEMENT = "75"                    # département couvert par le paquet
 OBS_API_KEY_ENV = "METEOFRANCE_API_KEY"   # nom de la variable d'env portant la clé
 
 # id        : id_station DPObs (8 chiffres, vérifié via /liste-stations)

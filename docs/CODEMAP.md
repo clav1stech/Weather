@@ -13,7 +13,8 @@ parquet :
 │ Forecast.py            API Open-Meteo → data/database_paris.parquet    │
 │ forecast_t2m_hd.py     API Forecast (Tx/Tn HD, flux annexe 7 j)        │
 │                        → data/database_paris_t2m.parquet               │
-│ fetch_observations.py  API Météo-France DPObs (obs 4 stations Paris,   │
+│ fetch_observations.py  API Météo-France DPPaquetObs (paquet dép. 75,   │
+│                        4 stations suivies, backfill/rattrapage auto,   │
 │                        clé via env METEOFRANCE_API_KEY uniquement)     │
 │                        → data/database_paris_observations.parquet      │
 │ Forecast_legacy.py     scrape Météociel → legacy/*.xlsx (0Z/12Z)       │
@@ -137,7 +138,7 @@ temporelle). Correspondance code :
 | `cycles` ≠ `expected_cycles` (alerte vs capacité) | `config.py` + `app/data/runsets.py` (`main_labels_expected_at`) |
 | Import legacy = absence avérée uniquement | `app/data/legacy_import.py` |
 | Tables d'export volontairement larges | `app/stats/tables.py` |
-| Clé API MF via env only, dédup (station, validity_time), K→°C au parsing | `fetch_observations.py` |
+| Clé API MF via env only, paquet départemental (backfill/rattrapage), dédup (station, validity_time), K→°C au parsing | `fetch_observations.py` |
 | Obs : dégradation silencieuse, groupes ICU explicites, prévu-vs-observé jours complets | `app/data/observations.py`, `app/domains/observations/` |
 
 ## Non-régression — comment vérifier

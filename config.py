@@ -12,8 +12,8 @@ import os
 # --------------------------------------------------------------------------- #
 #  Localisation & API
 # --------------------------------------------------------------------------- #
-LATITUDE = 48.86
-LONGITUDE = 2.33
+LATITUDE = 48.8534
+LONGITUDE = 2.3488
 TIMEZONE = "UTC"               # jamais "auto" : "auto" applique un unique offset
                                 # local (Europe/Paris) à toute la fenêtre de 16 j,
                                 # ce qui décale d'1 h les échéances après un

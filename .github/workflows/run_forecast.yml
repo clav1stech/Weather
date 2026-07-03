@@ -16,12 +16,19 @@ on:
     # obs horaire par station ; 4 requêtes/h, quota 100 req/min très loin).
     # Décalé à :20 pour ne pas faire la queue au push avec :15 et :45.
     - cron: '20 * * * *'
+    # Prévision instantanée 15 min (API Forecast minutely_15, flux annexe) :
+    # toutes les 30 min. Plus fréquent que les autres flux (c'est le point : du
+    # TRÈS court terme rafraîchi), mais pas au pas de 15 min de la donnée — le
+    # modèle seamless ne se réactualise pas aussi vite, 30 min suffit à garder
+    # la prévision fraîche sans doubler la charge de push git. Créneaux :05/:35
+    # libres (évite :15, :20, :45).
+    - cron: '5,35 * * * *'
   workflow_dispatch:
     inputs:
       target:
-        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF seules)"
+        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF seules ; instant = prévision 15 min)"
         type: choice
-        options: [both, api, legacy, t2m, obs]
+        options: [both, api, legacy, t2m, obs, instant]
         default: both
       legacy_run:
         description: "Cycle Météociel (si target=legacy ou both). 6Z/18Z : manuel only, AIFS/GEFS uniquement (ECMWF ENS absent à ces cycles)."
@@ -146,6 +153,47 @@ jobs:
             git add data/database_paris_observations.parquet
           fi
           git diff-index --quiet HEAD || git commit -m "Pipeline: observations Météo-France synchronisées"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push
+
+  fetch-instant:
+    # Flux ANNEXE prévision instantanée 15 min (fetch_instant.py → parquet
+    # séparé data/database_paris_instant.parquet). Aucune clé requise (API
+    # Open-Meteo publique). Même concurrency.group que les autres jobs : la
+    # contention est sur le PUSH git du repo, pas les fichiers. Le backfill
+    # past_days est géré par le script (large au 1er run, modeste ensuite).
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'instant') ||
+      github.event.schedule == '5,35 * * * *'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: weather-data-push
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests pandas pyarrow
+
+      - name: Fetch Open-Meteo Instant (minutely_15)
+        run: python fetch_instant.py
+
+      - name: Commit and Push Instant Database
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          # Le fichier peut ne pas exister si l'API n'a rien renvoyé
+          # d'exploitable (le script sort alors sans écrire) — pas d'échec.
+          if [ -f data/database_paris_instant.parquet ]; then
+            git add data/database_paris_instant.parquet
+          fi
+          git diff-index --quiet HEAD || git commit -m "Pipeline: prévision instantanée 15 min synchronisée"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
 

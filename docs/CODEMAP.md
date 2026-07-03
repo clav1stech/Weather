@@ -17,6 +17,9 @@ parquet :
 │                        4 stations suivies, backfill/rattrapage auto,   │
 │                        clé via env METEOFRANCE_API_KEY uniquement)     │
 │                        → data/database_paris_observations.parquet      │
+│ fetch_instant.py       API Forecast minutely_15 (prévision 15 min,     │
+│                        ~48 h, meteofrance_seamless, backfill past_days) │
+│                        → data/database_paris_instant.parquet           │
 │ Forecast_legacy.py     scrape Météociel → legacy/*.xlsx (0Z/12Z)       │
 │ validate_cross_pipeline.py   contrôle croisé OM ↔ legacy               │
 │ run_dual.py            orchestrateur manuel (bouton dashboard)         │
@@ -139,6 +142,7 @@ temporelle). Correspondance code :
 | Import legacy = absence avérée uniquement | `app/data/legacy_import.py` |
 | Tables d'export volontairement larges | `app/stats/tables.py` |
 | Clé API MF via env only, paquet départemental (backfill/rattrapage), dédup (station, validity_time), K→°C au parsing | `fetch_observations.py` |
+| Prévision 15 min : dédup validtime seul (upsert, prévision révisable), backfill past_days adaptatif, collecte-only | `fetch_instant.py` |
 | Obs : dégradation silencieuse, groupes ICU explicites, prévu-vs-observé jours complets | `app/data/observations.py`, `app/domains/observations/` |
 
 ## Non-régression — comment vérifier

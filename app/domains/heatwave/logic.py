@@ -6,6 +6,7 @@ que les paliers d'INTERPRÉTATION propres à l'affichage du domaine."""
 
 import pandas as pd
 
+import config as C
 from app.stats.climato import clim_z500_normal
 from app.stats.ensemble import var_median
 
@@ -147,3 +148,44 @@ def _confiance_label(spread):
     if spread < CONF_SPREAD_FAIBLE_C:
         return "🟡 moyenne (scénarios partagés)", "#F1C40F"
     return "🟠 faible (scénarios très dispersés)", "#E67E22"
+
+
+# ── Incertitude du Tx/Tn haute résolution (appui d'affichage, pas un critère) ──
+# La valeur affichée est celle du modèle prioritaire (Météo-France tant qu'il
+# couvre le jour). Sa fiabilité se juge sur DEUX régimes distincts :
+#   • les deux modèles HD présents (J → J+3) : l'écart |MF − ICON| mesure leur
+#     désaccord — deux modèles concordants renforcent la valeur, une forte
+#     divergence la rend incertaine ;
+#   • un seul modèle (J+4 → J+6 : MF s'arrête, ICON seul) : valeur indicative
+#     par construction, aucun recoupement possible.
+# Seuils en °C sur le plus grand des deux écarts (Tx ou Tn) : ordres de grandeur
+# d'une prévision de température au sol à quelques jours.
+T2M_ECART_BON_C = 1.5    # écart ≤ → modèles d'accord, valeur solide
+T2M_ECART_FORT_C = 3.0   # écart ≥ → forte divergence, valeur indicative
+
+
+def incertitude_txtn(ecart_tx, ecart_tn, solo, model, model_alt):
+    """(glyphe de case, libellé court, phrase de survol) qualifiant la fiabilité
+    d'un Tx/Tn HD. Glyphe non vide (« ≈ », signe « approximatif ») UNIQUEMENT
+    dans les cas peu fiables (source unique ou forte divergence) — l'accord des
+    modèles ne charge pas la case, il se lit au survol. Jamais de couleur ici :
+    la teinte des cases reste réservée au risque T850."""
+    if solo:
+        if model != C.T2M_LABELS[0]:
+            phrase = (f"au-delà de ~4 jours, {C.T2M_LABELS[0]} ne prévoit plus, seul "
+                      f"{model} couvre cette échéance (valeur indicative, sans recoupement)")
+        else:
+            phrase = (f"seul {model} est disponible ce jour "
+                      "(valeur indicative, sans recoupement)")
+        return "≈", "source unique", phrase
+    ecarts = [e for e in (ecart_tx, ecart_tn) if pd.notna(e)]
+    ecart = max(ecarts) if ecarts else 0.0
+    if ecart >= T2M_ECART_FORT_C:
+        return ("≈", "forte divergence",
+                f"{model} et {model_alt} s'écartent nettement (jusqu'à "
+                f"{ecart:.0f} °C), prévision encore incertaine")
+    if ecart >= T2M_ECART_BON_C:
+        return ("", "léger désaccord",
+                f"{model} et {model_alt} diffèrent un peu (jusqu'à {ecart:.0f} °C)")
+    return ("", "modèles d'accord",
+            f"{model} et {model_alt} concordent (écart ≤ {ecart:.0f} °C)")

@@ -231,8 +231,10 @@ def page_grand_public(runs, sig):
     else:
         modeles = " · ".join(dict.fromkeys(txtn["model"]))  # ordre d'apparition, sans doublon
         st.caption(f"Chaque case = un jour, coloré selon P(≥ {seuil_canicule:.0f} °C @850). "
-                   f"↑/↓ = températures max/min prévues **au sol** (modèle haute résolution "
-                   f"{modeles}), disponibles sur ~4 jours seulement.")
+                   f"↑/↓ = températures max/min prévues **au sol** (modèles haute résolution "
+                   f"{modeles}, sur ~7 jours). Un **≈** signale une valeur moins fiable — "
+                   "seul un modèle disponible au-delà de ~4 jours, ou désaccord marqué entre "
+                   "eux ; détail au survol.")
     st.plotly_chart(calendrier_risques(jours, seuil_canicule, txtn), width="stretch")
 
     # ── Tendance récente des runs (vulgarisé, en un coup d'œil) ──────────────

@@ -47,30 +47,56 @@ def load_t2m(_sig):
     return df
 
 
+_TXTN_COLS = ["date", "tx", "tn", "model", "model_alt", "ecart_tx", "ecart_tn", "solo"]
+
+
 @st.cache_data(show_spinner=False)
 def txtn_by_day(_sig):
-    """Un SEUL couple Tx/Tn par jour cible, prêt pour l'affichage :
-    DataFrame [date, tx, tn, model].
+    """Un SEUL couple Tx/Tn affiché par jour cible, + de quoi juger sa fiabilité :
+    DataFrame _TXTN_COLS [date, tx, tn, model, model_alt, ecart_tx, ecart_tn, solo].
 
     Pour chaque (modèle, jour), seule la DERNIÈRE collecte compte (l'historique
     ne sert qu'à l'archive). Puis, jour par jour, le premier modèle de
     config.T2M_MODELS ayant au moins une valeur l'emporte (Météo-France
-    prioritaire, DWD ICON en secours) — jamais de mélange ni de double
-    affichage pour un même jour. Les jours passés sont conservés ici (c'est le
-    dernier état connu) ; le filtrage temporel appartient à l'appelant."""
+    prioritaire, DWD ICON en secours) — jamais de mélange ni de double affichage.
+
+    Le second modèle éventuel n'est PAS affiché mais sert de recoupement :
+      • `model_alt` = son label, `ecart_tx`/`ecart_tn` = |primaire − second| (NaN
+        si l'un des deux manque cette variable) — matière à un indicateur
+        d'incertitude par divergence (cf. heatwave/logic.incertitude_txtn) ;
+      • `solo` = True quand un seul modèle couvre le jour (cas typique J+4→J+6 :
+        MF s'arrête à ~4 j, ICON seul) → valeur indicative, sans recoupement.
+
+    Les jours passés sont conservés (dernier état connu) ; le filtrage temporel
+    appartient à l'appelant."""
     df = load_t2m(_sig)
+    empty = pd.DataFrame(columns=_TXTN_COLS)
     if df.empty:
-        return pd.DataFrame(columns=["date", "tx", "tn", "model"])
+        return empty
     latest = (df.dropna(subset=["tx", "tn"], how="all")
                 .sort_values("fetched_at")
                 .groupby(["model", "target_date"], as_index=False).last())
     if latest.empty:
-        return pd.DataFrame(columns=["date", "tx", "tn", "model"])
+        return empty
     # Rang de priorité = position dans T2M_LABELS ; un label inconnu (retiré de
     # la config après coup) est relégué derrière tous les modèles déclarés.
     rank = {label: i for i, label in enumerate(C.T2M_LABELS)}
     latest["_rank"] = latest["model"].map(lambda m: rank.get(m, len(rank)))
-    best = (latest.sort_values("_rank")
-                  .groupby("target_date", as_index=False).first())
-    best = best.rename(columns={"target_date": "date"})
-    return best[["date", "tx", "tn", "model"]].sort_values("date").reset_index(drop=True)
+
+    rows = []
+    for date, g in latest.groupby("target_date"):
+        g = g.sort_values("_rank")
+        primary = g.iloc[0]
+        row = {"date": date, "tx": primary["tx"], "tn": primary["tn"],
+               "model": primary["model"], "model_alt": None,
+               "ecart_tx": float("nan"), "ecart_tn": float("nan"), "solo": True}
+        if len(g) >= 2:
+            second = g.iloc[1]
+            row["model_alt"] = second["model"]
+            row["solo"] = False
+            if pd.notna(primary["tx"]) and pd.notna(second["tx"]):
+                row["ecart_tx"] = abs(primary["tx"] - second["tx"])
+            if pd.notna(primary["tn"]) and pd.notna(second["tn"]):
+                row["ecart_tn"] = abs(primary["tn"] - second["tn"])
+        rows.append(row)
+    return pd.DataFrame(rows, columns=_TXTN_COLS).sort_values("date").reset_index(drop=True)

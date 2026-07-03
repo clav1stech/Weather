@@ -8,7 +8,8 @@ import plotly.graph_objects as go
 from app.stats.climato import clim_normal
 from app.ui.theme import _ink, _plotly_template, _rgba
 from app.domains.heatwave.logic import (
-    TREND_STRONG_C, _canicule_label, _confiance_label, _tendance_label)
+    TREND_STRONG_C, _canicule_label, _confiance_label, _tendance_label,
+    incertitude_txtn)
 
 
 def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
@@ -45,23 +46,28 @@ CANICULE_SCALE = [
 ]
 
 
-def _fmt_txtn_cell(tx, tn):
-    """Texte de case « ↑Tx ↓Tn » (°C entiers) — tolère qu'une des deux valeurs
-    manque (valeur daily null côté API) : on affiche ce qui existe, rien de plus."""
+def _fmt_txtn_cell(tx, tn, glyph):
+    """Texte de case « ≈ ↑Tx ↓Tn » (°C entiers) — tolère qu'une des deux valeurs
+    manque (valeur daily null côté API) : on affiche ce qui existe, rien de plus.
+    `glyph` (« ≈ » ou vide) préfixe la ligne Tx pour signaler une valeur peu
+    fiable (source unique ou forte divergence, cf. logic.incertitude_txtn)."""
     parts = []
     if pd.notna(tx):
         parts.append(f"↑{tx:.0f}°")
     if pd.notna(tn):
         parts.append(f"↓{tn:.0f}°")
-    return "<br>".join(parts)
+    cell = "<br>".join(parts)
+    return f"{glyph} {cell}" if (cell and glyph) else cell
 
 
 def calendrier_risques(jours, seuil, txtn=None):
     """Calendrier du risque : couleur pilotée par la probabilité T850 UNIQUEMENT.
-    `txtn` (DataFrame [date, tx, tn, model], cf. app/data/t2m.py) est un simple
-    appui d'affichage : Tx/Tn haute résolution en texte dans les cases couvertes
-    (~J à J+3), rien sur les autres. txtn None/vide → figure strictement
-    identique à l'affichage sans ce flux (absence = cas normal)."""
+    `txtn` (DataFrame _TXTN_COLS, cf. app/data/t2m.py) est un simple appui
+    d'affichage : Tx/Tn haute résolution en texte dans les cases couvertes
+    (J → J+6), rien sur les autres. Un « ≈ » marque les jours peu fiables
+    (source unique au-delà de J+3, ou forte divergence MF/ICON) ; le détail se
+    lit au survol. txtn None/vide → figure strictement identique à l'affichage
+    sans ce flux (absence = cas normal)."""
     texts = [
         f"{d:%a %d %b}<br>{_canicule_label(p)}"
         f"<br>Médiane : {m:.1f} °C · P90 : {p90:.1f} °C"
@@ -78,13 +84,20 @@ def calendrier_risques(jours, seuil, txtn=None):
         cells, hovers = [], []
         for d, hover in zip(jours["date"], texts):
             r = by_day.get(pd.Timestamp(d).normalize())
-            cell = _fmt_txtn_cell(r.tx, r.tn) if r is not None else ""
+            if r is None:
+                cells.append("")
+                hovers.append(hover)
+                continue
+            glyph, _, fiab_phrase = incertitude_txtn(
+                r.ecart_tx, r.ecart_tn, r.solo, r.model, r.model_alt)
+            cell = _fmt_txtn_cell(r.tx, r.tn, glyph)
             cells.append(cell)
             if cell:
                 sol = " · ".join(p for p in (
                     f"max {r.tx:.1f} °C" if pd.notna(r.tx) else "",
                     f"min {r.tn:.1f} °C" if pd.notna(r.tn) else "") if p)
-                hover += f"<br>Au sol : {sol} ({r.model}, haute résolution)"
+                hover += (f"<br>Au sol : {sol} ({r.model}, haute résolution)"
+                          f"<br>Fiabilité : {fiab_phrase}")
             hovers.append(hover)
         # Le hover migre vers customdata pour libérer `text` (affiché en case).
         # Pas de couleur de police imposée : Plotly contraste automatiquement

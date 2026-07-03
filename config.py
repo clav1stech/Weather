@@ -130,12 +130,13 @@ T2M_MODELS = [
     {"api": "meteofrance_seamless", "label": "Météo-France"},
     {"api": "dwd_icon_seamless",    "label": "DWD ICON"},
 ]
-# Horizon volontairement court : Météo-France (AROME/ARPEGE seamless) publie
-# ~4 jours (constaté empiriquement : J à J+3 puis null). DWD ICON va plus loin
-# (7 j constatés) mais on borne la requête à 4 j : ce flux est un appoint très
-# haute résolution, pas une extension d'horizon — au-delà, le calendrier du
-# risque reste piloté par T850 seul, sans mention de température (voulu).
-T2M_FORECAST_DAYS = 4
+# Horizon 7 jours : Météo-France (AROME/ARPEGE seamless) ne publie que J à J+3
+# (null au-delà, constaté empiriquement) ; DWD ICON couvre les 7 jours. On
+# collecte donc 7 j pour exploiter la valeur qu'ICON apporte au-delà de MF —
+# sur J+4 à J+6, ICON est seul (MF prioritaire tant qu'il existe, cf. T2M_MODELS)
+# et l'affichage le SIGNALE comme valeur indicative (source unique, pas de
+# recoupement). Ce flux reste un appui d'affichage, jamais un critère de risque.
+T2M_FORECAST_DAYS = 7
 
 # --------------------------------------------------------------------------- #
 #  Stockage

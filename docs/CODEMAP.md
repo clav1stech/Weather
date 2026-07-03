@@ -11,7 +11,7 @@ parquet :
 ```
 ┌── PIPELINE (racine, SENSIBLE — collecte des données) ──────────────────┐
 │ Forecast.py            API Open-Meteo → data/database_paris.parquet    │
-│ forecast_t2m_hd.py     API Forecast (Tx/Tn HD, flux annexe 4 j)        │
+│ forecast_t2m_hd.py     API Forecast (Tx/Tn HD, flux annexe 7 j)        │
 │                        → data/database_paris_t2m.parquet               │
 │ Forecast_legacy.py     scrape Météociel → legacy/*.xlsx (0Z/12Z)       │
 │ validate_cross_pipeline.py   contrôle croisé OM ↔ legacy               │

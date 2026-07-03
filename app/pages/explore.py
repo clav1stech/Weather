@@ -10,10 +10,12 @@ from app.data.db import run_slice, utc_cycle
 from app.data.runsets import (
     latest_run_sub, main_labels_expected_at, previous_runs_sub)
 from app.stats.ensemble import (
-    daily_aggregate, divergence, model_data, multimodel_cutoff, super_ensemble)
+    daily_aggregate, divergence, model_data, multimodel_cutoff, super_ensemble,
+    var_median)
 from app.stats.tables import enriched_super_table, model_table
 from app.ui.charts import (
-    divergence_chart, fan_chart, models_median_chart, spaghetti_chart, spread_chart)
+    divergence_chart, fan_chart, models_median_chart, spaghetti_chart, spread_chart,
+    z500_median_chart)
 from app.ui.components import complete_runs_caption
 
 
@@ -58,8 +60,9 @@ def page_explore(runs, sig):
         st.warning(f"⚠️ Modèle(s) principal(aux) absent(s) : **{', '.join(manquants)}**. "
                    "Super-ensemble appauvri (dispersion possiblement sous-estimée).")
 
-    tab_fan, tab_spag, tab_cmp, tab_unc, tab_tbl = st.tabs(
-        ["📈 Panache", "🍝 Spaghetti", "⚖️ Modèles", "📉 Incertitude", "🧾 Tableaux"])
+    tab_fan, tab_spag, tab_cmp, tab_unc, tab_z500, tab_tbl = st.tabs(
+        ["📈 Panache", "🍝 Spaghetti", "⚖️ Modèles", "📉 Incertitude", "🌀 Z500",
+         "🧾 Tableaux"])
 
     with tab_fan:
         if syn is not None and not syn.empty:
@@ -93,6 +96,23 @@ def page_explore(runs, sig):
             st.plotly_chart(spread_chart(syn), width="stretch")
         else:
             st.info("Pas de données d'incertitude.")
+
+    with tab_z500:
+        # Vue technique : médiane d'ensemble seule (jamais de spaghetti Z500) —
+        # lecture/contrôle de la donnée brute, la vulgarisation vit sur la page
+        # Indicateur de canicule. Absence normale : runs antérieurs à la collecte
+        # de z500 et runs importés du legacy (Météociel ne publie pas Z500).
+        med = var_median(sub, "z500")
+        if med is None or med.empty:
+            st.info("Géopotentiel 500 hPa indisponible pour ce run (donnée collectée "
+                    "uniquement par le pipeline Open-Meteo, à partir de son ajout à "
+                    "la base — jamais présente sur les runs importés du legacy).")
+        else:
+            st.caption("Médiane du super-ensemble (tous membres poolés) du géopotentiel "
+                       "à 500 hPa, en mètres. Au-dessus de la normale = dorsale "
+                       "(situation anticyclonique d'altitude), en dessous = talweg.")
+            st.plotly_chart(z500_median_chart(med, f"Géopotentiel 500 hPa — {run_label}"),
+                            width="stretch")
 
     with tab_tbl:
         st.caption("Tableaux larges, pensés pour l'export vers une analyse externe "

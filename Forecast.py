@@ -316,8 +316,16 @@ def parse_payload(payload, now_utc=None):
 #  Fraîcheur — détection empirique, échéance par échéance
 # --------------------------------------------------------------------------- #
 def load_existing():
+    """Base existante, réalignée sur le schéma courant : une variable ajoutée à
+    config.VARIABLES après l'écriture du parquet n'y a pas encore de colonne —
+    créée ici à NaN, sinon toute comparaison colonne à colonne sur l'historique
+    (mask_stale_tail, _reach_h_by_key) lèverait un KeyError au premier fetch."""
     if os.path.exists(C.DB_PATH):
-        return pd.read_parquet(C.DB_PATH)
+        df = pd.read_parquet(C.DB_PATH)
+        for col in C.VAR_COLS:
+            if col not in df.columns:
+                df[col] = np.nan
+        return df
     return pd.DataFrame(columns=C.SCHEMA)
 
 
@@ -402,8 +410,11 @@ def _contiguous_reach_h(run_date, valid_times):
 
 def _persist_horizon_reach_h(group):
     """Portée réelle contiguë (h) du run frais (cf. _contiguous_reach_h).
-    None si aucune valeur valide (rien à mesurer)."""
-    valid = group.dropna(subset=C.VAR_COLS)
+    None si aucune valeur valide (rien à mesurer). Une ligne compte dès qu'AU
+    MOINS une variable y est valide (how="all") : la portée d'un run est portée
+    par sa variable principale — une variable secondaire à couverture moindre
+    ne doit ni raccourcir la portée mesurée, ni bloquer la persistance."""
+    valid = group.dropna(subset=C.VAR_COLS, how="all")
     if valid.empty:
         return None
     run_date = pd.Timestamp(group["run_date"].iloc[0])
@@ -479,7 +490,11 @@ def _reach_h_by_key(df):
     valeur valide de `df` (cf. _contiguous_reach_h — même métrique que le filtre
     de persistance : un run creux déjà en base ne peut donc pas surclasser un
     run frais sain). Clés sans la moindre valeur valide absentes du dict."""
-    valid = df.dropna(subset=C.VAR_COLS)
+    # how="all" : une ligne est valide dès qu'une variable l'est — indispensable
+    # pour que les runs historiques (antérieurs à l'ajout d'une variable, donc
+    # NaN sur celle-ci) gardent leur vraie portée : sinon la garde anti-régression
+    # les croirait vides et laisserait un glitch API écraser un run complet.
+    valid = df.dropna(subset=C.VAR_COLS, how="all")
     if valid.empty:
         return {}
     return {key: _contiguous_reach_h(key[1], g["valid_time"])
@@ -589,7 +604,7 @@ def main():
         print("ℹ️  Aucun modèle renouvelé à ce poll — base laissée telle quelle.")
         return
     for model_label, g in fresh.groupby("model"):
-        valid = g.dropna(subset=C.VAR_COLS)
+        valid = g.dropna(subset=C.VAR_COLS, how="all")
         last = valid["valid_time"].max() if not valid.empty else None
         print(f"   ✅ {model_label} renouvelé — échéances valides jusqu'à {last}")
     print(f"   Lignes du run frais  : {len(fresh):,}")

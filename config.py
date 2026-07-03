@@ -90,11 +90,21 @@ MODELS = [
 # --------------------------------------------------------------------------- #
 # api : nom Open-Meteo (paramètre `hourly`)
 # col : nom de la colonne « valeur » dans la base plate
-# Avec une seule variable la base a exactement 5 colonnes :
-#   [run_date, model, member, valid_time, t850]
-# Ajouter {"api": "geopotential_500hPa", "col": "z500"} suffit à stocker z500.
+# Chaque variable = une colonne dans le schéma [run_date, model, member,
+# valid_time, <col>…]. Le pipeline (fetch/parse/persist) est générique : une
+# ligne ici suffit. Les lignes stockées AVANT l'ajout d'une variable restent
+# valides (colonne absente du parquet historique → NaN, schéma rétro-compatible ;
+# le pipeline et le dashboard tolèrent tous deux cette absence).
+#
+# z500 : géopotentiel à 500 hPa (contexte synoptique — dorsale/talweg), en
+# mètres géopotentiels (~5 500-5 900 m). Le nom API exact est
+# `geopotential_height_500hPa` (vérifié : `geopotential_500hPa` → HTTP 400) ;
+# exposé par les 4 modèles avec le même pattern de clés membre que t850 et la
+# même couverture temporelle. Variable de CONTEXTE uniquement : la détection
+# canicule et toutes les sélections de runs restent pilotées par PRIMARY_VAR.
 VARIABLES = [
     {"api": "temperature_850hPa", "col": "t850"},
+    {"api": "geopotential_height_500hPa", "col": "z500"},
 ]
 
 # Variable principale (KPI, panache, risque). Première de la liste par défaut.
@@ -179,6 +189,18 @@ CLIM_PEAK_DOY = 198      # jour de l'année du maximum (~17 juillet)
 
 SEUIL_CHALEUR_850 = 14.0   # °C — ligne de repère « chaleur notable »
 SEUIL_CANICULE_850 = 18.0  # °C — seuil de canicule exceptionnelle (pilote le risque)
+
+# --------------------------------------------------------------------------- #
+#  Climatologie Z500 (géopotentiel 500 hPa, mètres géopotentiels)
+# --------------------------------------------------------------------------- #
+# Même modèle cosinus que la T850 (normale = MEAN + AMPLITUDE·cos(…)), valeurs
+# ESTIMÉES pour la région parisienne (~5 560 m en janvier, ~5 760 m fin juillet)
+# — pas une normale officielle. Sert uniquement à calculer l'ANOMALIE de Z500
+# (dorsale/talweg) pour le signal de contexte synoptique : la valeur brute en
+# mètres ne veut rien dire seule, seul l'écart à la saison est interprétable.
+CLIM_Z500_MEAN = 5660.0      # m — moyenne annuelle
+CLIM_Z500_AMPLITUDE = 100.0  # m — demi-amplitude saisonnière
+CLIM_Z500_PEAK_DOY = 203     # jour de l'année du maximum (~22 juillet)
 
 # --------------------------------------------------------------------------- #
 #  KPI de la Vue d'ensemble (cartes en tête de page)

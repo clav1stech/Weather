@@ -60,14 +60,14 @@ restent intactes.
 | `app/data/runsets.py` | POLITIQUES de sélection de runs (3, volontairement distinctes) + backfill convergence | `latest_complete_run_sub`, `latest_run_sub`, `previous_runs_sub`, `completed_pooled_sub`, `trend_daily_medians`, `main_labels_expected_at`, `latest_refresh_status` |
 | `app/data/presence.py` | diagnostic présence OM & legacy (lecture seule) | `openmeteo_presence`, `legacy_presence`, `_missing_by_run`, `legacy_signature` |
 | `app/data/legacy_import.py` | import ciblé xlsx → parquet (seule ÉCRITURE, ultra-encadrée) | `legacy_import_candidates`, `import_legacy_run` |
-| `app/stats/ensemble.py` | stats génériques tolérantes NaN sur un pool de membres | `super_ensemble`, `model_data`, `model_medians`, `divergence`, `daily_aggregate`, `daily_risk` |
+| `app/stats/ensemble.py` | stats génériques tolérantes NaN sur un pool de membres | `super_ensemble`, `model_data`, `model_medians`, `divergence`, `daily_aggregate`, `daily_risk`, `var_median` |
 | `app/stats/tables.py` | tables d'export larges (onglet 🧾) | `enriched_super_table`, `model_table` |
-| `app/stats/climato.py` | normale saisonnière cosinus (ajustable en session) | `clim_normal`, `clim_params` |
+| `app/stats/climato.py` | normale saisonnière cosinus (ajustable en session) | `clim_normal`, `clim_params`, `clim_z500_normal` |
 | `app/ui/theme.py` | thème clair/sombre, CSS global, couleurs | `_plotly_template`, `_ink`, `_rgba`, `GLOBAL_CSS` |
-| `app/ui/charts.py` | graphiques Plotly génériques | `fan_chart`, `spaghetti_chart`, `models_median_chart`, `divergence_chart`, `spread_chart` |
+| `app/ui/charts.py` | graphiques Plotly génériques | `fan_chart`, `spaghetti_chart`, `models_median_chart`, `divergence_chart`, `spread_chart`, `z500_median_chart` |
 | `app/ui/components.py` | composants Streamlit réutilisables | `_kpi_card`, `complete_runs_caption` |
 | `app/domains/__init__.py` | REGISTRE des domaines (navigation) | `DOMAIN_PAGES` |
-| `app/domains/heatwave/` | domaine canicule : `logic.py` (paliers/labels), `charts.py`, `page.py` | `page_grand_public`, `tendance_recente` |
+| `app/domains/heatwave/` | domaine canicule : `logic.py` (paliers/labels), `charts.py`, `page.py` | `page_grand_public`, `tendance_recente`, `signal_synoptique` |
 | `app/pages/overview.py` | Vue d'ensemble (KPI config-driven `KPI_*`) | `page_overview` |
 | `app/pages/explore.py` | Explorer un run (onglets + tables d'export) | `page_explore` |
 | `app/pages/convergence.py` | Révisions & convergence run-à-run | `page_convergence` |

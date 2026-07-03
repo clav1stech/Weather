@@ -20,7 +20,8 @@ from app.ui.components import complete_runs_caption
 from app.domains.heatwave.charts import (
     calendrier_risques, confiance_chart, ligne_de_flottaison, tendance_heatmap)
 from app.domains.heatwave.logic import (
-    PROB_CANICULE_QUASI, PROB_RISQUE_MARQUE, PROB_RISQUE_MODERE, tendance_recente)
+    PROB_CANICULE_QUASI, PROB_RISQUE_MARQUE, PROB_RISQUE_MODERE, signal_synoptique,
+    tendance_recente)
 
 
 def page_grand_public(runs, sig):
@@ -195,6 +196,20 @@ def page_grand_public(runs, sig):
         c2.metric("Durée de l'épisode", f"{duree} jour{'s' if duree > 1 else ''}")
     c3.metric("Pic de risque", f"{pic['prob'] * 100:.0f} %",
               help=f"{pic['date']:%a %d %b} · médiane {pic['Médiane']:.1f} °C")
+
+    # ── Contexte atmosphérique (Z500) — appui discret du message T850 ─────────
+    # Signal qualitatif uniquement : la valeur brute du géopotentiel ne parle
+    # qu'aux spécialistes (lecture technique : Explorer un run → onglet 🌀 Z500).
+    # None (z500 absent de la base ou du pool, ex. runs legacy) → rien d'affiché,
+    # le message principal reste strictement identique.
+    signal = signal_synoptique(sub, today)
+    if signal is not None:
+        icone, libelle, phrase = signal
+        st.markdown(f"{icone} **Configuration atmosphérique : {libelle}.** {phrase}")
+        st.caption("Lecture de la circulation d'altitude (géopotentiel 500 hPa) sur les "
+                   f"{len(C.MODELS)} modèles combinés — un éclairage en appui de "
+                   "l'indicateur principal ci-dessus, pas un critère de risque "
+                   "supplémentaire.")
 
     st.subheader("📈 Évolution de la chaleur prévue")
     st.caption("Courbe foncée = médiane ; bande rouge = P10–P90 ; pointillés bleus = "

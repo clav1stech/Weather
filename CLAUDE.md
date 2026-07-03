@@ -61,6 +61,10 @@ Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
 - Les tableaux de l'onglet 🧾 sont **volontairement larges** (destinés à l'export pour analyse par IA) : stats du super-ensemble + par modèle médiane, contrôle (member 0), nb de membres, Δ médiane vs run précédent — ne pas les « alléger » pour la lisibilité écran.
 - Le « run précédent » des colonnes Δ (`previous_runs_sub`) se calcule **par modèle** (dernier run strictement antérieur de CE modèle), jamais via un cycle global partagé.
 
+### Variables de contexte (Z500)
+- **`t850` (PRIMARY_VAR) reste l'UNIQUE variable pilotant** la détection canicule, les seuils, la sélection/complétude des runs et les KPI. `z500` (géopotentiel 500 hPa — nom API `geopotential_height_500hPa`, le nom `geopotential_500hPa` est invalide) n'est qu'une **couche de contexte synoptique** : médiane d'ensemble seule dans les vues techniques (jamais de spaghetti Z500), signal **qualitatif** côté grand public (anomalie vs normale cosinus `CLIM_Z500_*`, paliers/persistance dans `heatwave/logic.py` — jamais de valeur brute) — en appui du message T850, jamais un critère de risque concurrent.
+- **L'absence de z500 est un cas NORMAL, jamais une anomalie** : lignes antérieures à son ajout, runs importés du legacy (Météociel ne publie pas Z500 — ne jamais l'ajouter au scrape ni au contrôle croisé). Tout accès Z500 se dégrade en silence (`None` → rien d'affiché). Côté pipeline : `load_existing` réaligne le parquet historique sur le schéma courant (colonne manquante → NaN), et les mesures de portée/anti-régression comptent une ligne valide dès qu'**une** variable l'est (`dropna(subset=VAR_COLS, how="all")`) — ne pas resserrer, sinon les runs historiques paraîtraient vides et la garde anti-régression serait neutralisée.
+
 ### Robustesse NaN / horizon 16 j
 - Toutes les statistiques restent **tolérantes aux NaN** (`skipna`) : l'horizon 16 j doit s'afficher proprement même quand les membres se raréfient (~7,5 j).
 

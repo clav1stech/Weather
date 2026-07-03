@@ -6,6 +6,7 @@ stats déjà calculées (cf. app/stats/ensemble.py) et retourne une figure."""
 import plotly.graph_objects as go
 
 import config as C
+from app.stats.climato import clim_z500_normal
 from app.stats.ensemble import model_data
 from app.ui.theme import _ink, _plotly_template, _rgba
 
@@ -100,6 +101,31 @@ def divergence_chart(div, cutoff=None):
     fig.update_layout(title="Divergence inter-modèles (écart des médianes)",
                       height=340, template=_plotly_template(), hovermode="x unified",
                       xaxis_title="Échéance", yaxis_title="Écart chaud−froid (°C)",
+                      margin=dict(t=70, l=10, r=10, b=10))
+    return fig
+
+
+def z500_median_chart(med, titre):
+    """Médiane d'ensemble du géopotentiel 500 hPa par échéance (vue TECHNIQUE :
+    lecture de la donnée brute, jamais les membres individuels — pas de
+    spaghetti) + normale saisonnière en pointillés pour situer l'anomalie
+    (dorsale au-dessus, talweg en dessous). `med` : sortie de var_median()."""
+    x = med["valid_time"]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=x, y=clim_z500_normal(x), mode="lines", name="Normale saisonnière",
+        line=dict(color="#2980B9", width=2, dash="dot"),
+        hovertemplate="Normale : %{y:.0f} m<extra></extra>"))
+    fig.add_trace(go.Scatter(
+        x=x, y=med["median"], mode="lines", name="Médiane Z500",
+        line=dict(color="#7D3C98", width=3),
+        customdata=med["n_membres"],
+        hovertemplate="%{x|%a %d %b · %Hh}<br>Médiane : %{y:.0f} m "
+                      "(%{customdata} membres)<extra></extra>"))
+    fig.update_layout(title=titre, height=340, hovermode="x unified",
+                      template=_plotly_template(), xaxis_title="Échéance (date de validité)",
+                      yaxis_title="Géopotentiel 500 hPa (m)",
+                      legend=dict(orientation="h", y=1.12),
                       margin=dict(t=70, l=10, r=10, b=10))
     return fig
 

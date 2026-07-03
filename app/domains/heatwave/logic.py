@@ -6,6 +6,9 @@ que les paliers d'INTERPRÉTATION propres à l'affichage du domaine."""
 
 import pandas as pd
 
+from app.stats.climato import clim_z500_normal
+from app.stats.ensemble import var_median
+
 # Paliers de probabilité de canicule PARTAGÉS entre le calendrier du risque
 # (_canicule_label) et le KPI « Statut canicule » (statut gradué) — une seule
 # échelle pour toute la page, jamais deux jugements différents du même chiffre.
@@ -64,6 +67,71 @@ def _tendance_label(delta):
     if delta <= -TREND_STABLE_C:
         return "↘", "légère révision à la baisse"
     return "＝", "prévision stable"
+
+
+# ── Contexte synoptique Z500 (appui du signal T850, jamais un critère de risque) ──
+# L'anomalie du géopotentiel 500 hPa vs sa normale saisonnière (cosinus,
+# config.CLIM_Z500_*) trahit le régime d'altitude : anomalie nettement positive
+# = dorsale/blocage anticyclonique qui installe et entretient la chaleur ;
+# nettement négative = talweg, régime perturbé peu propice à une chaleur durable.
+# Seuils en mètres géopotentiels, ordres de grandeur synoptiques estivaux (une
+# dorsale marquée dépasse +60 m d'anomalie, un talweg net passe sous −40 m).
+# Le signal reste QUALITATIF : simple, explicable, à base de seuils + persistance
+# — jamais de valeur brute côté grand public, jamais de concurrence avec T850.
+Z500_FENETRE_J = 7           # jours à venir considérés pour qualifier le régime
+Z500_ANOM_DORSALE_M = 60.0   # anomalie journalière ≥ → jour « dorsale »
+Z500_ANOM_TALWEG_M = -40.0   # anomalie journalière ≤ → jour « talweg »
+Z500_JOURS_PERSISTANCE = 2   # jours dorsale/talweg suffisant à qualifier la fenêtre
+
+
+def anomalie_z500_journaliere(sub):
+    """Anomalie journalière (m) de la médiane d'ensemble Z500 vs la normale
+    saisonnière : DataFrame [date, anom]. Médiane journalière = médiane des
+    médianes horaires (Z500 varie peu dans la journée, inutile de repooler les
+    membres). None si z500 est absent ou vide dans `sub` (base antérieure à la
+    collecte, runs importés du legacy — absence normale, pas une anomalie)."""
+    med = var_median(sub, "z500")
+    if med is None or med.empty:
+        return None
+    med = med.copy()
+    med["date"] = pd.to_datetime(med["valid_time"]).dt.normalize()
+    daily = med.groupby("date")["median"].median().reset_index()
+    daily["anom"] = daily["median"] - clim_z500_normal(daily["date"])
+    return daily[["date", "anom"]]
+
+
+def signal_synoptique(sub, today, fenetre_j=Z500_FENETRE_J):
+    """Signal qualitatif grand public du régime d'altitude sur les prochains
+    jours : (icône, libellé court, phrase d'appui) ou None si Z500 inexploitable
+    (rien à afficher — le message T850 reste seul, strictement inchangé).
+
+    Deux portes d'entrée symétriques par régime : anomalie MOYENNE de la fenêtre
+    franchissant le seuil (régime installé), OU nombre de jours au-delà du seuil
+    atteignant la persistance (régime qui s'installe en cours de fenêtre)."""
+    daily = anomalie_z500_journaliere(sub)
+    if daily is None:
+        return None
+    win = daily[(daily["date"] >= today) &
+                (daily["date"] < today + pd.Timedelta(days=fenetre_j))]
+    if win.empty:
+        return None
+    anom_moy = float(win["anom"].mean())
+    n_dorsale = int((win["anom"] >= Z500_ANOM_DORSALE_M).sum())
+    n_talweg = int((win["anom"] <= Z500_ANOM_TALWEG_M).sum())
+    if anom_moy >= Z500_ANOM_DORSALE_M or n_dorsale >= Z500_JOURS_PERSISTANCE:
+        return ("🔆", "favorable au maintien de la chaleur",
+                "En altitude, les modèles voient une **dorsale anticyclonique** — une "
+                "configuration qui installe la chaleur et la fait durer. Si un épisode "
+                "chaud se dessine ci-dessous, ce contexte le rend plus solide.")
+    if anom_moy <= Z500_ANOM_TALWEG_M or n_talweg >= Z500_JOURS_PERSISTANCE:
+        return ("🌬️", "peu propice à une chaleur durable",
+                "La circulation d'altitude reste de type **perturbé** : même si des "
+                "journées chaudes apparaissent ci-dessous, ce contexte ne favorise pas "
+                "leur installation dans la durée.")
+    return ("⚖️", "neutre",
+            "Pas de configuration d'altitude marquée : ni blocage qui entretiendrait "
+            "la chaleur, ni régime perturbé qui la balaierait — le signal ci-dessous "
+            "se suffit à lui-même.")
 
 
 # Seuils (°C) sur le spread journalier P90−P10 pour le libellé grand public de

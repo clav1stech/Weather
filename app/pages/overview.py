@@ -17,8 +17,8 @@ from app.data.db import run_label_text
 from app.data.runsets import (
     latest_complete_run_sub, latest_refresh_status, previous_runs_sub)
 from app.stats.climato import clim_normal
-from app.stats.ensemble import daily_risk, multimodel_cutoff, super_ensemble
-from app.ui.charts import fan_chart, models_median_chart
+from app.stats.ensemble import daily_risk, multimodel_cutoff, super_ensemble, var_median
+from app.ui.charts import fan_chart, models_median_chart, z500_median_chart
 from app.ui.components import _kpi_card, complete_runs_caption
 
 
@@ -180,3 +180,16 @@ def page_overview(runs, sig):
     st.caption("Trait plein = médiane par modèle, bande = dispersion (P10–P90), "
                "pointillés = run de contrôle.")
     st.plotly_chart(models_median_chart(sub, present, cutoff), width="stretch")
+
+    # Contexte synoptique (technique, médiane seule) — rendu UNIQUEMENT si le pool
+    # contient du Z500 : en son absence (base pas encore alimentée, runs legacy),
+    # la page reste strictement identique à l'existant.
+    med_z500 = var_median(sub, "z500")
+    if med_z500 is not None and not med_z500.empty:
+        with st.expander("🌀 Contexte synoptique — géopotentiel 500 hPa (médiane)"):
+            st.caption("Médiane du super-ensemble du géopotentiel à 500 hPa (m). "
+                       "Au-dessus de la normale = dorsale/blocage anticyclonique "
+                       "(favorise chaleur durable) ; en dessous = talweg.")
+            st.plotly_chart(z500_median_chart(
+                med_z500, "Géopotentiel 500 hPa — derniers runs complets par modèle"),
+                width="stretch")

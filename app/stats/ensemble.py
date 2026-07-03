@@ -16,12 +16,31 @@ from app.runtime import VAR
 _PCT_COLS = ["Min", "P10", "P25", "Médiane", "P75", "P90", "Max"]
 
 
-def member_matrix(sub):
-    """Pivot membres : index=valid_time, colonnes=(model, member). Tri temporel."""
-    if sub.empty:
+def member_matrix(sub, var=VAR):
+    """Pivot membres : index=valid_time, colonnes=(model, member). Tri temporel.
+
+    `var` (défaut : variable principale) permet de pivoter une variable
+    secondaire (ex. z500). Colonne absente de `sub` (parquet antérieur à l'ajout
+    de la variable, run legacy) → None : l'absence d'une variable de contexte
+    est un cas normal, jamais une erreur."""
+    if sub.empty or var not in sub.columns:
         return None
-    piv = sub.pivot_table(index="valid_time", columns=["model", "member"], values=VAR)
+    piv = sub.pivot_table(index="valid_time", columns=["model", "member"], values=var)
     return piv.sort_index()
+
+
+def var_median(sub, var):
+    """Médiane d'ensemble d'une variable SECONDAIRE par échéance (tous membres
+    poolés, NaN ignorés) : [valid_time, median, n_membres]. None si la variable
+    est absente ou sans la moindre valeur valide — les vues qui l'affichent se
+    dégradent alors silencieusement, sans toucher au reste du dashboard."""
+    piv = member_matrix(sub, var)
+    if piv is None or not piv.notna().any(axis=None):
+        return None
+    out = pd.DataFrame({"valid_time": piv.index,
+                        "median": piv.median(axis=1).values,
+                        "n_membres": piv.notna().sum(axis=1).values})
+    return out[out["n_membres"] > 0].reset_index(drop=True)
 
 
 def super_ensemble(sub):

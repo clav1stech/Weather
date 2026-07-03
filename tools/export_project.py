@@ -11,7 +11,10 @@
                           données (data/, legacy/) et binaires. Rotation des N plus récents.
     --only <chemins>    : restreint la collecte à un sous-ensemble de chemins (répétable ou
                           séparés par des virgules), pour réduire le volume envoyé à l'IA sur
-                          une question ciblée. Le nom du fichier reflète le périmètre exporté.
+                          une question ciblée. Le nom du fichier reflète le périmètre exporté ;
+                          le manifeste liste les fichiers laissés hors périmètre. N'avance pas
+                          le numéro de patch Z (un sous-ensemble du même commit n'est pas un
+                          nouvel export).
 
 Les deux profils partagent la même collecte de fichiers, paramétrée par profil : on ne
 duplique jamais la logique de parcours. Export/ est gitignoré → aucun artefact n'est commité.
@@ -99,8 +102,13 @@ def _get_git_info():
     }
 
 
-def get_next_patch_version(suffix):
-    """Prochain patch Z disponible pour le couple (X.Y, extension) dans Export/."""
+def _resolve_patch_version(suffix, advance):
+    """Numéro de patch Z pour le couple (X.Y, extension) dans Export/.
+
+    advance=True  → prochain Z disponible (nouvel export plein).
+    advance=False → Z déjà utilisé le plus récent, sans avancer : un export partiel IA
+                    (--only) sur le même commit ne mérite pas un nouveau numéro de version.
+    """
     pattern = re.compile(rf"_v{VERSION_X}\.{VERSION_Y}\.(\d+)$")
     max_z = -1
     for f in export_dir.iterdir():
@@ -109,7 +117,7 @@ def get_next_patch_version(suffix):
         m = pattern.search(f.stem)
         if m:
             max_z = max(max_z, int(m.group(1)))
-    return max_z + 1
+    return max_z + 1 if advance else max(max_z, 0)
 
 
 def collect_files(profile, only=None):
@@ -171,8 +179,12 @@ def _prune_backups(suffix, keep):
             pass
 
 
-def export_ai(files, base_name, git):
-    """Écrit le .txt curé : manifeste (git/version/sommaire/tokens) puis fichiers balisés."""
+def export_ai(files, base_name, git, excluded=None):
+    """Écrit le .txt curé : manifeste (git/version/sommaire/tokens) puis fichiers balisés.
+
+    excluded, en export partiel (--only), liste les fichiers du périmètre --ai complet
+    laissés hors de ce sous-ensemble, pour que le manifeste s'auto-décrive.
+    """
     txt_path = export_dir / f"{base_name}.txt"
 
     # Pré-lecture pour le sommaire et l'estimation de volume (une seule lecture par fichier)
@@ -201,6 +213,10 @@ def export_ai(files, base_name, git):
             rel = f.relative_to(project_dir).as_posix()
             n_lines = contents[f].count("\n") + 1
             out.write(f"#   {rel}  ({n_lines} lignes, {len(contents[f]) // 1024} Ko)\n")
+        if excluded:
+            out.write(f"#\n# NON INCLUS ({len(excluded)} fichiers hors périmètre --only)\n")
+            for f in excluded:
+                out.write(f"#   {f.relative_to(project_dir).as_posix()}\n")
         out.write("\n")
 
         for f in files:
@@ -240,13 +256,19 @@ def run(profile, only=None):
 
     suffix = ".txt" if profile == "ai" else ".zip"
     scope = _scope_tag(only)
-    version_tag = f"v{VERSION_X}.{VERSION_Y}.{get_next_patch_version(suffix)}"
+    is_partial_ai = profile == "ai" and only is not None
+    z = _resolve_patch_version(suffix, advance=not is_partial_ai)
+    version_tag = f"v{VERSION_X}.{VERSION_Y}.{z}"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     # Le scope apparaît dans le nom pour que le fichier s'identifie sans être ouvert
     base_name = f"export_{project_dir.name}_{scope}_{timestamp}_{version_tag}"
 
     if profile == "ai":
-        export_ai(files, base_name, _get_git_info())
+        excluded = None
+        if only is not None:
+            included = set(files)
+            excluded = [f for f in collect_files("ai") if f not in included]
+        export_ai(files, base_name, _get_git_info(), excluded=excluded)
     else:
         export_backup(files, base_name)
 

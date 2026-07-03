@@ -29,3 +29,14 @@ def clim_normal(when):
     doy = pd.to_datetime(when)
     doy = doy.dt.dayofyear if hasattr(doy, "dt") else doy.dayofyear
     return mean + amplitude * np.cos(2 * np.pi * (doy - peak_doy) / 365.25)
+
+
+def clim_z500_normal(when):
+    """Normale climatique Z500 saisonnière (cosinus, config.CLIM_Z500_*), en
+    mètres géopotentiels. Sert à convertir la médiane Z500 en ANOMALIE — seule
+    lecture interprétable du géopotentiel. Pas de réglage session (contrairement
+    à la T850) : Z500 est une variable de contexte, pas un indicateur ajusté."""
+    doy = pd.to_datetime(when)
+    doy = doy.dt.dayofyear if hasattr(doy, "dt") else doy.dayofyear
+    return C.CLIM_Z500_MEAN + C.CLIM_Z500_AMPLITUDE * np.cos(
+        2 * np.pi * (doy - C.CLIM_Z500_PEAK_DOY) / 365.25)

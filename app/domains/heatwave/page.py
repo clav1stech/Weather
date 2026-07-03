@@ -14,13 +14,15 @@ import streamlit as st
 
 import config as C
 from app.data.runsets import latest_complete_run_sub, trend_daily_medians
+from app.data.t2m import t2m_signature, txtn_by_day
 from app.stats.climato import clim_normal, clim_params
 from app.stats.ensemble import daily_aggregate, daily_risk, super_ensemble
 from app.ui.components import complete_runs_caption
 from app.domains.heatwave.charts import (
     calendrier_risques, confiance_chart, ligne_de_flottaison, tendance_heatmap)
 from app.domains.heatwave.logic import (
-    PROB_CANICULE_QUASI, PROB_RISQUE_MARQUE, PROB_RISQUE_MODERE, tendance_recente)
+    PROB_CANICULE_QUASI, PROB_RISQUE_MARQUE, PROB_RISQUE_MODERE, signal_synoptique,
+    tendance_recente)
 
 
 def page_grand_public(runs, sig):
@@ -196,6 +198,20 @@ def page_grand_public(runs, sig):
     c3.metric("Pic de risque", f"{pic['prob'] * 100:.0f} %",
               help=f"{pic['date']:%a %d %b} · médiane {pic['Médiane']:.1f} °C")
 
+    # ── Contexte atmosphérique (Z500) — appui discret du message T850 ─────────
+    # Signal qualitatif uniquement : la valeur brute du géopotentiel ne parle
+    # qu'aux spécialistes (lecture technique : Explorer un run → onglet 🌀 Z500).
+    # None (z500 absent de la base ou du pool, ex. runs legacy) → rien d'affiché,
+    # le message principal reste strictement identique.
+    signal = signal_synoptique(sub, today)
+    if signal is not None:
+        icone, libelle, phrase = signal
+        st.markdown(f"{icone} **Configuration atmosphérique : {libelle}.** {phrase}")
+        st.caption("Lecture de la circulation d'altitude (géopotentiel 500 hPa) sur les "
+                   f"{len(C.MODELS)} modèles combinés — un éclairage en appui de "
+                   "l'indicateur principal ci-dessus, pas un critère de risque "
+                   "supplémentaire.")
+
     st.subheader("📈 Évolution de la chaleur prévue")
     st.caption("Courbe foncée = médiane ; bande rouge = P10–P90 ; pointillés bleus = "
                "normale climatique saisonnière ; orange/rouge = seuils d'alerte.")
@@ -204,8 +220,22 @@ def page_grand_public(runs, sig):
                     width="stretch")
 
     st.subheader("🗓️ Calendrier du risque de canicule")
-    st.caption(f"Chaque case = un jour, coloré selon P(≥ {seuil_canicule:.0f} °C @850).")
-    st.plotly_chart(calendrier_risques(jours, seuil_canicule), width="stretch")
+    # Tx/Tn haute résolution (flux annexe, parquet séparé — cf. app/data/t2m.py) :
+    # appui d'affichage en lecture seule sur ~4 jours, jamais un critère de
+    # risque. On ne garde que les jours du calendrier (≥ aujourd'hui) ; absence
+    # de données (fichier manquant, horizon dépassé) = cas normal, rien d'affiché.
+    txtn = txtn_by_day(t2m_signature())
+    txtn = txtn[txtn["date"] >= today] if not txtn.empty else txtn
+    if txtn.empty:
+        st.caption(f"Chaque case = un jour, coloré selon P(≥ {seuil_canicule:.0f} °C @850).")
+    else:
+        modeles = " · ".join(dict.fromkeys(txtn["model"]))  # ordre d'apparition, sans doublon
+        st.caption(f"Chaque case = un jour, coloré selon P(≥ {seuil_canicule:.0f} °C @850). "
+                   f"↑/↓ = températures max/min prévues **au sol** (modèles haute résolution "
+                   f"{modeles}, sur ~7 jours). Un **≈** signale une valeur moins fiable — "
+                   "seul un modèle disponible au-delà de ~4 jours, ou désaccord marqué entre "
+                   "eux ; détail au survol.")
+    st.plotly_chart(calendrier_risques(jours, seuil_canicule, txtn), width="stretch")
 
     # ── Tendance récente des runs (vulgarisé, en un coup d'œil) ──────────────
     st.subheader("🧭 Les modèles changent-ils d'avis ?")

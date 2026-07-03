@@ -73,7 +73,7 @@ def page_run(runs, sig):
         st.info("ℹ️ Hors créneau Météociel : le double run fonctionnera, mais le scrape legacy "
                "sera automatiquement sauté (run_dual.py ne le déclenche qu'aux créneaux ci-dessus).")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.subheader("① Open-Meteo seul")
         st.caption("`Forecast.py` : interroge l'API, détecte le cycle par modèle, met à jour "
@@ -109,6 +109,25 @@ def page_run(runs, sig):
                         st.error(f"❌ Code de sortie {code}.")
                 except subprocess.TimeoutExpired:
                     st.error("⏱️ Délai dépassé (10 min).")
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Erreur : {e}")
+
+    with col3:
+        st.subheader("③ Tx/Tn haute résolution")
+        st.caption("`forecast_t2m_hd.py` : API Forecast standard (Météo-France/DWD ICON), "
+                  "met à jour `data/database_paris_t2m.parquet` (flux annexe, 4 j). ~5-15 s.")
+        if st.button("🌡️ Lancer Tx/Tn HD", type="secondary"):
+            with st.spinner("Exécution de forecast_t2m_hd.py…"):
+                try:
+                    code, output = _run_script(os.path.join(C.BASE_DIR, "forecast_t2m_hd.py"))
+                    st.code(output or "(aucune sortie)")
+                    if code == 0:
+                        st.success("✅ Pipeline Tx/Tn HD terminé.")
+                        st.cache_data.clear()
+                    else:
+                        st.error(f"❌ Code de sortie {code}.")
+                except subprocess.TimeoutExpired:
+                    st.error("⏱️ Délai dépassé (5 min).")
                 except Exception as e:  # noqa: BLE001
                     st.error(f"Erreur : {e}")
 

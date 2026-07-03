@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
 """Script de migration (One-off) : Fichiers Excel (Météociel) → Base Parquet.
 
-Parcourt tous les anciens fichiers Forecast-*.xlsx du dossier `Forecasts/`,
+Parcourt tous les anciens fichiers Forecast-*.xlsx du dossier `legacy/`,
 extrait les onglets modèles (ECMWF, AIFS, GEFS), pivote les données au format
 "Tidy" et les intègre dans `data/database_paris.parquet`.
+
+Rôle historique : c'est ce script qui a rétro-rempli la base avant la bascule
+pipeline (config.PIPELINE_LIVE_SINCE). Il n'a plus vocation à être relancé —
+pour combler une absence ponctuelle, passer par l'import ciblé du dashboard
+(app/data/legacy_import.py), qui offre bien plus de garde-fous. Conservé comme
+référence du mapping xlsx → schéma plat.
 """
 
 import os
@@ -14,10 +20,12 @@ import datetime as dt
 import pandas as pd
 
 # --------------------------------------------------------------------------- #
-# Configuration
+# Configuration — chemins ancrés sur la racine du projet (parent de tools/),
+# le script reste donc lançable depuis n'importe quel répertoire courant.
 # --------------------------------------------------------------------------- #
-OLD_DIR = "Forecasts"
-NEW_DB_PATH = "data/database_paris.parquet"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OLD_DIR = os.path.join(ROOT, "legacy")
+NEW_DB_PATH = os.path.join(ROOT, "data", "database_paris.parquet")
 SCHEMA = ['run_date', 'model', 'member', 'valid_time', 't850']
 
 
@@ -123,7 +131,14 @@ def migrate():
     # Fusion avec la base existante si le nouveau script a déjà tourné
     os.makedirs(os.path.dirname(NEW_DB_PATH), exist_ok=True)
     if os.path.exists(NEW_DB_PATH):
-        backup_path = NEW_DB_PATH.replace(".parquet", f"_backup_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet")
+        # Copie datée dans data/backups/ (gitignoré) — même convention que
+        # l'import ciblé du dashboard (app/data/legacy_import.py).
+        backup_dir = os.path.join(os.path.dirname(NEW_DB_PATH), "backups")
+        os.makedirs(backup_dir, exist_ok=True)
+        backup_path = os.path.join(
+            backup_dir,
+            os.path.basename(NEW_DB_PATH).replace(
+                ".parquet", f"_backup_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.parquet"))
         shutil.copy2(NEW_DB_PATH, backup_path)
         print(f"  Sauvegarde créée : {backup_path}")
         existing = pd.read_parquet(NEW_DB_PATH)

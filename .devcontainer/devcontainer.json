@@ -5,7 +5,7 @@
   "customizations": {
     "codespaces": {
       "openFiles": [
-        "README.md",
+        "docs/CODEMAP.md",
         "meteo_app.py"
       ]
     },

@@ -227,7 +227,7 @@ CROSS_CHECK_LOG_PATH = os.path.join(DATA_DIR, "cross_check_log.csv")
 PIPELINE_LIVE_SINCE = "2026-06-30"
 LEGACY_MODELS = {"ECMWF": "ECMWF", "AIFS": "AIFS", "GEFS": "GEFS"}  # label -> feuille xlsx
 LEGACY_DET_NAMES = {"DET", "GFS"}  # nom de la colonne contrôle selon le modèle
-LEGACY_FORECASTS_DIR = os.path.join(BASE_DIR, "Forecasts")
+LEGACY_FORECASTS_DIR = os.path.join(BASE_DIR, "legacy")
 
 # Stratégie de comparaison par modèle :
 #   • "median" : médiane des membres d'ensemble des deux côtés. Stratégie par

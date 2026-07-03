@@ -101,7 +101,7 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
           shopt -s nullglob
-          git add Forecasts/*.xlsx data/*.csv
+          git add legacy/*.xlsx data/*.csv
           git diff-index --quiet HEAD || git commit -m "Pipeline: scrape legacy + contrôle croisé (${{ steps.run_label.outputs.label }})"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push

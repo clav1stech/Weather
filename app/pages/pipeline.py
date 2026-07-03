@@ -1,0 +1,195 @@
+# -*- coding: utf-8 -*-
+"""Page « Lancer le pipeline » (local uniquement) : lancement manuel de
+Forecast.py / run_dual.py, import ciblé legacy → parquet et historique du
+contrôle croisé. Seule page qui ÉCRIT dans les données — toujours via les
+garde-fous de app/data/legacy_import.py et Forecast.persist."""
+
+import os
+import subprocess
+import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+import streamlit as st
+
+import config as C
+import run_dual
+from app.data.legacy_import import import_legacy_run, legacy_import_candidates
+from app.data.presence import legacy_signature
+
+
+def _run_script(*args, timeout=300):
+    """Lance un script Python du projet en sous-processus, capture stdout/stderr."""
+    child_env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    proc = subprocess.run([sys.executable, *args], cwd=C.BASE_DIR, capture_output=True,
+                          text=True, encoding="utf-8", errors="replace",
+                          timeout=timeout, env=child_env)
+    output = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
+    return proc.returncode, output
+
+
+def cross_check_log_signature():
+    try:
+        return os.path.getmtime(C.CROSS_CHECK_LOG_PATH)
+    except OSError:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def load_cross_check_log(_sig):
+    if _sig is None or not os.path.exists(C.CROSS_CHECK_LOG_PATH):
+        return pd.DataFrame()
+    df = pd.read_csv(C.CROSS_CHECK_LOG_PATH, parse_dates=["checked_at", "run_date", "valid_time"])
+    return df.sort_values("checked_at", ascending=False).reset_index(drop=True)
+
+
+def page_run(runs, sig):
+    st.title("🚀 Lancer le pipeline")
+
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    nearest = run_dual._nearest_cron_hour(now_utc)
+    legacy_slot = run_dual.LEGACY_SLOT_BY_CRON_HOUR.get(nearest)
+    if nearest is not None:
+        poll_info = f"poll de référence le plus proche : **{nearest:02d}:15 UTC**"
+    else:
+        poll_info = "hors créneau cron (aucun poll dans la fenêtre ±1h30)"
+    st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}** · {poll_info}")
+
+    st.markdown("**Horaires conseillés (cron du workflow) :**")
+    rows = []
+    for h in run_dual.CRON_HOURS:
+        slot = run_dual.LEGACY_SLOT_BY_CRON_HOUR.get(h)
+        action = (f"Open-Meteo + scrape Météociel {slot} + contrôle croisé"
+                  if slot else "Open-Meteo seul (Météociel pas encore complet à cette heure)")
+        marker = " ← maintenant" if h == nearest else ""
+        rows.append(f"- **{h:02d}:15 UTC** — {action}{marker}")
+    st.markdown("\n".join(rows))
+
+    if legacy_slot:
+        st.success(f"✅ Créneau favorable au double run : Météociel a fini de publier le "
+                   f"{legacy_slot} (~{'midi' if legacy_slot == '0Z' else 'minuit'} heure de Paris).")
+    else:
+        st.info("ℹ️ Hors créneau Météociel : le double run fonctionnera, mais le scrape legacy "
+               "sera automatiquement sauté (run_dual.py ne le déclenche qu'aux créneaux ci-dessus).")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("① Open-Meteo seul")
+        st.caption("`Forecast.py` : interroge l'API, détecte le cycle par modèle, met à jour "
+                  "`data/database_paris.parquet`. ~10-30 s.")
+        if st.button("▶️ Lancer Forecast.py", type="secondary"):
+            with st.spinner("Exécution de Forecast.py…"):
+                try:
+                    code, output = _run_script(os.path.join(C.BASE_DIR, "Forecast.py"))
+                    st.code(output or "(aucune sortie)")
+                    if code == 0:
+                        st.success("✅ Pipeline Open-Meteo terminé.")
+                        st.cache_data.clear()
+                    else:
+                        st.error(f"❌ Code de sortie {code}.")
+                except subprocess.TimeoutExpired:
+                    st.error("⏱️ Délai dépassé (5 min).")
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Erreur : {e}")
+
+    with col2:
+        st.subheader("② Double run + contrôle croisé")
+        st.caption("`run_dual.py` : Open-Meteo, puis (si créneau favorable) scrape Météociel "
+                  "+ comparaison ECMWF/AIFS/GEFS échéance par échéance. ~30-90 s.")
+        if st.button("🔁 Lancer le double run", type="primary"):
+            with st.spinner("Exécution de run_dual.py…"):
+                try:
+                    code, output = _run_script(os.path.join(C.BASE_DIR, "run_dual.py"), timeout=600)
+                    st.code(output or "(aucune sortie)")
+                    if code == 0:
+                        st.success("✅ Double run terminé.")
+                        st.cache_data.clear()
+                    else:
+                        st.error(f"❌ Code de sortie {code}.")
+                except subprocess.TimeoutExpired:
+                    st.error("⏱️ Délai dépassé (10 min).")
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Erreur : {e}")
+
+    st.markdown("---")
+    st.subheader("🩹 Import ciblé depuis le legacy")
+    st.caption("Comble une **absence avérée** du parquet Open-Meteo depuis un xlsx "
+               "Météociel (même principe que `migrate.py`, mais un seul couple "
+               "run × modèle à la fois). Ne liste que les couples présents en "
+               "legacy et **sans aucune donnée valide** côté Open-Meteo — jamais "
+               "d'écrasement. Sauvegarde datée du parquet avant écriture ; les "
+               "xlsx restent en lecture seule.")
+    cands = legacy_import_candidates(sig, legacy_signature())
+    if cands.empty:
+        st.info("Aucune absence à combler : tous les runs legacy sont déjà "
+                "couverts par des données valides dans le parquet Open-Meteo.")
+    else:
+        def _cand_label(r):
+            reach = "" if pd.isna(r["lead_h"]) else f" · portée {r['lead_h']/24:.1f} j"
+            return (f"{r['model']} — run {r['run_date']:%d/%m/%Y} "
+                    f"{r['run_date'].hour}Z · {int(r['n_members'])} membres"
+                    f"{reach} · {r['file']}")
+
+        choice = st.selectbox("Run legacy à importer (absent du parquet)",
+                              cands.to_dict("records"), format_func=_cand_label)
+        confirm = st.checkbox("Je confirme l'import de ce run dans le parquet "
+                              "(sauvegarde datée créée automatiquement avant écriture).")
+        if st.button("📥 Importer ce run", type="primary", disabled=not confirm):
+            with st.spinner("Import en cours…"):
+                try:
+                    ok, msg = import_legacy_run(choice["file"], choice["model"],
+                                                choice["run_date"])
+                except Exception as e:  # noqa: BLE001
+                    ok, msg = False, f"Erreur inattendue : {e}"
+            if ok:
+                st.success(f"✅ {msg}")
+                st.cache_data.clear()
+            else:
+                st.error(f"❌ {msg}")
+
+    st.markdown("---")
+    st.subheader("🔍 Historique du contrôle croisé")
+    st.caption("Comparaison **médiane d'ensemble** (ECMWF/AIFS/GEFS) entre Open-Meteo et "
+              "Météociel, échéance par échéance. Seuil de signalement (⚠️) élargi avec "
+              f"l'échéance, de {C.CROSS_CHECK_TOLERANCE_BASE_C:.1f} à "
+              f"{C.CROSS_CHECK_TOLERANCE_CAP_C:.1f} °C (un bug pipeline ressort à courte "
+              "échéance ; à longue échéance deux ensembles distincts divergent légitimement).")
+    log_sig = cross_check_log_signature()
+    log = load_cross_check_log(log_sig)
+    if log.empty:
+        st.info("Aucun contrôle croisé enregistré pour l'instant. Lance le double run à un "
+               "créneau favorable (10:15 ou 22:15 UTC) pour en générer un.")
+    else:
+        latest_check = log["checked_at"].max()
+        latest = log[log["checked_at"] == latest_check]
+        st.caption(f"Dernier contrôle : **{latest_check:%d/%m/%Y %Hh%M}** UTC · "
+                  f"run **{pd.Timestamp(latest['run_date'].iloc[0]):%d %b %Hh}** UTC")
+        summary = latest.groupby(["model", "metric"]).agg(
+            n=("diff", "size"), mean_abs=("diff", lambda s: s.abs().mean()),
+            max_abs=("diff", lambda s: s.abs().max()), n_flag=("flag", "sum")).reset_index()
+        summary.columns = ["Modèle", "Métrique", "N", "Écart moyen abs.", "Écart max abs.", "Flags"]
+        st.dataframe(summary.style.format({"Écart moyen abs.": "{:.2f}", "Écart max abs.": "{:.2f}"}),
+                    width="stretch", hide_index=True)
+
+        if int(latest["flag"].sum()):
+            st.warning(f"⚠️ {int(latest['flag'].sum())} échéance(s) au-delà du seuil sur le "
+                      "dernier contrôle — détail ci-dessous.")
+        with st.expander("📋 Détail du dernier contrôle"):
+            detail_cols = ["model", "metric", "valid_time", "lead_h", "legacy_value",
+                           "openmeteo_value", "diff", "tol", "flag"]
+            # Rétro-compat : un log antérieur au format lead-aware n'a ni lead_h ni tol.
+            show = latest[[c for c in detail_cols if c in latest.columns]].sort_values(
+                "diff", key=lambda s: s.abs(), ascending=False)
+            styler = show.style.apply(
+                lambda r: ["background-color:#fdecea;color:#611a15" if r["flag"] else ""
+                           for _ in r], axis=1
+            ).format({"legacy_value": "{:.1f}", "openmeteo_value": "{:.1f}",
+                      "diff": "{:+.2f}", "tol": "{:.2f}"})
+            st.dataframe(styler, width="stretch", height=400, hide_index=True)
+
+        with st.expander("📜 Historique complet (tous contrôles)"):
+            st.dataframe(log, width="stretch", height=400, hide_index=True)
+            st.download_button("⬇️ Télécharger l'historique (CSV)",
+                               log.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="cross_check_log.csv", mime="text/csv")

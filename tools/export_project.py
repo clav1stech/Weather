@@ -11,7 +11,10 @@
                           données (data/, legacy/) et binaires. Rotation des N plus récents.
     --only <chemins>    : restreint la collecte à un sous-ensemble de chemins (répétable ou
                           séparés par des virgules), pour réduire le volume envoyé à l'IA sur
-                          une question ciblée. Le nom du fichier reflète le périmètre exporté.
+                          une question ciblée. Le nom du fichier reflète le périmètre exporté ;
+                          le manifeste liste les fichiers laissés hors périmètre. N'avance pas
+                          le numéro de patch Z (un sous-ensemble du même commit n'est pas un
+                          nouvel export).
 
 Les deux profils partagent la même collecte de fichiers, paramétrée par profil : on ne
 duplique jamais la logique de parcours. Export/ est gitignoré → aucun artefact n'est commité.
@@ -253,13 +256,19 @@ def run(profile, only=None):
 
     suffix = ".txt" if profile == "ai" else ".zip"
     scope = _scope_tag(only)
-    version_tag = f"v{VERSION_X}.{VERSION_Y}.{get_next_patch_version(suffix)}"
+    is_partial_ai = profile == "ai" and only is not None
+    z = _resolve_patch_version(suffix, advance=not is_partial_ai)
+    version_tag = f"v{VERSION_X}.{VERSION_Y}.{z}"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     # Le scope apparaît dans le nom pour que le fichier s'identifie sans être ouvert
     base_name = f"export_{project_dir.name}_{scope}_{timestamp}_{version_tag}"
 
     if profile == "ai":
-        export_ai(files, base_name, _get_git_info())
+        excluded = None
+        if only is not None:
+            included = set(files)
+            excluded = [f for f in collect_files("ai") if f not in included]
+        export_ai(files, base_name, _get_git_info(), excluded=excluded)
     else:
         export_backup(files, base_name)
 

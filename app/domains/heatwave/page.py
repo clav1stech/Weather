@@ -14,6 +14,7 @@ import streamlit as st
 
 import config as C
 from app.data.runsets import latest_complete_run_sub, trend_daily_medians
+from app.data.t2m import t2m_signature, txtn_by_day
 from app.stats.climato import clim_normal, clim_params
 from app.stats.ensemble import daily_aggregate, daily_risk, super_ensemble
 from app.ui.components import complete_runs_caption
@@ -219,8 +220,20 @@ def page_grand_public(runs, sig):
                     width="stretch")
 
     st.subheader("🗓️ Calendrier du risque de canicule")
-    st.caption(f"Chaque case = un jour, coloré selon P(≥ {seuil_canicule:.0f} °C @850).")
-    st.plotly_chart(calendrier_risques(jours, seuil_canicule), width="stretch")
+    # Tx/Tn haute résolution (flux annexe, parquet séparé — cf. app/data/t2m.py) :
+    # appui d'affichage en lecture seule sur ~4 jours, jamais un critère de
+    # risque. On ne garde que les jours du calendrier (≥ aujourd'hui) ; absence
+    # de données (fichier manquant, horizon dépassé) = cas normal, rien d'affiché.
+    txtn = txtn_by_day(t2m_signature())
+    txtn = txtn[txtn["date"] >= today] if not txtn.empty else txtn
+    if txtn.empty:
+        st.caption(f"Chaque case = un jour, coloré selon P(≥ {seuil_canicule:.0f} °C @850).")
+    else:
+        modeles = " · ".join(dict.fromkeys(txtn["model"]))  # ordre d'apparition, sans doublon
+        st.caption(f"Chaque case = un jour, coloré selon P(≥ {seuil_canicule:.0f} °C @850). "
+                   f"↑/↓ = températures max/min prévues **au sol** (modèle haute résolution "
+                   f"{modeles}), disponibles sur ~4 jours seulement.")
+    st.plotly_chart(calendrier_risques(jours, seuil_canicule, txtn), width="stretch")
 
     # ── Tendance récente des runs (vulgarisé, en un coup d'œil) ──────────────
     st.subheader("🧭 Les modèles changent-ils d'avis ?")

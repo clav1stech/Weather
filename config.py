@@ -111,11 +111,41 @@ VARIABLES = [
 PRIMARY_VAR = VARIABLES[0]["col"]
 
 # --------------------------------------------------------------------------- #
+#  Tx/Tn haute résolution (API Forecast standard, PAS l'API Ensemble)
+# --------------------------------------------------------------------------- #
+# Flux ANNEXE en lecture seule (cf. forecast_t2m_hd.py) : température 2 m
+# max/min journalière à très haute résolution locale, affichée en appui dans le
+# calendrier du risque de canicule. N'influence NI la détection canicule, NI la
+# sélection des runs, NI les KPI — t850 (PRIMARY_VAR) reste l'unique pilote.
+# api   : identifiant Open-Meteo (paramètre `models` de l'API Forecast). Les
+#         « seamless » combinent les grilles du fournisseur (ex. AROME→ARPEGE) ;
+#         il n'y a donc PAS de cycle unique identifiable — le flux est daté par
+#         instant de collecte (fetched_at), pas par run synoptique.
+# label : nom stocké dans la colonne `model` du parquet T2m.
+# L'ORDRE de la liste est l'ordre de PRIORITÉ à l'affichage : pour chaque jour,
+# le premier modèle disposant d'une valeur l'emporte, le suivant ne sert que de
+# secours — jamais les deux à la fois pour un même jour.
+T2M_API_URL = "https://api.open-meteo.com/v1/forecast"
+T2M_MODELS = [
+    {"api": "meteofrance_seamless", "label": "Météo-France"},
+    {"api": "dwd_icon_seamless",    "label": "DWD ICON"},
+]
+# Horizon volontairement court : Météo-France (AROME/ARPEGE seamless) publie
+# ~4 jours (constaté empiriquement : J à J+3 puis null). DWD ICON va plus loin
+# (7 j constatés) mais on borne la requête à 4 j : ce flux est un appoint très
+# haute résolution, pas une extension d'horizon — au-delà, le calendrier du
+# risque reste piloté par T850 seul, sans mention de température (voulu).
+T2M_FORECAST_DAYS = 4
+
+# --------------------------------------------------------------------------- #
 #  Stockage
 # --------------------------------------------------------------------------- #
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DB_PATH = os.path.join(DATA_DIR, "database_paris.parquet")
+# Parquet SÉPARÉ pour le flux Tx/Tn HD : pas un ensemble (aucun `member`), le
+# mélanger à DB_PATH casserait la sémantique de la base plate principale.
+DB_T2M_PATH = os.path.join(DATA_DIR, "database_paris_t2m.parquet")
 
 # Une série (model, member) entièrement NaN (modèle indisponible ce run) n'est
 # pas stockée. Les modèles qui s'arrêtent tôt gardent en revanche leurs lignes
@@ -284,3 +314,6 @@ API_BY_LABEL = {m["label"]: m["api"] for m in MODELS}
 VAR_COLS = [v["col"] for v in VARIABLES]
 VAR_API_BY_COL = {v["col"]: v["api"] for v in VARIABLES}
 SCHEMA = ["run_date", "model", "member", "valid_time"] + VAR_COLS
+# Flux Tx/Tn HD — l'ordre de T2M_LABELS EST l'ordre de priorité d'affichage.
+T2M_LABELS = [m["label"] for m in T2M_MODELS]
+T2M_SCHEMA = ["fetched_at", "model", "target_date", "tx", "tn"]

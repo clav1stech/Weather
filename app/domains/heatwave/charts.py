@@ -2,6 +2,7 @@
 """Graphiques propres au domaine canicule : ligne de flottaison (seuils +
 normale), calendrier du risque, heatmap de tendance, barres de confiance."""
 
+import pandas as pd
 import plotly.graph_objects as go
 
 from app.stats.climato import clim_normal
@@ -44,18 +45,53 @@ CANICULE_SCALE = [
 ]
 
 
-def calendrier_risques(jours, seuil):
+def _fmt_txtn_cell(tx, tn):
+    """Texte de case « ↑Tx ↓Tn » (°C entiers) — tolère qu'une des deux valeurs
+    manque (valeur daily null côté API) : on affiche ce qui existe, rien de plus."""
+    parts = []
+    if pd.notna(tx):
+        parts.append(f"↑{tx:.0f}°")
+    if pd.notna(tn):
+        parts.append(f"↓{tn:.0f}°")
+    return "<br>".join(parts)
+
+
+def calendrier_risques(jours, seuil, txtn=None):
+    """Calendrier du risque : couleur pilotée par la probabilité T850 UNIQUEMENT.
+    `txtn` (DataFrame [date, tx, tn, model], cf. app/data/t2m.py) est un simple
+    appui d'affichage : Tx/Tn haute résolution en texte dans les cases couvertes
+    (~J à J+3), rien sur les autres. txtn None/vide → figure strictement
+    identique à l'affichage sans ce flux (absence = cas normal)."""
     texts = [
         f"{d:%a %d %b}<br>{_canicule_label(p)}"
         f"<br>Médiane : {m:.1f} °C · P90 : {p90:.1f} °C"
         f"<br>P(≥ {seuil:.0f} °C) : {p * 100:.0f} %"
         for d, p, m, p90 in zip(jours["date"], jours["prob"], jours["Médiane"], jours["P90"])
     ]
-    fig = go.Figure(go.Heatmap(
+    heat = dict(
         x=jours["date"], y=["Risque canicule"], z=[jours["prob"].tolist()],
         colorscale=CANICULE_SCALE, zmin=0.0, zmax=1.0, xgap=3, ygap=0,
         text=[texts], hovertemplate="%{text}<extra></extra>",
-        colorbar=dict(title="P(canicule)", tickformat=".0%", thickness=12, len=0.9)))
+        colorbar=dict(title="P(canicule)", tickformat=".0%", thickness=12, len=0.9))
+    if txtn is not None and not txtn.empty:
+        by_day = {pd.Timestamp(r.date).normalize(): r for r in txtn.itertuples()}
+        cells, hovers = [], []
+        for d, hover in zip(jours["date"], texts):
+            r = by_day.get(pd.Timestamp(d).normalize())
+            cell = _fmt_txtn_cell(r.tx, r.tn) if r is not None else ""
+            cells.append(cell)
+            if cell:
+                sol = " · ".join(p for p in (
+                    f"max {r.tx:.1f} °C" if pd.notna(r.tx) else "",
+                    f"min {r.tn:.1f} °C" if pd.notna(r.tn) else "") if p)
+                hover += f"<br>Au sol : {sol} ({r.model}, haute résolution)"
+            hovers.append(hover)
+        # Le hover migre vers customdata pour libérer `text` (affiché en case).
+        # Pas de couleur de police imposée : Plotly contraste automatiquement
+        # le texte selon la teinte de chaque case (vert clair → texte sombre).
+        heat.update(text=[cells], texttemplate="%{text}", textfont=dict(size=11),
+                    customdata=[hovers], hovertemplate="%{customdata}<extra></extra>")
+    fig = go.Figure(go.Heatmap(**heat))
     fig.update_layout(height=150, template=_plotly_template(),
                       xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
                       yaxis=dict(visible=False), margin=dict(t=10, l=10, r=10, b=10))

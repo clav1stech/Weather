@@ -11,6 +11,8 @@ parquet :
 ```
 ┌── PIPELINE (racine, SENSIBLE — collecte des données) ──────────────────┐
 │ Forecast.py            API Open-Meteo → data/database_paris.parquet    │
+│ forecast_t2m_hd.py     API Forecast (Tx/Tn HD, flux annexe 4 j)        │
+│                        → data/database_paris_t2m.parquet               │
 │ Forecast_legacy.py     scrape Météociel → legacy/*.xlsx (0Z/12Z)       │
 │ validate_cross_pipeline.py   contrôle croisé OM ↔ legacy               │
 │ run_dual.py            orchestrateur manuel (bouton dashboard)         │
@@ -60,6 +62,7 @@ restent intactes.
 | `app/data/runsets.py` | POLITIQUES de sélection de runs (3, volontairement distinctes) + backfill convergence | `latest_complete_run_sub`, `latest_run_sub`, `previous_runs_sub`, `completed_pooled_sub`, `trend_daily_medians`, `main_labels_expected_at`, `latest_refresh_status` |
 | `app/data/presence.py` | diagnostic présence OM & legacy (lecture seule) | `openmeteo_presence`, `legacy_presence`, `_missing_by_run`, `legacy_signature` |
 | `app/data/legacy_import.py` | import ciblé xlsx → parquet (seule ÉCRITURE, ultra-encadrée) | `legacy_import_candidates`, `import_legacy_run` |
+| `app/data/t2m.py` | lecture du parquet Tx/Tn HD (flux annexe, dégradation silencieuse) | `t2m_signature`, `load_t2m`, `txtn_by_day` |
 | `app/stats/ensemble.py` | stats génériques tolérantes NaN sur un pool de membres | `super_ensemble`, `model_data`, `model_medians`, `divergence`, `daily_aggregate`, `daily_risk`, `var_median` |
 | `app/stats/tables.py` | tables d'export larges (onglet 🧾) | `enriched_super_table`, `model_table` |
 | `app/stats/climato.py` | normale saisonnière cosinus (ajustable en session) | `clim_normal`, `clim_params`, `clim_z500_normal` |

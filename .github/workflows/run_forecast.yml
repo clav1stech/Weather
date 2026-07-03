@@ -8,12 +8,15 @@ on:
     # 0Z/12Z, publiés en intégralité avec retard (~midi / minuit heure de Paris).
     - cron: '15 10 * * *'   # 0Z
     - cron: '15 22 * * *'   # 12Z
+    # Tx/Tn haute résolution (API Forecast, flux annexe) : toutes les 2h,
+    # décalé de 30 min du fetch-api pour ne pas faire la queue au push.
+    - cron: '45 */2 * * *'
   workflow_dispatch:
     inputs:
       target:
-        description: "Job(s) à lancer"
+        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul)"
         type: choice
-        options: [both, api, legacy]
+        options: [both, api, legacy, t2m]
         default: both
       legacy_run:
         description: "Cycle Météociel (si target=legacy ou both). 6Z/18Z : manuel only, AIFS/GEFS uniquement (ECMWF ENS absent à ces cycles)."
@@ -53,6 +56,48 @@ jobs:
           shopt -s nullglob
           git add data/*.parquet
           git diff-index --quiet HEAD || git commit -m "Pipeline: base Open-Meteo synchronisée"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push
+
+  fetch-t2m-hd:
+    # Flux ANNEXE Tx/Tn haute résolution (forecast_t2m_hd.py → parquet séparé
+    # data/database_paris_t2m.parquet). Fichier distinct des autres jobs, mais
+    # le PUSH git, lui, est partagé : même concurrency.group pour sérialiser
+    # (le cron 2h croise fatalement fetch-api ; sans groupe commun, courses de
+    # push malgré le pull --rebase). Cron décalé de 30 min pour limiter la file.
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 't2m') ||
+      github.event.schedule == '45 */2 * * *'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: weather-data-push
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests pandas pyarrow
+
+      - name: Fetch Open-Meteo Tx/Tn HD
+        run: python forecast_t2m_hd.py
+
+      - name: Commit and Push T2m Database
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          # Le fichier peut ne pas exister au tout premier run si l'API n'a rien
+          # renvoyé d'exploitable (le script sort alors sans écrire) — pas d'échec
+          # (if explicite : `[ -f ] && …` faux ferait tomber le shell `bash -e`).
+          if [ -f data/database_paris_t2m.parquet ]; then
+            git add data/database_paris_t2m.parquet
+          fi
+          git diff-index --quiet HEAD || git commit -m "Pipeline: base Tx/Tn HD synchronisée"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
 

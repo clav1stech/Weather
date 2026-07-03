@@ -11,12 +11,17 @@ on:
     # Tx/Tn haute résolution (API Forecast, flux annexe) : toutes les 2h,
     # décalé de 30 min du fetch-api pour ne pas faire la queue au push.
     - cron: '45 */2 * * *'
+    # Observations Météo-France (DPObs, flux annexe) : toutes les heures —
+    # cadence VOLONTAIREMENT indépendante des autres jobs (l'API publie une
+    # obs horaire par station ; 4 requêtes/h, quota 100 req/min très loin).
+    # Décalé à :20 pour ne pas faire la queue au push avec :15 et :45.
+    - cron: '20 * * * *'
   workflow_dispatch:
     inputs:
       target:
-        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul)"
+        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF seules)"
         type: choice
-        options: [both, api, legacy, t2m]
+        options: [both, api, legacy, t2m, obs]
         default: both
       legacy_run:
         description: "Cycle Météociel (si target=legacy ou both). 6Z/18Z : manuel only, AIFS/GEFS uniquement (ECMWF ENS absent à ces cycles)."
@@ -98,6 +103,49 @@ jobs:
             git add data/database_paris_t2m.parquet
           fi
           git diff-index --quiet HEAD || git commit -m "Pipeline: base Tx/Tn HD synchronisée"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push
+
+  fetch-observations:
+    # Flux ANNEXE observations Météo-France (fetch_observations.py → parquet
+    # séparé data/database_paris_observations.parquet). La clé API vit dans le
+    # secret METEOFRANCE_API_KEY — jamais dans le code ni les logs (le script
+    # ne l'affiche jamais, même partiellement). Même concurrency.group que les
+    # autres jobs : la contention est sur le PUSH git du repo, pas les fichiers.
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'obs') ||
+      github.event.schedule == '20 * * * *'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: weather-data-push
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests pandas pyarrow
+
+      - name: Fetch Météo-France Observations
+        env:
+          METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
+        run: python fetch_observations.py
+
+      - name: Commit and Push Observations Database
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          # Le fichier peut ne pas exister au tout premier run si aucune station
+          # n'a répondu (le script sort alors sans écrire) — pas d'échec.
+          if [ -f data/database_paris_observations.parquet ]; then
+            git add data/database_paris_observations.parquet
+          fi
+          git diff-index --quiet HEAD || git commit -m "Pipeline: observations Météo-France synchronisées"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
 

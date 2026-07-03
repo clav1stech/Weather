@@ -139,6 +139,74 @@ T2M_MODELS = [
 T2M_FORECAST_DAYS = 7
 
 # --------------------------------------------------------------------------- #
+#  Observations temps réel Météo-France (API DPObs — flux annexe séparé)
+# --------------------------------------------------------------------------- #
+# Flux ANNEXE d'OBSERVATIONS de surface (cf. fetch_observations.py) : 4 stations
+# parisiennes choisies pour leur contraste d'exposition à l'îlot de chaleur
+# urbain (ICU). Affichage/contexte uniquement — n'influence NI la détection
+# canicule, NI la sélection des runs, NI les KPI (t850 reste l'unique pilote).
+#
+# Authentification : header "apikey" (pas d'OAuth2), clé lue EXCLUSIVEMENT via
+# la variable d'environnement METEOFRANCE_API_KEY (secret GitHub Actions en CI,
+# .env gitignoré en local) — jamais en dur ici ni ailleurs dans le code.
+OBS_API_BASE = "https://public-api.meteofrance.fr/public/DPObs/v2"
+OBS_API_KEY_ENV = "METEOFRANCE_API_KEY"   # nom de la variable d'env portant la clé
+
+# id        : id_station DPObs (8 chiffres, vérifié via /liste-stations)
+# nom       : nom court affiché
+# reseau    : RADOME (instrumentation complète) ou ETENDU (température/pluie seules)
+# reference : True = station de référence (Montsouris) — seule station dont
+#             humidité/vent/pression sont affichés (les stations ETENDU ne
+#             publient pas ces variables : absence STRUCTURELLE, pas un bug).
+# icu       : exposition à l'îlot de chaleur — "urbain" (tissu dense, retient
+#             la chaleur la nuit) ou "aere" (parc/bois, se refroidit bien).
+#             Champ EXPLICITE : ne pas le déduire du réseau (la coïncidence
+#             ETENDU=urbain / RADOME=aéré est propre à CES 4 stations).
+# profil    : exposition ICU en toutes lettres, affichée pour situer la station.
+# color     : couleur d'affichage (comparaison inter-stations).
+OBS_STATIONS = [
+    {"id": "75114001", "nom": "Montsouris",   "lat": 48.821667, "lon": 2.337833,
+     "alt": 75, "reseau": "RADOME", "reference": True,  "icu": "aere",
+     "color": "#1F618D",
+     "profil": "parc du sud de Paris — station de référence historique"},
+    {"id": "75110001", "nom": "Lariboisière", "lat": 48.882833, "lon": 2.352000,
+     "alt": 55, "reseau": "ETENDU", "reference": False, "icu": "urbain",
+     "color": "#C0392B",
+     "profil": "nord de Paris, tissu urbain dense (ICU marqué)"},
+    {"id": "75106001", "nom": "Luxembourg",   "lat": 48.844833, "lon": 2.338500,
+     "alt": 50, "reseau": "ETENDU", "reference": False, "icu": "urbain",
+     "color": "#B9770E",
+     "profil": "rive gauche, proche Saint-Germain-des-Prés (urbain)"},
+    {"id": "75116008", "nom": "Longchamp",    "lat": 48.854833, "lon": 2.233667,
+     "alt": 27, "reseau": "RADOME", "reference": False, "icu": "aere",
+     "color": "#1E8449",
+     "profil": "bois de Boulogne, très végétalisé et aéré"},
+]
+
+# Variables collectées depuis /station/horaire — api = champ JSON DPObs,
+# col = colonne parquet, conv = conversion appliquée AU PARSING (avant stockage,
+# pour que le parquet soit directement comparable aux données Open-Meteo) :
+#   "kelvin"    : K → °C (t/td/tx/tn sont renvoyés en Kelvin par l'API) ;
+#   "pa_to_hpa" : Pa → hPa (pres/pmer) ;
+#   None        : valeur stockée telle quelle (u en %, dd en °, ff en m/s,
+#                 rr1 en mm, ray_glo01 en J/m²).
+# Une variable absente/null (stations ETENDU : humidité, vent, pression) reste
+# NaN — jamais de valeur inventée, jamais d'erreur.
+OBS_VARIABLES = [
+    {"api": "t",         "col": "t",         "conv": "kelvin"},
+    {"api": "td",        "col": "td",        "conv": "kelvin"},
+    {"api": "tx",        "col": "tx",        "conv": "kelvin"},
+    {"api": "tn",        "col": "tn",        "conv": "kelvin"},
+    {"api": "u",         "col": "humidite",  "conv": None},
+    {"api": "dd",        "col": "vent_dir",  "conv": None},
+    {"api": "ff",        "col": "vent_ff",   "conv": None},
+    {"api": "rr1",       "col": "precip_1h", "conv": None},
+    {"api": "pres",      "col": "pression",  "conv": "pa_to_hpa"},
+    {"api": "pmer",      "col": "pression_mer", "conv": "pa_to_hpa"},
+    {"api": "ray_glo01", "col": "rayonnement",  "conv": None},
+]
+
+# --------------------------------------------------------------------------- #
 #  Stockage
 # --------------------------------------------------------------------------- #
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -147,6 +215,9 @@ DB_PATH = os.path.join(DATA_DIR, "database_paris.parquet")
 # Parquet SÉPARÉ pour le flux Tx/Tn HD : pas un ensemble (aucun `member`), le
 # mélanger à DB_PATH casserait la sémantique de la base plate principale.
 DB_T2M_PATH = os.path.join(DATA_DIR, "database_paris_t2m.parquet")
+# Parquet SÉPARÉ pour les observations Météo-France (une ligne par
+# (station, heure d'observation), append-only) — même principe d'isolement.
+DB_OBS_PATH = os.path.join(DATA_DIR, "database_paris_observations.parquet")
 
 # Une série (model, member) entièrement NaN (modèle indisponible ce run) n'est
 # pas stockée. Les modèles qui s'arrêtent tôt gardent en revanche leurs lignes
@@ -318,3 +389,15 @@ SCHEMA = ["run_date", "model", "member", "valid_time"] + VAR_COLS
 # Flux Tx/Tn HD — l'ordre de T2M_LABELS EST l'ordre de priorité d'affichage.
 T2M_LABELS = [m["label"] for m in T2M_MODELS]
 T2M_SCHEMA = ["fetched_at", "model", "target_date", "tx", "tn"]
+# Flux observations Météo-France. valid_time = validity_time de l'API (heure de
+# l'observation, UTC tz-naïf) — PAS reference_time, qui est l'heure de
+# production du lot côté Météo-France (identique pour toutes les stations et
+# renouvelée à chaque poll pour une même observation : en faire la clé
+# dupliquerait chaque obs à chaque poll). Clé de déduplication :
+# (station_id, valid_time).
+OBS_STATION_IDS = [s["id"] for s in OBS_STATIONS]
+OBS_NOM_BY_ID = {s["id"]: s["nom"] for s in OBS_STATIONS}
+OBS_COLOR_BY_NOM = {s["nom"]: s["color"] for s in OBS_STATIONS}
+OBS_STATION_BY_ID = {s["id"]: s for s in OBS_STATIONS}
+OBS_VAR_COLS = [v["col"] for v in OBS_VARIABLES]
+OBS_SCHEMA = ["valid_time", "station_id", "station_nom"] + OBS_VAR_COLS

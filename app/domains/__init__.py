@@ -9,10 +9,12 @@ aux pages transverses : créer le sous-package puis l'enregistrer ci-dessous
 """
 
 from app.domains.heatwave.page import page_grand_public
+from app.domains.observations.page import page_observations
 
 # (label de navigation, fonction de rendu (runs, sig) -> None), dans l'ordre
 # d'affichage souhaité dans la sidebar — les domaines passent AVANT les pages
 # transverses (le 1er domaine est la page d'accueil du dashboard).
 DOMAIN_PAGES = [
     ("Indicateur de canicule", page_grand_public),
+    ("Observations en direct", page_observations),
 ]

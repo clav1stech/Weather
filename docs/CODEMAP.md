@@ -13,10 +13,14 @@ parquet :
 │ Forecast.py            API Open-Meteo → data/database_paris.parquet    │
 │ forecast_t2m_hd.py     API Forecast (Tx/Tn HD, flux annexe 7 j)        │
 │                        → data/database_paris_t2m.parquet               │
+│ fetch_observations.py  API Météo-France DPObs (obs 4 stations Paris,   │
+│                        clé via env METEOFRANCE_API_KEY uniquement)     │
+│                        → data/database_paris_observations.parquet      │
 │ Forecast_legacy.py     scrape Météociel → legacy/*.xlsx (0Z/12Z)       │
 │ validate_cross_pipeline.py   contrôle croisé OM ↔ legacy               │
 │ run_dual.py            orchestrateur manuel (bouton dashboard)         │
 │ .github/workflows/run_forecast.yml   cron 2h (API) + 0Z/12Z (legacy)   │
+│                        + cron horaire (observations MF)                │
 └─────────────────────────────────────────────────────────────────────────┘
                     │ écrit                         ▲ lit (lecture seule)
                     ▼                               │
@@ -63,6 +67,7 @@ restent intactes.
 | `app/data/presence.py` | diagnostic présence OM & legacy (lecture seule) | `openmeteo_presence`, `legacy_presence`, `_missing_by_run`, `legacy_signature` |
 | `app/data/legacy_import.py` | import ciblé xlsx → parquet (seule ÉCRITURE, ultra-encadrée) | `legacy_import_candidates`, `import_legacy_run` |
 | `app/data/t2m.py` | lecture du parquet Tx/Tn HD (flux annexe, dégradation silencieuse) | `t2m_signature`, `load_t2m`, `txtn_by_day` |
+| `app/data/observations.py` | lecture du parquet observations MF (flux annexe, dégradation silencieuse) | `obs_signature`, `load_obs`, `latest_obs`, `obs_window`, `daily_txtn_obs` |
 | `app/stats/ensemble.py` | stats génériques tolérantes NaN sur un pool de membres | `super_ensemble`, `model_data`, `model_medians`, `divergence`, `daily_aggregate`, `daily_risk`, `var_median` |
 | `app/stats/tables.py` | tables d'export larges (onglet 🧾) | `enriched_super_table`, `model_table` |
 | `app/stats/climato.py` | normale saisonnière cosinus (ajustable en session) | `clim_normal`, `clim_params`, `clim_z500_normal` |
@@ -71,6 +76,7 @@ restent intactes.
 | `app/ui/components.py` | composants Streamlit réutilisables | `_kpi_card`, `complete_runs_caption` |
 | `app/domains/__init__.py` | REGISTRE des domaines (navigation) | `DOMAIN_PAGES` |
 | `app/domains/heatwave/` | domaine canicule : `logic.py` (paliers/labels), `charts.py`, `page.py` | `page_grand_public`, `tendance_recente`, `signal_synoptique` |
+| `app/domains/observations/` | domaine observations MF : ICU inter-stations, prévu vs observé | `page_observations`, `ecart_icu_series`, `comparaison_prevu_observe` |
 | `app/pages/overview.py` | Vue d'ensemble (KPI config-driven `KPI_*`) | `page_overview` |
 | `app/pages/explore.py` | Explorer un run (onglets + tables d'export) | `page_explore` |
 | `app/pages/convergence.py` | Révisions & convergence run-à-run | `page_convergence` |
@@ -131,6 +137,8 @@ temporelle). Correspondance code :
 | `cycles` ≠ `expected_cycles` (alerte vs capacité) | `config.py` + `app/data/runsets.py` (`main_labels_expected_at`) |
 | Import legacy = absence avérée uniquement | `app/data/legacy_import.py` |
 | Tables d'export volontairement larges | `app/stats/tables.py` |
+| Clé API MF via env only, dédup (station, validity_time), K→°C au parsing | `fetch_observations.py` |
+| Obs : dégradation silencieuse, groupes ICU explicites, prévu-vs-observé jours complets | `app/data/observations.py`, `app/domains/observations/` |
 
 ## Non-régression — comment vérifier
 

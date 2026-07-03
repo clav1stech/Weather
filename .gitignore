@@ -14,6 +14,11 @@ Thumbs.db
 # Réglages Claude Code personnels (non partagés)
 .claude/settings.local.json
 
+# Secrets locaux (clé API Météo-France…) — JAMAIS versionnés. En CI, la clé
+# vit dans un secret GitHub Actions (METEOFRANCE_API_KEY), jamais dans le code.
+.env
+.env.*
+
 # Environnement virtuel local (macOS)
 .venv/
 

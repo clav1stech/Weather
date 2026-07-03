@@ -32,8 +32,9 @@ from streamlit.testing.v1 import AppTest  # noqa: E402
 
 GOLDEN_PATH = os.path.join(ROOT, "tools", "golden", "golden_ui.json")
 
-PAGES = ["Indicateur de canicule", "Vue d'ensemble", "Explorer un run",
-         "Convergence des runs", "Contrôle des runs", "Lancer le pipeline"]
+PAGES = ["Indicateur de canicule", "Observations en direct", "Vue d'ensemble",
+         "Explorer un run", "Convergence des runs", "Contrôle des runs",
+         "Lancer le pipeline"]
 
 # Horloges pures (heure courante, indépendante des données) → neutralisées.
 _CLOCK_RE = re.compile(r"\b\d{1,2}:\d{2}\b")

@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 import config as C
-from app.data.runsets import latest_complete_run_sub, trend_daily_medians
+from app.data.runsets import latest_complete_run_sub, latest_z500_sub, trend_daily_medians
 from app.data.t2m import t2m_signature, txtn_by_day
 from app.stats.climato import clim_normal, clim_params
 from app.stats.ensemble import daily_aggregate, daily_risk, super_ensemble
@@ -201,9 +201,11 @@ def page_grand_public(runs, sig):
     # ── Contexte atmosphérique (Z500) — appui discret du message T850 ─────────
     # Signal qualitatif uniquement : la valeur brute du géopotentiel ne parle
     # qu'aux spécialistes (lecture technique : Explorer un run → onglet 🌀 Z500).
-    # None (z500 absent de la base ou du pool, ex. runs legacy) → rien d'affiché,
-    # le message principal reste strictement identique.
-    signal = signal_synoptique(sub, today)
+    # Pool DÉDIÉ (latest_z500_sub) plutôt que `sub` : chaque modèle apporte sa
+    # dernière valeur z500 connue, quitte à remonter à un run plus ancien que
+    # celui retenu pour T850. None (z500 absent de toute la base, ex. runs
+    # legacy) → rien d'affiché, le message principal reste strictement identique.
+    signal = signal_synoptique(latest_z500_sub(sig), today)
     if signal is not None:
         icone, libelle, phrase = signal
         st.markdown(f"{icone} **Configuration atmosphérique : {libelle}.** {phrase}")

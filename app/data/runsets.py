@@ -117,6 +117,36 @@ def latest_run_sub(_sig):
     return pd.concat(frames, ignore_index=True), sources
 
 
+@st.cache_data(show_spinner=False)
+def latest_z500_sub(_sig, as_of=None):
+    """Pool Z500 : pour CHAQUE modèle, son dernier run contenant du z500 valide —
+    en remontant l'historique si le run T850 retenu par latest_complete_run_sub
+    n'en a pas (ex. juste après l'ajout de la variable, ou run legacy comblé
+    entre-temps). Le géopotentiel n'est qu'un contexte synoptique : aucune
+    exigence d'horizon/complétude ici, contrairement aux vues combinées — on
+    veut la dernière valeur connue par modèle, même issue d'un run plus ancien
+    que celui affiché pour T850. `as_of` : mêmes bornes que
+    latest_complete_run_sub (rejeu « Vu depuis »). z500 absent partout (base
+    pas encore alimentée à cette date, runs legacy) → pool vide, dégradation
+    silencieuse en aval (var_median renvoie None)."""
+    df = load_db(_sig)
+    if as_of is not None:
+        df = df[df["run_date"] <= pd.Timestamp(as_of)]
+    if df.empty or "z500" not in df.columns:
+        return df.iloc[0:0]
+    frames = []
+    for label in C.MODEL_LABELS:
+        mdf = df[df["model"] == label]
+        valid = mdf.dropna(subset=["z500"])
+        if valid.empty:
+            continue
+        rd = valid["run_date"].max()
+        frames.append(mdf[mdf["run_date"] == rd])
+    if not frames:
+        return df.iloc[0:0]
+    return pd.concat(frames, ignore_index=True)
+
+
 def main_labels_expected_at(run_date):
     """Modèles principaux attendus au cycle synoptique de `run_date`.
     Utilise `expected_cycles` (config) — ex. ECMWF attendu seulement à 0Z/12Z,

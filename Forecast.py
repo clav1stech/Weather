@@ -472,6 +472,63 @@ def filter_fresh_rows(fresh, existing):
     return out, stale_labels, partial_labels
 
 
+def complete_missing_vars(candidate, existing):
+    """Comble, sur le DERNIER run déjà stocké de chaque modèle, une variable
+    ENTIÈREMENT absente de ce run (ex. z500 ajouté à config.VARIABLES après
+    coup, alors que le cycle en base n'a pas changé depuis) avec les valeurs du
+    poll courant — jamais les variables déjà renseignées (ex. t850), qui
+    restent gérées par mask_stale_tail/filter_fresh_rows.
+
+    Un cycle inchangé (t850 identique) est normalement écarté par
+    filter_fresh_rows comme « rien de neuf » ; c'est correct pour t850, mais
+    empêcherait alors À VIE qu'une variable ajoutée en cours de cycle soit
+    persistée, puisque le cycle ne redeviendra jamais « frais » pour autant.
+    Cette fonction traite ce cas séparément : une variable absente n'a par
+    définition aucune « queue périmée » à détecter (rien à comparer), donc pas
+    de passage par mask_stale_tail — c'est un premier remplissage, pas un
+    re-poll à filtrer.
+
+    Absence AVÉRÉE uniquement (colonne 100 % NaN pour ce run stocké) — une
+    variable partiellement renseignée n'est jamais retouchée par cette voie.
+    Ne comble que les couples (member, valid_time) déjà présents dans le run
+    stocké — jamais d'extension de portée ici (uniquement filter_fresh_rows
+    étend la portée d'un run). Ne s'applique que si `candidate` porte
+    exactement le même run_date que celui déjà stocké : un run_date différent
+    est un cycle réellement nouveau, déjà couvert par filter_fresh_rows.
+
+    Retourne un DataFrame au format de `fresh` (prêt pour persist()), vide si
+    rien à compléter."""
+    if existing.empty or candidate.empty:
+        return candidate.iloc[0:0]
+    frames = []
+    for label in C.MODEL_LABELS:
+        ex_model = existing[existing["model"] == label]
+        if ex_model.empty:
+            continue
+        latest_rd = ex_model["run_date"].max()
+        ex_group = ex_model[ex_model["run_date"] == latest_rd]
+        missing_cols = [c for c in C.VAR_COLS if ex_group[c].isna().all()]
+        if not missing_cols:
+            continue
+        cand_group = candidate[(candidate["model"] == label)
+                                & (candidate["run_date"] == latest_rd)]
+        if cand_group.empty:
+            continue
+        fillable = [c for c in missing_cols if cand_group[c].notna().any()]
+        if not fillable:
+            continue
+        completed = ex_group.merge(
+            cand_group[["member", "valid_time", *fillable]],
+            on=["member", "valid_time"], how="left", suffixes=("", "_new"))
+        for col in fillable:
+            completed[col] = completed[f"{col}_new"]
+            completed = completed.drop(columns=[f"{col}_new"])
+        frames.append(completed[C.SCHEMA])
+    if not frames:
+        return candidate.iloc[0:0]
+    return pd.concat(frames, ignore_index=True)
+
+
 # --------------------------------------------------------------------------- #
 #  Persistance
 # --------------------------------------------------------------------------- #
@@ -600,13 +657,27 @@ def main():
         print(f"   ⏳ Cycle détecté mais portée contiguë trop courte pour être persisté "
               f"(calcul en cours, cycle nativement partiel — ex. ECMWF 6Z/18Z — ou "
               f"réponse creuse ; run complet précédent conservé) : {', '.join(partial)}")
+
+    # Cycle inchangé (t850 identique, écarté ci-dessus) ne veut pas dire « rien à
+    # faire » : une variable ajoutée à config.VARIABLES après coup (ex. z500) peut
+    # rester absente à vie sur ce run si on ne la comble pas séparément.
+    completions = complete_missing_vars(candidate, existing)
+    completed_labels = set(completions["model"].unique()) if not completions.empty else set()
+    if completed_labels:
+        print(f"   🧩 Variable manquante comblée sur le run déjà stocké : "
+              f"{', '.join(sorted(completed_labels))}")
+        fresh = pd.concat([fresh, completions], ignore_index=True) if not fresh.empty else completions
+
     if fresh.empty:
         print("ℹ️  Aucun modèle renouvelé à ce poll — base laissée telle quelle.")
         return
     for model_label, g in fresh.groupby("model"):
         valid = g.dropna(subset=C.VAR_COLS, how="all")
         last = valid["valid_time"].max() if not valid.empty else None
-        print(f"   ✅ {model_label} renouvelé — échéances valides jusqu'à {last}")
+        if model_label in completed_labels:
+            print(f"   🧩 {model_label} — run inchangé, variable comblée jusqu'à {last}")
+        else:
+            print(f"   ✅ {model_label} renouvelé — échéances valides jusqu'à {last}")
     print(f"   Lignes du run frais  : {len(fresh):,}")
 
     combined = persist(fresh, existing)

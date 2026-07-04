@@ -29,6 +29,13 @@ NUIT_FIN_H = 6
 # et l'affichage doit le dire plutôt que de faire passer l'obs pour actuelle).
 OBS_PERIMEE_H = 3.0
 
+# Seuil, plus resserré, de l'horodatage en rouge sur les cartes « temps réel »
+# (page.py) : avec le flux 6 min (RADOME) qui rafraîchit toutes les ~15 min,
+# une obs vieille de plus d'1 h signale un problème de mise à jour bien avant
+# le seuil OBS_PERIMEE_H (3 h, pensé pour l'ère hourly-only) — sert seulement
+# à la couleur de cette pastille, pas à cacher l'observation.
+OBS_CARTE_ALERTE_H = 1.0
+
 # Paliers de l'écart ICU nocturne moyen (°C) — interprétation, pas physique.
 ICU_MARQUE_C = 1.0
 ICU_FORT_C = 3.0
@@ -39,12 +46,14 @@ ICU_FORT_C = 3.0
 JOUR_COMPLET_MIN_H = 20
 
 
-def obs_est_perimee(valid_time_local, now_local):
+def obs_est_perimee(valid_time_local, now_local, seuil_h=OBS_PERIMEE_H):
     """L'observation est-elle trop ancienne pour être présentée comme
-    « en direct » ? (les deux instants en heure de Paris, tz-naïfs)."""
+    « en direct » ? (les deux instants en heure de Paris, tz-naïfs). `seuil_h`
+    paramétrable pour réutiliser cette même logique avec un seuil différent
+    (cf. OBS_CARTE_ALERTE_H, plus resserré, pour la couleur des cartes)."""
     if pd.isna(valid_time_local):
         return True
-    return (now_local - valid_time_local) > pd.Timedelta(hours=OBS_PERIMEE_H)
+    return (now_local - valid_time_local) > pd.Timedelta(hours=seuil_h)
 
 
 def _label_icu(ecart_c):

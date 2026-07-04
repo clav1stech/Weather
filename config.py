@@ -251,6 +251,48 @@ OBS_VARIABLES = [
 ]
 
 # --------------------------------------------------------------------------- #
+#  Observations INFRA-HORAIRES 6 min (DPPaquetObs — flux annexe séparé)
+# --------------------------------------------------------------------------- #
+# Flux ANNEXE de FRAÎCHEUR : même API, même clé, même déduplication
+# (station_id, valid_time), mais endpoint /paquet/infrahoraire-6m — une mesure
+# toutes les 6 min au lieu d'une par heure (cf. fetch_observations_6m.py →
+# parquet séparé data/database_paris_observations_6m.parquet). SEUL usage :
+# rafraîchir la dernière température (et les valeurs INSTANTANÉES : humidité,
+# vent, pression) des cartes « temps réel » — le flux horaire reste l'unique
+# source de la comparaison inter-stations et des Tx/Tn journaliers (grille
+# horaire indispensable à JOUR_COMPLET_MIN_H). Affichage/contexte uniquement,
+# n'influence NI la détection canicule, NI la sélection des runs, NI les KPI.
+#
+# ACCÈS : endpoint /paquet/infrahoraire-6m servi par le contexte v2 (OBS_API_BASE),
+# mais interrogé PAR STATION (paramètre `id_station`, un appel par station) — le
+# filtre `id-departement` du flux horaire y renvoie 400. Constaté en conditions
+# réelles : chaque appel renvoie ~4,4 j de points 6 min (fenêtre bien plus large
+# que les 24 h documentés → backfill initial naturel en un poll).
+#
+# STRUCTUREL : les 4 stations répondent au 6 min, mais l'INSTRUMENTATION diffère.
+# RADOME (Montsouris, Longchamp) publie t/td/u/vent/rafales/rr_per (+ pression
+# à Montsouris seule, Longchamp ne la publiant pas, comme en horaire) ; ETENDU
+# (Lariboisière, Luxembourg) ne publie QUE t et rr_per — le reste est null par
+# niveau d'instrumentation, jamais une panne → NaN, jamais une valeur inventée.
+# Uniquement des grandeurs INSTANTANÉES converties AU PARSING comme l'horaire
+# (jamais tx/tn ni rr1 horaire ; rr_per est le cumul 6 min de la période, pas
+# rr1). Noms de champs DPPaquetObs 6 min propres à ce flux : rafales ddraf10/raf10
+# (≠ ddraf/raf), précipitation rr_per (≠ rr1).
+OBS_6M_ENDPOINT = "/paquet/infrahoraire-6m"
+OBS_6M_VARIABLES = [
+    {"api": "t",       "col": "t",            "conv": "kelvin"},
+    {"api": "td",      "col": "td",           "conv": "kelvin"},
+    {"api": "u",       "col": "humidite",     "conv": None},
+    {"api": "dd",      "col": "vent_dir",     "conv": None},
+    {"api": "ff",      "col": "vent_ff",      "conv": None},
+    {"api": "ddraf10", "col": "raf_dir",      "conv": None},
+    {"api": "raf10",   "col": "raf",          "conv": None},
+    {"api": "rr_per",  "col": "precip_6m",    "conv": None},
+    {"api": "pres",    "col": "pression",     "conv": "pa_to_hpa"},
+    {"api": "pmer",    "col": "pression_mer", "conv": "pa_to_hpa"},
+]
+
+# --------------------------------------------------------------------------- #
 #  Stockage
 # --------------------------------------------------------------------------- #
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -262,6 +304,9 @@ DB_T2M_PATH = os.path.join(DATA_DIR, "database_paris_t2m.parquet")
 # Parquet SÉPARÉ pour les observations Météo-France (une ligne par
 # (station, heure d'observation), append-only) — même principe d'isolement.
 DB_OBS_PATH = os.path.join(DATA_DIR, "database_paris_observations.parquet")
+# Parquet SÉPARÉ pour les observations infra-horaires 6 min (fraîcheur des
+# cartes temps réel, stations RADOME seules) — jamais mélangé au flux horaire.
+DB_OBS_6M_PATH = os.path.join(DATA_DIR, "database_paris_observations_6m.parquet")
 # Parquet SÉPARÉ pour la prévision instantanée 15 min (une ligne par échéance
 # quart-horaire, upsert sur validtime) — flux distinct, jamais mélangé.
 DB_INSTANT_PATH = os.path.join(DATA_DIR, "database_paris_instant.parquet")
@@ -448,6 +493,8 @@ OBS_COLOR_BY_NOM = {s["nom"]: s["color"] for s in OBS_STATIONS}
 OBS_STATION_BY_ID = {s["id"]: s for s in OBS_STATIONS}
 OBS_VAR_COLS = [v["col"] for v in OBS_VARIABLES]
 OBS_SCHEMA = ["valid_time", "station_id", "station_nom"] + OBS_VAR_COLS
+OBS_6M_VAR_COLS = [v["col"] for v in OBS_6M_VARIABLES]
+OBS_6M_SCHEMA = ["valid_time", "station_id", "station_nom"] + OBS_6M_VAR_COLS
 # Flux prévision instantanée 15 min. Clé de déduplication = `validtime` SEUL
 # (upsert, dernière prévision connue conservée) : c'est une prévision révisable,
 # pas un fait acquis comme une observation — on garde l'estimation la plus

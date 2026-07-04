@@ -17,6 +17,9 @@ parquet :
 │                        4 stations suivies, backfill/rattrapage auto,   │
 │                        clé via env METEOFRANCE_API_KEY uniquement)     │
 │                        → data/database_paris_observations.parquet      │
+│ fetch_observations_6m.py  idem /paquet/infrahoraire-6m (fraîcheur 6 min, │
+│                        RADOME seules, variables instantanées)          │
+│                        → data/database_paris_observations_6m.parquet   │
 │ fetch_instant.py       API Forecast minutely_15 (prévision 15 min,     │
 │                        ~48 h, meteofrance_seamless, backfill past_days) │
 │                        → data/database_paris_instant.parquet           │
@@ -72,6 +75,7 @@ restent intactes.
 | `app/data/legacy_import.py` | import ciblé xlsx → parquet (seule ÉCRITURE, ultra-encadrée) | `legacy_import_candidates`, `import_legacy_run` |
 | `app/data/t2m.py` | lecture du parquet Tx/Tn HD (flux annexe, dégradation silencieuse) | `t2m_signature`, `load_t2m`, `txtn_by_day` |
 | `app/data/observations.py` | lecture du parquet observations MF (flux annexe, dégradation silencieuse) | `obs_signature`, `load_obs`, `latest_obs`, `obs_window`, `daily_txtn_obs` |
+| `app/data/observations_6m.py` | lecture du parquet observations 6 min (fraîcheur cartes temps réel, RADOME) | `obs_6m_signature`, `load_obs_6m`, `latest_obs_6m` |
 | `app/stats/ensemble.py` | stats génériques tolérantes NaN sur un pool de membres | `super_ensemble`, `model_data`, `model_medians`, `divergence`, `daily_aggregate`, `daily_risk`, `var_median` |
 | `app/stats/tables.py` | tables d'export larges (onglet 🧾) | `enriched_super_table`, `model_table` |
 | `app/stats/climato.py` | normale saisonnière cosinus (ajustable en session) | `clim_normal`, `clim_params`, `clim_z500_normal` |
@@ -142,6 +146,7 @@ temporelle). Correspondance code :
 | Import legacy = absence avérée uniquement | `app/data/legacy_import.py` |
 | Tables d'export volontairement larges | `app/stats/tables.py` |
 | Clé API MF via env only, paquet départemental (backfill/rattrapage), dédup (station, validity_time), K→°C au parsing | `fetch_observations.py` |
+| Fraîcheur 6 min (RADOME seules), flux/parquet séparé, réutilise clé + `_convert` du flux horaire, freshest-par-champ à l'affichage | `fetch_observations_6m.py`, `app/data/observations_6m.py` |
 | Prévision 15 min : dédup validtime seul (upsert, prévision révisable), backfill past_days adaptatif, collecte-only | `fetch_instant.py` |
 | Obs : dégradation silencieuse, groupes ICU explicites, prévu-vs-observé jours complets | `app/data/observations.py`, `app/domains/observations/` |
 

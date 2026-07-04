@@ -23,12 +23,18 @@ on:
     # la prévision fraîche sans doubler la charge de push git. Créneaux :05/:35
     # libres (évite :15, :20, :45).
     - cron: '5,35 * * * *'
+    # Observations infra-horaires 6 min (DPPaquetObs /paquet/infrahoraire-6m,
+    # flux annexe) : toutes les 15 min — c'est la FRAÎCHEUR temps réel des
+    # cartes station RADOME (Montsouris/Longchamp). Créneaux :10/:25/:40/:55
+    # libres (évite :05/:15/:20/:35/:45). Le paquet étant une fenêtre glissante,
+    # chaque poll rattrape tous les points 6 min depuis le précédent.
+    - cron: '10,25,40,55 * * * *'
   workflow_dispatch:
     inputs:
       target:
-        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF seules ; instant = prévision 15 min)"
+        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF horaires ; obs6m = observations 6 min ; instant = prévision 15 min)"
         type: choice
-        options: [both, api, legacy, t2m, obs, instant]
+        options: [both, api, legacy, t2m, obs, obs6m, instant]
         default: both
       legacy_run:
         description: "Cycle Météociel (si target=legacy ou both). 6Z/18Z : manuel only, AIFS/GEFS uniquement (ECMWF ENS absent à ces cycles)."
@@ -153,6 +159,48 @@ jobs:
             git add data/database_paris_observations.parquet
           fi
           git diff-index --quiet HEAD || git commit -m "Pipeline: observations Météo-France synchronisées"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push
+
+  fetch-observations-6m:
+    # Flux ANNEXE observations 6 min (fetch_observations_6m.py → parquet séparé
+    # data/database_paris_observations_6m.parquet). Même clé/secret et même
+    # concurrency.group que les autres jobs (contention sur le PUSH git, pas les
+    # fichiers). Cadence 15 min : c'est la fraîcheur temps réel des cartes RADOME.
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'obs6m') ||
+      github.event.schedule == '10,25,40,55 * * * *'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: weather-data-push
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests pandas pyarrow
+
+      - name: Fetch Météo-France Observations 6 min
+        env:
+          METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
+        run: python fetch_observations_6m.py
+
+      - name: Commit and Push Observations 6 min Database
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          # Le fichier peut ne pas exister au tout premier run si aucune station
+          # RADOME n'a répondu (le script sort alors sans écrire) — pas d'échec.
+          if [ -f data/database_paris_observations_6m.parquet ]; then
+            git add data/database_paris_observations_6m.parquet
+          fi
+          git diff-index --quiet HEAD || git commit -m "Pipeline: observations 6 min synchronisées"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
 

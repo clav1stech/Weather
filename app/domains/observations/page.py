@@ -19,49 +19,110 @@ import streamlit as st
 import config as C
 from app.data.observations import (
     daily_txtn_obs, latest_obs, load_obs, obs_signature, obs_window)
+from app.data.observations_6m import latest_obs_6m, obs_6m_signature
 from app.data.t2m import t2m_signature, txtn_by_day
 from app.domains.observations.charts import (
     comparaison_stations, ecart_icu_chart, prevu_vs_observe_chart)
 from app.domains.observations.logic import (
-    comparaison_prevu_observe, ecart_icu_series, obs_est_perimee,
-    verdict_icu_nocturne)
+    OBS_CARTE_ALERTE_H, comparaison_prevu_observe, ecart_icu_series,
+    obs_est_perimee, verdict_icu_nocturne)
 
 
-def _carte_station(col, station, row, now_local):
-    """Carte « temps réel » d'une station : température + heure d'observation,
-    et pour la station de référence (Montsouris) humidité / vent / pluie /
-    pression. `row` None = station sans la moindre observation en base."""
-    with col:
+def _cols_cartes():
+    """Colonnes des rangées temps réel : une par station, se partageant à parts
+    égales toute la largeur de la page (comme les KPI de la page canicule).
+    st.columns garde TOUJOURS ses colonnes sur une seule ligne (responsive) :
+    aucun ascenseur horizontal ni retour à la ligne possible."""
+    return st.columns(len(C.OBS_STATIONS))
+
+
+def _champ_frais(row_h, row_6m, col):
+    """Valeur la plus FRAÎCHE de la colonne `col` entre l'obs horaire et l'obs
+    6 min d'une même station : le 6 min prime dès qu'il porte cette colonne avec
+    une valeur non-NaN et un horodatage plus récent (grandeurs instantanées —
+    température, humidité, vent, pression). Les colonnes propres au flux horaire
+    (precip_1h, tx/tn : cumuls/extrêmes horaires absents du 6 min) retombent
+    naturellement sur l'horaire. Retourne (valeur ou NaN, horodatage ou None).
+    `row_6m` None = station sans 6 min (ETENDU, ou base 6 min absente)."""
+    best_val, best_t = float("nan"), None
+    for r in (row_h, row_6m):
+        if r is None or col not in r or pd.isna(r[col]) or pd.isna(r["valid_time"]):
+            continue
+        if best_t is None or r["valid_time"] > best_t:
+            best_val, best_t = r[col], r["valid_time"]
+    return best_val, best_t
+
+
+def _carte_station(col, station, row_h, row_6m, now_local):
+    """Carte « temps réel » d'une station : température + heure d'observation.
+    Cadre bordé à hauteur naturelle (contenu identique d'une carte à l'autre :
+    nom + métrique + horodatage → cartes de même hauteur, aucun CSS requis). La
+    température affichée est la plus fraîche entre l'horaire et l'infra-horaire
+    6 min (`row_6m`, stations RADOME seules — None ailleurs). `row_h`/`row_6m`
+    tous deux None = station sans la moindre observation en base. Les mesures
+    communes (humidité, vent, pluie, pression) ne sont volontairement PAS ici :
+    elles ne valent qu'à Montsouris mais décrivent tout Paris (variables
+    homogènes à cette échelle) — les afficher dans son rectangle donnerait à
+    tort l'impression d'une donnée propre à cette seule station, cf.
+    `_conditions_generales`."""
+    with col, st.container(border=True):
         st.markdown(f"**{station['nom']}**")
-        st.caption(station["profil"])
-        if row is None:
+        if row_h is None and row_6m is None:
             st.info("Pas encore d'observation en base.")
             return
-        perimee = obs_est_perimee(row["valid_time"], now_local)
-        t_txt = f"{row['t']:.1f} °C" if pd.notna(row["t"]) else "—"
+        t, t_time = _champ_frais(row_h, row_6m, "t")
+        # Température absente à ce poll : on horodate quand même avec l'obs la
+        # plus récente disponible (au moins une existe, cf. garde ci-dessus).
+        if t_time is None:
+            t_time = max(r["valid_time"] for r in (row_h, row_6m)
+                         if r is not None and pd.notna(r["valid_time"]))
+        t_txt = f"{t:.1f} °C" if pd.notna(t) else "—"
         st.metric("Température", t_txt,
                   help=f"Station {station['reseau']} · alt. {station['alt']} m")
-        heure = f"{row['valid_time']:%a %d %b · %Hh%M}"
-        if perimee:
-            st.caption(f"⚠️ Dernière obs : {heure} — donnée ancienne "
-                       "(collecte ou API en retard)")
+        heure = f"Le {t_time:%d/%m à %Hh%M}"
+        # Rouge si l'obs a plus d'OBS_CARTE_ALERTE_H (1 h) — seuil resserré vs
+        # OBS_PERIMEE_H (3 h) : avec le flux 6 min, une obs vieille d'1 h+ est
+        # déjà le signe d'un souci de collecte, pas juste un cron un peu lent.
+        if obs_est_perimee(t_time, now_local, seuil_h=OBS_CARTE_ALERTE_H):
+            st.markdown(f":red[{heure}]")
         else:
-            st.caption(f"🕐 Observé le {heure} (heure de Paris)")
-        if station["reference"]:
-            détails = []
-            if pd.notna(row["humidite"]):
-                détails.append(f"💧 {row['humidite']:.0f} %")
-            if pd.notna(row["vent_ff"]):
-                vent = f"🌬️ {row['vent_ff'] * 3.6:.0f} km/h"
-                if pd.notna(row["vent_dir"]):
-                    vent += f" ({row['vent_dir']:.0f}°)"
-                détails.append(vent)
-            if pd.notna(row["precip_1h"]):
-                détails.append(f"🌧️ {row['precip_1h']:.1f} mm/1h")
-            if pd.notna(row["pression_mer"]):
-                détails.append(f"🔽 {row['pression_mer']:.0f} hPa")
-            if détails:
-                st.caption(" · ".join(détails))
+            st.caption(heure)
+
+
+def _conditions_generales(row_ref_h, row_ref_6m):
+    """Bloc unique « conditions générales » (humidité, vent, pluie, pression) —
+    séparé des rectangles par station : ces variables, plus homogènes que la
+    température à l'échelle de Paris, ne sont mesurées qu'à Montsouris mais
+    décrivent toute l'agglomération. Grandeurs instantanées rafraîchies au 6 min
+    quand il est plus frais (`row_ref_6m`) ; la pluie (cumul 1 h) reste horaire.
+    `row_ref_h`/`row_ref_6m` tous deux None → rien affiché."""
+    if row_ref_h is None and row_ref_6m is None:
+        return
+    hum, _ = _champ_frais(row_ref_h, row_ref_6m, "humidite")
+    ff, _ = _champ_frais(row_ref_h, row_ref_6m, "vent_ff")
+    dd, _ = _champ_frais(row_ref_h, row_ref_6m, "vent_dir")
+    pr1, _ = _champ_frais(row_ref_h, row_ref_6m, "precip_1h")
+    pmer, _ = _champ_frais(row_ref_h, row_ref_6m, "pression_mer")
+    détails = []
+    if pd.notna(hum):
+        détails.append(("💧 Humidité", f"{hum:.0f} %"))
+    if pd.notna(ff):
+        vent = f"{ff * 3.6:.0f} km/h"
+        if pd.notna(dd):
+            vent += f" ({dd:.0f}°)"
+        détails.append(("🌬️ Vent", vent))
+    if pd.notna(pr1):
+        détails.append(("🌧️ Précipitations", f"{pr1:.1f} mm/1h"))
+    if pd.notna(pmer):
+        détails.append(("🔽 Pression", f"{pmer:.0f} hPa"))
+    if not détails:
+        return
+    st.caption("Conditions générales sur Paris (mesurées à Montsouris)")
+    # Mêmes colonnes que les cartes (station + espaceur) → métriques alignées
+    # dessous, même largeur, jamais de débordement.
+    cols = _cols_cartes()
+    for c, (label, valeur) in zip(cols, détails):
+        c.metric(label, valeur)
 
 
 def page_observations(runs, sig):
@@ -71,8 +132,8 @@ def page_observations(runs, sig):
 
     st.caption("Quatre stations Météo-France parisiennes, choisies pour leur "
                "contraste d'exposition à l'**îlot de chaleur urbain (ICU)** — "
-               "données d'observation officielles (API DPObs), rafraîchies "
-               "toutes les heures.")
+               "données d'observation officielles (API DPObs). La température "
+               "est rafraîchie **toutes les quelques minutes** (flux 6 min).")
 
     with st.expander("❓ Pourquoi ces 4 stations — et pourquoi certaines mesures manquent"):
         lignes = "\n".join(
@@ -108,9 +169,18 @@ def page_observations(runs, sig):
     st.subheader("📍 Dernières observations")
     latest = latest_obs(obs_sig)
     by_nom = {r["station_nom"]: r for _, r in latest.iterrows()}
-    cols = st.columns(len(C.OBS_STATIONS))
+    # Fraîcheur infra-horaire 6 min (stations RADOME seules) : flux séparé qui
+    # ne rafraîchit QUE les valeurs instantanées affichées ici — jamais la
+    # comparaison inter-stations ni les Tx/Tn (grille horaire).
+    latest6 = latest_obs_6m(obs_6m_signature())
+    by_nom6 = {r["station_nom"]: r for _, r in latest6.iterrows()}
+    cols = _cols_cartes()
     for col, station in zip(cols, C.OBS_STATIONS):
-        _carte_station(col, station, by_nom.get(station["nom"]), now_local)
+        _carte_station(col, station, by_nom.get(station["nom"]),
+                       by_nom6.get(station["nom"]), now_local)
+    ref = next((s for s in C.OBS_STATIONS if s["reference"]), None)
+    if ref is not None:
+        _conditions_generales(by_nom.get(ref["nom"]), by_nom6.get(ref["nom"]))
 
     # ── Bloc 2 : comparaison inter-stations (ICU) ────────────────────────────
     st.subheader("🌃 L'écart ville / verdure, heure par heure")

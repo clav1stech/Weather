@@ -73,7 +73,7 @@ def page_run(runs, sig):
         st.info("ℹ️ Hors créneau Météociel : le double run fonctionnera, mais le scrape legacy "
                "sera automatiquement sauté (run_dual.py ne le déclenche qu'aux créneaux ci-dessus).")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.subheader("① Open-Meteo seul")
         st.caption("`Forecast.py` : interroge l'API, détecte le cycle par modèle, met à jour "
@@ -130,6 +130,32 @@ def page_run(runs, sig):
                     st.error("⏱️ Délai dépassé (5 min).")
                 except Exception as e:  # noqa: BLE001
                     st.error(f"Erreur : {e}")
+
+    with col4:
+        st.subheader("④ Observations + instantané")
+        st.caption("`fetch_observations.py` (paquet Météo-France DPPaquetObs, "
+                  "4 stations) puis `fetch_instant.py` (Open-Meteo minutely_15, "
+                  "prévision 15 min) — flux annexes indépendants, à la suite. "
+                  "~10-20 s.")
+        if st.button("📡 Lancer obs + instant", type="secondary"):
+            for label, script, timeout in (
+                ("observations Météo-France", "fetch_observations.py", 60),
+                ("prévision instantanée 15 min", "fetch_instant.py", 60),
+            ):
+                with st.spinner(f"Exécution de {script}…"):
+                    try:
+                        code, output = _run_script(os.path.join(C.BASE_DIR, script),
+                                                   timeout=timeout)
+                        st.code(output or "(aucune sortie)")
+                        if code == 0:
+                            st.success(f"✅ {label.capitalize()} : terminé.")
+                        else:
+                            st.error(f"❌ {label.capitalize()} : code de sortie {code}.")
+                    except subprocess.TimeoutExpired:
+                        st.error(f"⏱️ {label.capitalize()} : délai dépassé ({timeout} s).")
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"Erreur ({label}) : {e}")
+            st.cache_data.clear()
 
     st.markdown("---")
     st.subheader("🩹 Import ciblé depuis le legacy")

@@ -74,8 +74,12 @@ jobs:
           shopt -s nullglob
           git add data/*.parquet
           git diff-index --quiet HEAD || git commit -m "Pipeline: base Open-Meteo synchronisée"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push
+          n=0
+          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+            n=$((n + 1))
+            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
+            sleep $((RANDOM % 10 + 5))
+          done
 
   fetch-t2m-hd:
     # Flux ANNEXE Tx/Tn haute résolution (forecast_t2m_hd.py → parquet séparé
@@ -116,8 +120,12 @@ jobs:
             git add data/database_paris_t2m.parquet
           fi
           git diff-index --quiet HEAD || git commit -m "Pipeline: base Tx/Tn HD synchronisée"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push
+          n=0
+          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+            n=$((n + 1))
+            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
+            sleep $((RANDOM % 10 + 5))
+          done
 
   fetch-observations:
     # Flux ANNEXE observations Météo-France (fetch_observations.py → parquet
@@ -159,8 +167,12 @@ jobs:
             git add data/database_paris_observations.parquet
           fi
           git diff-index --quiet HEAD || git commit -m "Pipeline: observations Météo-France synchronisées"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push
+          n=0
+          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+            n=$((n + 1))
+            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
+            sleep $((RANDOM % 10 + 5))
+          done
 
   fetch-observations-6m:
     # Flux ANNEXE observations 6 min (fetch_observations_6m.py → parquet séparé
@@ -201,8 +213,12 @@ jobs:
             git add data/database_paris_observations_6m.parquet
           fi
           git diff-index --quiet HEAD || git commit -m "Pipeline: observations 6 min synchronisées"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push
+          n=0
+          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+            n=$((n + 1))
+            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
+            sleep $((RANDOM % 10 + 5))
+          done
 
   fetch-instant:
     # Flux ANNEXE prévision instantanée 15 min (fetch_instant.py → parquet
@@ -242,8 +258,12 @@ jobs:
             git add data/database_paris_instant.parquet
           fi
           git diff-index --quiet HEAD || git commit -m "Pipeline: prévision instantanée 15 min synchronisée"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push
+          n=0
+          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+            n=$((n + 1))
+            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
+            sleep $((RANDOM % 10 + 5))
+          done
 
   scrape-legacy:
     if: |
@@ -292,5 +312,9 @@ jobs:
           shopt -s nullglob
           git add legacy/*.xlsx data/*.csv
           git diff-index --quiet HEAD || git commit -m "Pipeline: scrape legacy + contrôle croisé (${{ steps.run_label.outputs.label }})"
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push
+          n=0
+          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+            n=$((n + 1))
+            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
+            sleep $((RANDOM % 10 + 5))
+          done

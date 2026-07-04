@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.4.7] - 2026-07-04
+Ajouter un retry sur le push git des jobs du pipeline.
+
+Corrige l'annulation de jobs encore en attente (`cancel-in-progress: false`
+ne protège que les jobs déjà en cours) quand une requête plus récente arrive
+sur le même `concurrency.group` pendant qu'un déclenchement `target=all` est
+encore en file d'attente. Chaque job retente `pull --rebase` + `push`
+jusqu'à 5 fois avant d'échouer.
+
 ## [2.4.6] - 2026-07-04
 Ajouter l'option 'all' au déclenchement manuel du pipeline.
 

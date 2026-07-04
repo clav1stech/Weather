@@ -16,13 +16,13 @@ on:
     # obs horaire par station ; 4 requêtes/h, quota 100 req/min très loin).
     # Décalé à :20 pour ne pas faire la queue au push avec :15 et :45.
     - cron: '20 * * * *'
-    # Prévision instantanée 15 min (API Forecast minutely_15, flux annexe) :
-    # toutes les 30 min. Plus fréquent que les autres flux (c'est le point : du
-    # TRÈS court terme rafraîchi), mais pas au pas de 15 min de la donnée — le
-    # modèle seamless ne se réactualise pas aussi vite, 30 min suffit à garder
-    # la prévision fraîche sans doubler la charge de push git. Créneaux :05/:35
-    # libres (évite :15, :20, :45).
-    - cron: '5,35 * * * *'
+    # Prévision Montsouris « vintages » 15 min (API Forecast minutely_15, flux
+    # annexe) : toutes les heures. Chaque poll fige un vintage supplémentaire de
+    # chaque échéance (historique des révisions conservé, cf.
+    # fetch_montsouris_vintages.py) — une cadence horaire suffit à capturer la
+    # convergence de la prévision sans gonfler la charge de push git. Créneau :50
+    # libre (évite :05/:10/:15/:20/:25/:35/:40/:45/:55).
+    - cron: '50 * * * *'
     # Observations infra-horaires 6 min (DPPaquetObs /paquet/infrahoraire-6m,
     # flux annexe) : toutes les 15 min — c'est la FRAÎCHEUR temps réel des
     # cartes station RADOME (Montsouris/Longchamp). Créneaux :10/:25/:40/:55
@@ -32,9 +32,9 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF horaires ; obs6m = observations 6 min ; instant = prévision 15 min ; all = tous les flux)"
+        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF horaires ; obs6m = observations 6 min ; vintages = prévision Montsouris 15 min ; all = tous les flux)"
         type: choice
-        options: [both, api, legacy, t2m, obs, obs6m, instant, all]
+        options: [both, api, legacy, t2m, obs, obs6m, vintages, all]
         default: both
       legacy_run:
         description: "Cycle Météociel (si target=legacy ou both). 6Z/18Z : manuel only, AIFS/GEFS uniquement (ECMWF ENS absent à ces cycles)."
@@ -220,15 +220,17 @@ jobs:
             sleep $((RANDOM % 10 + 5))
           done
 
-  fetch-instant:
-    # Flux ANNEXE prévision instantanée 15 min (fetch_instant.py → parquet
-    # séparé data/database_paris_instant.parquet). Aucune clé requise (API
+  fetch-vintages:
+    # Flux ANNEXE prévision Montsouris « vintages » 15 min
+    # (fetch_montsouris_vintages.py → parquet séparé
+    # data/database_paris_montsouris_vintages.parquet). Aucune clé requise (API
     # Open-Meteo publique). Même concurrency.group que les autres jobs : la
     # contention est sur le PUSH git du repo, pas les fichiers. Le backfill
-    # past_days est géré par le script (large au 1er run, modeste ensuite).
+    # past_days est géré par le script (large au 1er run, modeste ensuite) ; la
+    # compaction borne la table à chaque run.
     if: |
-      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'instant' || github.event.inputs.target == 'all')) ||
-      github.event.schedule == '5,35 * * * *'
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'vintages' || github.event.inputs.target == 'all')) ||
+      github.event.schedule == '50 * * * *'
     runs-on: ubuntu-latest
     concurrency:
       group: weather-data-push
@@ -245,19 +247,19 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch Open-Meteo Instant (minutely_15)
-        run: python fetch_instant.py
+      - name: Fetch Open-Meteo Montsouris vintages (minutely_15)
+        run: python fetch_montsouris_vintages.py
 
-      - name: Commit and Push Instant Database
+      - name: Commit and Push Vintages Database
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
           # Le fichier peut ne pas exister si l'API n'a rien renvoyé
           # d'exploitable (le script sort alors sans écrire) — pas d'échec.
-          if [ -f data/database_paris_instant.parquet ]; then
-            git add data/database_paris_instant.parquet
+          if [ -f data/database_paris_montsouris_vintages.parquet ]; then
+            git add data/database_paris_montsouris_vintages.parquet
           fi
-          git diff-index --quiet HEAD || git commit -m "Pipeline: prévision instantanée 15 min synchronisée"
+          git diff-index --quiet HEAD || git commit -m "Pipeline: prévision Montsouris vintages 15 min synchronisée"
           n=0
           until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
             n=$((n + 1))

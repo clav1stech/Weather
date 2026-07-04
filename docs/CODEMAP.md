@@ -20,9 +20,11 @@ parquet :
 │ fetch_observations_6m.py  idem /paquet/infrahoraire-6m (fraîcheur 6 min, │
 │                        RADOME seules, variables instantanées)          │
 │                        → data/database_paris_observations_6m.parquet   │
-│ fetch_instant.py       API Forecast minutely_15 (prévision 15 min,     │
-│                        ~48 h, meteofrance_seamless, backfill past_days) │
-│                        → data/database_paris_instant.parquet           │
+│ fetch_montsouris_vintages.py  API Forecast minutely_15 @Montsouris     │
+│                        (prévision 15 min ~48 h, meteofrance_seamless,   │
+│                        vintages append-only (valid_time, fetched_at),   │
+│                        compaction 48 h, backfill past_days)             │
+│                        → data/database_paris_montsouris_vintages.parquet│
 │ Forecast_legacy.py     scrape Météociel → legacy/*.xlsx (0Z/12Z)       │
 │ validate_cross_pipeline.py   contrôle croisé OM ↔ legacy               │
 │ run_dual.py            orchestrateur manuel (bouton dashboard)         │
@@ -147,7 +149,7 @@ temporelle). Correspondance code :
 | Tables d'export volontairement larges | `app/stats/tables.py` |
 | Clé API MF via env only, paquet départemental (backfill/rattrapage), dédup (station, validity_time), K→°C au parsing | `fetch_observations.py` |
 | Fraîcheur 6 min (RADOME seules), flux/parquet séparé, réutilise clé + `_convert` du flux horaire, freshest-par-champ à l'affichage | `fetch_observations_6m.py`, `app/data/observations_6m.py` |
-| Prévision 15 min : dédup validtime seul (upsert, prévision révisable), backfill past_days adaptatif, collecte-only | `fetch_instant.py` |
+| Prévision Montsouris 15 min : vintages append-only clé (valid_time, fetched_at), compaction 48 h à deux régimes, `source` bootstrap/live, backfill past_days adaptatif | `fetch_montsouris_vintages.py`, `app/data/vintages.py` |
 | Obs : dégradation silencieuse, groupes ICU explicites, prévu-vs-observé jours complets | `app/data/observations.py`, `app/domains/observations/` |
 
 ## Non-régression — comment vérifier

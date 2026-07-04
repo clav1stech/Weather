@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.4.8] - 2026-07-04
+Remplacer le flux instant 15 min par un flux vintages Montsouris (historique des révisions).
+
+L'ancien flux `fetch_instant.py` (upsert sur `validtime`, une seule valeur par
+échéance) est remplacé par `fetch_montsouris_vintages.py` : au point de
+Montsouris, chaque poll fige un « vintage » (couple `valid_time`, `fetched_at`)
+en append-only, conservant l'historique borné des révisions successives d'une
+prévision — un futur graphique comparera la courbe observée aux prévisions
+émises il y a 6/12/18/24 h. Une compaction à deux régimes (`VINTAGE_RETENTION_H`
+= 48 h) borne la table : au-delà de la fenêtre, une échéance passée ne garde que
+son vintage le plus proche de la réalisation. Colonne `source`
+(`bootstrap`/`live`), couche données `app/data/vintages.py` en lecture seule.
+CI : job `fetch-instant` → `fetch-vintages` (cron horaire `50 * * * *`), option
+`workflow_dispatch` `instant` → `vintages`. L'ancien parquet
+`database_paris_instant.parquet` est laissé en place (orphelin, plus lu).
+
 ## [2.4.7] - 2026-07-04
 Ajouter un retry sur le push git des jobs du pipeline.
 

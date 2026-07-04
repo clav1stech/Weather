@@ -103,17 +103,17 @@ def page_run(runs, sig):
                 [("Pipeline Tx/Tn HD", "forecast_t2m_hd.py", 300)])
 
     with col4:
-        st.subheader("④ Observations + instantané")
+        st.subheader("④ Observations + vintages")
         st.caption("`fetch_observations.py` (paquet horaire Météo-France, "
                   "4 stations), `fetch_observations_6m.py` (infra-horaire 6 min, "
-                  "4 stations) puis `fetch_instant.py` (Open-Meteo "
-                  "minutely_15, prévision 15 min) — flux annexes indépendants, à "
-                  "la suite. ~15-30 s.")
-        if st.button("📡 Lancer obs + 6 min + instant", type="secondary"):
+                  "4 stations) puis `fetch_montsouris_vintages.py` (Open-Meteo "
+                  "minutely_15, prévision Montsouris 15 min) — flux annexes "
+                  "indépendants, à la suite. ~15-30 s.")
+        if st.button("📡 Lancer obs + 6 min + vintages", type="secondary"):
             st.session_state["pipeline_results"] = _execute([
                 ("Observations Météo-France", "fetch_observations.py", 60),
                 ("Observations 6 min", "fetch_observations_6m.py", 60),
-                ("Prévision instantanée 15 min", "fetch_instant.py", 60),
+                ("Prévision Montsouris (vintages 15 min)", "fetch_montsouris_vintages.py", 60),
             ])
 
     # Déroulé de la dernière exécution — rendu PLEINE LARGEUR sous les colonnes

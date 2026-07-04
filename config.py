@@ -139,39 +139,54 @@ T2M_MODELS = [
 T2M_FORECAST_DAYS = 7
 
 # --------------------------------------------------------------------------- #
-#  Prévision instantanée haute fréquence 15 min (API Forecast, flux annexe)
+#  Prévision Montsouris — vintages 15 min (API Forecast, flux annexe)
 # --------------------------------------------------------------------------- #
-# Flux ANNEXE de TRÈS COURT TERME (cf. fetch_instant.py) : température 2 m,
-# humidité relative et précipitations au pas de 15 MINUTES sur les prochaines
-# ~48 h (endpoint minutely_15). Troisième granularité temporelle du projet, à
-# ne PAS fusionner avec les autres : ensemble T850 (horaire, 16 j, synoptique),
-# Tx/Tn HD (journalier, 7 j), et ici l'infra-horaire 15 min court terme.
-# Affichage/contexte uniquement — n'influence NI la détection canicule, NI la
-# sélection des runs, NI les KPI (t850 reste l'unique pilote).
+# Flux ANNEXE de TRÈS COURT TERME (cf. fetch_montsouris_vintages.py) : température
+# 2 m, humidité relative et précipitations au pas de 15 MINUTES sur les prochaines
+# ~48 h (endpoint minutely_15), au point de Montsouris (station de référence).
+# Troisième granularité temporelle du projet, à ne PAS fusionner avec les autres :
+# ensemble T850 (horaire, 16 j, synoptique), Tx/Tn HD (journalier, 7 j), et ici
+# l'infra-horaire 15 min court terme. Affichage/contexte uniquement — n'influence
+# NI la détection canicule, NI la sélection des runs, NI les KPI (t850 reste
+# l'unique pilote).
 #
-# Un seul modèle, meteofrance_seamless (AROME→ARPEGE) : « seamless » = pas de
-# cycle synoptique unique identifiable, donc daté par instant de collecte
-# (fetched_at), comme le flux T2m HD. Pas de secours DWD ICON ici (contrairement
-# au T2m HD) : le besoin est la finesse temporelle locale à court terme, où
-# AROME est le meilleur ; un secours multi-modèles introduirait un arbitrage non
-# souhaité (cf. principe T2M). L'ajout du vent (wind_speed_10m) ne coûterait
-# qu'une ligne dans INSTANT_VARIABLES si le besoin apparaît.
-INSTANT_API_URL = "https://api.open-meteo.com/v1/forecast"
-INSTANT_MODEL = "meteofrance_seamless"
+# VINTAGES : à la différence de l'ancien flux « instant » (upsert sur validtime,
+# une seule valeur par échéance), on CONSERVE ici l'historique borné des
+# révisions successives d'une même échéance — chaque poll fige un « vintage »
+# (couple valid_time + fetched_at). Un futur graphique compare la courbe observée
+# (obs 6 min) aux prévisions émises il y a 6/12/18/24 h pour visualiser la
+# convergence à l'approche de l'échéance. Clé (valid_time, fetched_at),
+# append-only ; une étape de compaction (VINTAGE_RETENTION_H) borne la table
+# (cf. fetch_montsouris_vintages.compact).
+#
+# Point Montsouris (station de référence, cf. OBS_STATIONS) et non le point Paris
+# générique LATITUDE/LONGITUDE : le graphique confronte ces prévisions aux
+# observations de CETTE station.
+VINTAGE_API_URL = "https://api.open-meteo.com/v1/forecast"
+VINTAGE_MODEL = "meteofrance_seamless"
+VINTAGE_LAT = 48.821667   # Montsouris (= entrée "Montsouris" de OBS_STATIONS)
+VINTAGE_LON = 2.337833
 # api : nom Open-Meteo (paramètre `minutely_15`) ; col : colonne parquet.
 # Unités renvoyées directement exploitables (vérifié) : °C, %, mm — aucun
 # recalcul au parsing, contrairement aux observations MF (Kelvin/Pa).
-INSTANT_VARIABLES = [
+VINTAGE_VARIABLES = [
     {"api": "temperature_2m",      "col": "temperature"},
     {"api": "relative_humidity_2m", "col": "humidite"},
     {"api": "precipitation",       "col": "precip"},
 ]
+# Rétention à deux régimes (compaction à chaque run). Fenêtre ± cette durée
+# autour de l'instant du run : tous les vintages d'une échéance dedans sont
+# conservés ; passé la fenêtre, une échéance ne garde QUE le vintage dont
+# fetched_at est le plus proche du valid_time (dernière estimation avant
+# réalisation). Borne la croissance de la table sans perdre la trace historique.
+VINTAGE_RETENTION_H = 48
 # Backfill via past_days : au TOUT PREMIER run (parquet absent), on amorce
-# l'historique avec plusieurs jours d'un coup ; aux runs suivants, un past_days
-# modeste suffit à combler un éventuel trou de cron sans re-télécharger tout
-# l'historique (la fenêtre future ~48 h est de toute façon toujours renvoyée).
-INSTANT_BACKFILL_PAST_DAYS_INIT = 7   # premier run (base vide) : contexte utile
-INSTANT_BACKFILL_PAST_DAYS = 1        # runs suivants : rattrapage de trou de cron
+# l'historique avec plusieurs jours d'un coup (source="bootstrap", approximation
+# proche de l'observé — PAS un vrai vintage figé) ; aux runs suivants, un
+# past_days modeste comble un éventuel trou de cron (source="live"). La fenêtre
+# future ~48 h est de toute façon toujours renvoyée.
+VINTAGE_BACKFILL_PAST_DAYS_INIT = 7   # premier run (base vide) : contexte utile
+VINTAGE_BACKFILL_PAST_DAYS = 1        # runs suivants : rattrapage de trou de cron
 
 # --------------------------------------------------------------------------- #
 #  Observations temps réel Météo-France (API DPObs — flux annexe séparé)
@@ -307,9 +322,10 @@ DB_OBS_PATH = os.path.join(DATA_DIR, "database_paris_observations.parquet")
 # Parquet SÉPARÉ pour les observations infra-horaires 6 min (fraîcheur des
 # cartes temps réel, stations RADOME seules) — jamais mélangé au flux horaire.
 DB_OBS_6M_PATH = os.path.join(DATA_DIR, "database_paris_observations_6m.parquet")
-# Parquet SÉPARÉ pour la prévision instantanée 15 min (une ligne par échéance
-# quart-horaire, upsert sur validtime) — flux distinct, jamais mélangé.
-DB_INSTANT_PATH = os.path.join(DATA_DIR, "database_paris_instant.parquet")
+# Parquet SÉPARÉ pour la prévision Montsouris vintages 15 min (une ligne par
+# couple (échéance quart-horaire, instant de collecte), append-only) — flux
+# distinct, jamais mélangé.
+DB_VINTAGE_PATH = os.path.join(DATA_DIR, "database_paris_montsouris_vintages.parquet")
 
 # Une série (model, member) entièrement NaN (modèle indisponible ce run) n'est
 # pas stockée. Les modèles qui s'arrêtent tôt gardent en revanche leurs lignes
@@ -495,10 +511,10 @@ OBS_VAR_COLS = [v["col"] for v in OBS_VARIABLES]
 OBS_SCHEMA = ["valid_time", "station_id", "station_nom"] + OBS_VAR_COLS
 OBS_6M_VAR_COLS = [v["col"] for v in OBS_6M_VARIABLES]
 OBS_6M_SCHEMA = ["valid_time", "station_id", "station_nom"] + OBS_6M_VAR_COLS
-# Flux prévision instantanée 15 min. Clé de déduplication = `validtime` SEUL
-# (upsert, dernière prévision connue conservée) : c'est une prévision révisable,
-# pas un fait acquis comme une observation — on garde l'estimation la plus
-# fraîche de chaque échéance, sans historique des révisions (table légère).
-# `fetched_at` reste stocké comme MÉTA (fraîcheur de la valeur), pas dans la clé.
-INSTANT_VAR_COLS = [v["col"] for v in INSTANT_VARIABLES]
-INSTANT_SCHEMA = ["validtime", "fetched_at"] + INSTANT_VAR_COLS
+# Flux prévision Montsouris vintages 15 min. Clé (valid_time, fetched_at),
+# APPEND-ONLY : chaque poll fige un vintage supplémentaire d'une même échéance
+# (prévision révisable), on conserve l'historique borné des révisions (compaction
+# au-delà de VINTAGE_RETENTION_H). `source` distingue le comblement initial
+# ("bootstrap", proche de l'observé) des vrais polls ("live").
+VINTAGE_VAR_COLS = [v["col"] for v in VINTAGE_VARIABLES]
+VINTAGE_SCHEMA = ["valid_time", "fetched_at"] + VINTAGE_VAR_COLS + ["source"]

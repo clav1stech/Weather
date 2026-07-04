@@ -3,8 +3,9 @@
 
 Trois blocs : dernière observation par station (temps réel), comparaison
 inter-stations sur 24-48 h (l'écart ICU nocturne est le message), et
-confrontation Tx/Tn prévus (flux HD, prévision UNIQUE pour Paris) vs observés
-par station — qui mesure l'ICU local par rapport à la prévision générale.
+convergence de la prévision 15 min à Montsouris (courbe observée 6 min vs
+prévisions émises à divers reculs — vintages : voit-on la prévision se
+resserrer vers l'observé à l'approche de l'échéance ?).
 
 Flux d'affichage pur : ces observations n'influencent ni la détection
 canicule, ni la sélection des runs, ni les KPI. Base d'observations absente ou
@@ -17,15 +18,16 @@ import pandas as pd
 import streamlit as st
 
 import config as C
+from app.runtime import LOCAL_TZ
 from app.data.observations import (
-    daily_txtn_obs, latest_obs, load_obs, obs_signature, obs_window)
-from app.data.observations_6m import latest_obs_6m, obs_6m_signature
-from app.data.t2m import t2m_signature, txtn_by_day
+    latest_obs, load_obs, obs_signature, obs_window)
+from app.data.observations_6m import latest_obs_6m, load_obs_6m, obs_6m_signature
+from app.data.vintages import load_vintages, vintages_signature
 from app.domains.observations.charts import (
-    comparaison_stations, ecart_icu_chart, prevu_vs_observe_chart)
+    comparaison_stations, ecart_icu_chart, vintage_comparison_chart)
 from app.domains.observations.logic import (
-    OBS_CARTE_ALERTE_H, comparaison_prevu_observe, ecart_icu_series,
-    obs_est_perimee, verdict_icu_nocturne)
+    OBS_CARTE_ALERTE_H, ecart_icu_series, obs_est_perimee,
+    verdict_icu_nocturne, vintage_comparison_series)
 
 
 def _cols_cartes():
@@ -125,6 +127,54 @@ def _conditions_generales(row_ref_h, row_ref_6m):
         c.metric(label, valeur)
 
 
+def _section_convergence_prevision():
+    """Convergence de la prévision 15 min à Montsouris : température observée
+    (6 min) vs prévisions émises à divers reculs (vintages). Lecture seule des
+    deux flux via leurs couches data ; dégradation silencieuse tant que
+    l'historique de vintages est trop court pour comparer les reculs."""
+    st.subheader("🔭 Convergence de la prévision — Montsouris")
+    st.caption("Pour chaque heure, la température **observée** à Montsouris "
+               "(trait bleu épais) et les prévisions qui la visaient, émises à "
+               "divers reculs — la dernière en date, puis 6, 12, 18 et 24 h plus "
+               "tôt (ambre, de plus en plus pâle). Les prévisions se resserrent "
+               "vers l'observé à mesure que l'échéance approche : c'est la "
+               "convergence du modèle. Courbes de prévision lissées (moyenne "
+               "~1 h) pour atténuer l'intermittence nocturne du modèle en couche "
+               "limite stable — l'observé n'est jamais lissé.")
+    vdf = load_vintages(vintages_signature())
+    if vdf.empty:
+        st.info("Le flux de prévision 15 min vient d'être mis en place — "
+                "l'historique des révisions se constitue (il faut ~24 h de recul "
+                "pour comparer tous les reculs). Revenez dans quelques heures.")
+        return
+    # Vintages stockés en UTC (cf. app/data/vintages) ; l'observé 6 min est déjà
+    # en heure de Paris → on aligne les vintages sur le même fuseau à l'affichage
+    # (invariant temporel : conversion vers Paris seulement au rendu).
+    for c in ("valid_time", "fetched_at"):
+        s = pd.to_datetime(vdf[c])
+        vdf[c] = s.dt.tz_localize("UTC").dt.tz_convert(LOCAL_TZ).dt.tz_localize(None)
+
+    ref = next((s for s in C.OBS_STATIONS if s["reference"]), None)
+    obs6 = load_obs_6m(obs_6m_signature())
+    if ref is not None and not obs6.empty:
+        obs_ref = (obs6[(obs6["station_id"] == ref["id"]) & obs6["t"].notna()]
+                   .sort_values("valid_time"))
+    else:
+        obs_ref = pd.DataFrame(columns=["valid_time", "t"])
+
+    series = vintage_comparison_series(vdf, obs_ref if not obs_ref.empty else None)
+    if series.empty:
+        st.info("Pas encore assez de recul dans l'historique de prévision pour "
+                "tracer la convergence — revenez dans quelques heures.")
+        return
+    # Observé restreint à la fenêtre couverte par les séries de prévision.
+    if not obs_ref.empty:
+        obs_ref = obs_ref[obs_ref["valid_time"] >= series["valid_time"].min()]
+    st.plotly_chart(vintage_comparison_chart(
+        obs_ref, series, "Prévision vs observé — Montsouris (48 h)"),
+        width="stretch")
+
+
 def page_observations(runs, sig):
     st.title("🏙️ Observations en direct")
     obs_sig = obs_signature()
@@ -210,35 +260,5 @@ def page_observations(runs, sig):
                        f"({', '.join(s['nom'] for s in C.OBS_STATIONS if s['icu'] == 'aere')}), "
                        "aux heures où les deux groupes ont des mesures.")
 
-    # ── Bloc 3 : prévision vs réalité ────────────────────────────────────────
-    st.subheader("🎯 La prévision collait-elle à la réalité ?")
-    st.caption("La prévision Tx/Tn haute résolution (Météo-France / DWD ICON) est "
-               "calculée pour **un point unique de Paris** — pas pour chaque "
-               "station. L'écart par station n'est donc pas une « erreur » du "
-               "modèle : il montre quelle station colle le mieux à la prévision "
-               "générale et laquelle s'en écarte le plus (signal d'ICU local).")
-    today = pd.Timestamp(datetime.now().date())
-    cmp_df = comparaison_prevu_observe(txtn_by_day(t2m_signature()),
-                                       daily_txtn_obs(obs_sig), today)
-    if cmp_df.empty:
-        st.info("Pas encore de journée complète recoupant prévision et "
-                "observations — ce bloc se remplira de lui-même après un ou "
-                "deux jours de collecte.")
-        return
-    col_tx, col_tn = st.columns(2)
-    col_tx.plotly_chart(prevu_vs_observe_chart(cmp_df, "tx"), width="stretch")
-    col_tn.plotly_chart(prevu_vs_observe_chart(cmp_df, "tn"), width="stretch")
-
-    # Biais moyen par station (observé − prévu) — se consolide avec l'historique.
-    n_jours = cmp_df["date"].nunique()
-    biais = (cmp_df.groupby("station_nom", as_index=False)
-                   .agg(ecart_tx=("ecart_tx", "mean"), ecart_tn=("ecart_tn", "mean")))
-    ordre = {s["nom"]: i for i, s in enumerate(C.OBS_STATIONS)}
-    biais = biais.assign(_o=biais["station_nom"].map(ordre)).sort_values("_o")
-    st.caption(f"Écart moyen observé − prévu sur {n_jours} journée(s) complète(s) — "
-               "en positif : la station est plus chaude que la prévision générale.")
-    st.dataframe(
-        biais.rename(columns={"station_nom": "Station",
-                              "ecart_tx": "Écart Tx (°C)", "ecart_tn": "Écart Tn (°C)"})
-             .drop(columns="_o").set_index("Station").round(1),
-        width="stretch")
+    # ── Bloc 3 : convergence de la prévision (vintages) ──────────────────────
+    _section_convergence_prevision()

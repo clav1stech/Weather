@@ -40,10 +40,105 @@ OBS_CARTE_ALERTE_H = 1.0
 ICU_MARQUE_C = 1.0
 ICU_FORT_C = 3.0
 
-# Un jour civil d'observations n'est comparable aux Tx/Tn prévus que s'il est
-# quasi complet : Tn/Tx d'une journée trouée (collecte démarrée en cours de
-# journée, panne prolongée) seraient faussés. 24 obs attendues par jour.
-JOUR_COMPLET_MIN_H = 20
+# Fenêtre d'affichage de la convergence de prévision (h glissantes depuis la
+# dernière donnée disponible, pas depuis l'horloge — cf. obs_window).
+VINTAGE_WINDOW_H = 48
+# Tolérance d'appariement d'un lead : un vintage n'incarne « la prévision émise
+# il y a h » que si son fetched_at tombe à ± cette marge de (valid_time − h).
+# Demi-espacement des leads standards (6 h) → 3 h : jamais d'ambiguïté entre
+# deux leads voisins, et une échéance trop récente pour avoir h de recul reste
+# simplement SANS point à ce lead (jamais un vintage plus jeune déguisé en J-h).
+VINTAGE_LEAD_TOL_H = 3.0
+
+
+def vintage_comparison_series(vintages_df, obs6m_df=None,
+                              leads_h=(0, 6, 12, 18, 24),
+                              window_h=VINTAGE_WINDOW_H,
+                              tol_h=VINTAGE_LEAD_TOL_H):
+    """Séries de prévision « à J-h » pour Montsouris, à confronter à la courbe
+    observée : pour chaque échéance (`valid_time`) et chaque lead `h`, la
+    température prévue par le vintage émis ~h heures avant l'échéance.
+
+    Fonction PURE (aucune lecture de fichier ; DataFrames passés en argument) —
+    `vintages_df` et `obs6m_df` doivent partager le MÊME fuseau (la conversion
+    UTC → Paris appartient à l'appelant, cf. invariant temporel du projet).
+
+    Règles de sélection, échéance par échéance :
+      • On ne considère QUE les vintages tels que `fetched_at ≤ valid_time` :
+        une prévision ne peut pas être postérieure à l'échéance qu'elle prédit.
+      • lead 0 = « dernière prévision disponible » : le `fetched_at` le plus
+        RÉCENT (≤ valid_time) parmi les vintages `source="live"` s'il en existe
+        un pour cette échéance. À DÉFAUT (flux live encore trop jeune pour avoir
+        produit un vintage sur cette échéance — typiquement les ~24 premières
+        heures du flux), repli sur le vintage `source="bootstrap"` : ce n'est
+        pas une vraie prévision « émise en temps réel » (le comblement initial
+        interroge tout le passé en un seul instant), mais la meilleure estimation
+        connue pour cette heure en attendant qu'un vrai vintage live existe — un
+        repère temporaire qui s'efface de lui-même dès qu'un live apparaît.
+      • lead h > 0 : le vintage dont `fetched_at` est le plus proche de
+        (valid_time − h), à condition d'être à ± `tol_h` de cette cible —
+        sinon l'échéance est ABSENTE de cette série (jamais d'interpolation, et
+        le bootstrap n'est JAMAIS repli ici : un faux « J-6h » serait trompeur
+        sur la capacité prédictive du modèle, contrairement au lead 0 qui ne
+        prétend qu'à « la meilleure estimation connue »).
+
+    Fenêtre : `window_h` heures glissantes finissant à la dernière donnée
+    disponible (dernière obs 6 min si fournie — l'ancre « présent » naturelle,
+    l'observé n'allant pas dans le futur —, sinon dernier `valid_time` des
+    vintages). DataFrame long [valid_time, lead_h, temperature] (une trace par
+    lead côté chart) ; vide si rien d'exploitable."""
+    cols = ["valid_time", "lead_h", "temperature"]
+    if vintages_df is None or vintages_df.empty:
+        return pd.DataFrame(columns=cols)
+    v = vintages_df[["valid_time", "fetched_at", "temperature", "source"]].copy()
+    v["valid_time"] = pd.to_datetime(v["valid_time"])
+    v["fetched_at"] = pd.to_datetime(v["fetched_at"])
+
+    if obs6m_df is not None and not obs6m_df.empty:
+        anchor = pd.to_datetime(obs6m_df["valid_time"]).max()
+    else:
+        anchor = v["valid_time"].max()
+    if pd.isna(anchor):
+        return pd.DataFrame(columns=cols)
+    start = anchor - pd.Timedelta(hours=window_h)
+    v = v[(v["valid_time"] > start) & (v["valid_time"] <= anchor)]
+    if v.empty:
+        return pd.DataFrame(columns=cols)
+
+    tol = pd.Timedelta(hours=tol_h)
+    rows = []
+    for vt, grp in v.groupby("valid_time"):
+        # Pool "live" : jamais de prévision post-échéance (fetched_at ≤ vt) —
+        # seul pool utilisé pour les leads > 0. Le bootstrap est traité à part :
+        # comblement initial en un seul instantané, son fetched_at (l'instant du
+        # comblement) est quasi toujours POSTÉRIEUR aux valid_time passés — il
+        # échouerait donc toujours ce filtre alors qu'il porte la seule donnée
+        # disponible avant que le flux live ait tourné assez longtemps.
+        live = grp[(grp["source"] != "bootstrap") & (grp["fetched_at"] <= vt)]
+        boot = grp[grp["source"] == "bootstrap"]
+        if live.empty and boot.empty:
+            continue
+        for h in leads_h:
+            if h == 0:
+                if not live.empty:
+                    pick = live.loc[live["fetched_at"].idxmax()]
+                elif not boot.empty:
+                    pick = boot.loc[boot["fetched_at"].idxmax()]
+                else:
+                    continue
+            else:
+                if live.empty:                       # bootstrap jamais repli ici
+                    continue
+                target = vt - pd.Timedelta(hours=h)
+                dist = (live["fetched_at"] - target).abs()
+                if dist.min() > tol:                 # pas de recul de ~h → absent
+                    continue
+                pick = live.loc[dist.idxmin()]
+            temp = pick["temperature"]
+            if pd.isna(temp):
+                continue
+            rows.append({"valid_time": vt, "lead_h": h, "temperature": float(temp)})
+    return pd.DataFrame(rows, columns=cols)
 
 
 def obs_est_perimee(valid_time_local, now_local, seuil_h=OBS_PERIMEE_H):
@@ -107,32 +202,3 @@ def verdict_icu_nocturne(ecarts):
         phrase = ("situation atypique : les stations aérées sont restées plus "
                   "chaudes que l'urbain dense (advection locale, microclimat).")
     return moy, label, phrase
-
-
-def comparaison_prevu_observe(txtn_prevu, txtn_obs, today):
-    """Confrontation Tx/Tn PRÉVUS (flux HD — une seule prévision pour tout
-    Paris, cf. config.LATITUDE/LONGITUDE) vs OBSERVÉS par station, sur les
-    jours révolus (date < today) dont l'observation est quasi complète
-    (n_heures ≥ JOUR_COMPLET_MIN_H). Le flux HD n'étant PAS spécifique à
-    chaque station, l'écart par station mesure justement l'ICU local vs la
-    prévision « générale » — c'est le message de ce bloc, pas un défaut.
-
-    DataFrame [date, station_nom, tx_obs, tn_obs, tx_prevu, tn_prevu,
-    ecart_tx, ecart_tn] (écart = observé − prévu) ; vide tant que
-    l'historique ne recoupe pas encore les deux flux."""
-    cols = ["date", "station_nom", "tx_obs", "tn_obs", "tx_prevu", "tn_prevu",
-            "ecart_tx", "ecart_tn"]
-    if txtn_prevu.empty or txtn_obs.empty:
-        return pd.DataFrame(columns=cols)
-    obs = txtn_obs[(txtn_obs["date"] < today)
-                   & (txtn_obs["n_heures"] >= JOUR_COMPLET_MIN_H)]
-    if obs.empty:
-        return pd.DataFrame(columns=cols)
-    prevu = txtn_prevu.rename(columns={"tx": "tx_prevu", "tn": "tn_prevu"})
-    merged = obs.rename(columns={"tx": "tx_obs", "tn": "tn_obs"}) \
-                .merge(prevu[["date", "tx_prevu", "tn_prevu"]], on="date", how="inner")
-    if merged.empty:
-        return pd.DataFrame(columns=cols)
-    merged["ecart_tx"] = merged["tx_obs"] - merged["tx_prevu"]
-    merged["ecart_tn"] = merged["tn_obs"] - merged["tn_prevu"]
-    return merged[cols].sort_values(["date", "station_nom"]).reset_index(drop=True)

@@ -72,35 +72,77 @@ def ecart_icu_chart(ecarts):
     return fig
 
 
-def prevu_vs_observe_chart(cmp_df, quoi):
-    """Tx (`quoi`="tx") ou Tn (`quoi`="tn") : prévision HD (une SEULE valeur
-    pour tout Paris — trait foncé) vs valeurs observées par station (points
-    colorés). L'éparpillement vertical des points autour du trait EST le
-    signal : quelle station colle à la prévision générale, laquelle s'en
-    écarte (ICU local)."""
-    obs_col, prevu_col = f"{quoi}_obs", f"{quoi}_prevu"
-    lib = "maximale (Tx)" if quoi == "tx" else "minimale (Tn)"
-    prevu = cmp_df.drop_duplicates("date").sort_values("date")
+# Teinte unique des courbes de prévision (ambre), distincte du bleu Montsouris
+# de l'observé : les leads se différencient par l'OPACITÉ (lead récent = opaque,
+# lead ancien = pâle) et le style de trait, pas par la couleur — on lit d'un
+# coup « les prévisions convergent vers l'observé à mesure que le lead diminue ».
+_VINTAGE_HEX = "#E67E22"
+
+# Lissage AFFICHAGE SEUL des courbes de PRÉVISION (jamais l'observé, qui n'a pas
+# ce problème) : la nuit, la couche limite stable fait osciller la température
+# à 2 m d'un pas de 15 min à l'autre (intermittence de mélange/découplage propre
+# au modèle, cf. logic) — un vrai signal du modèle, pas du bruit de collecte,
+# mais qui parasite la lecture de la convergence. Moyenne glissante centrée sur
+# ~1 h (4 pas de 15 min) ; la donnée stockée reste brute, seul le tracé lisse.
+_SMOOTH_WINDOW_PTS = 5
+
+
+def _smoothed(series):
+    return series.rolling(window=_SMOOTH_WINDOW_PTS, center=True, min_periods=1).mean()
+
+
+def vintage_comparison_chart(obs_df, vintage_series_df, titre):
+    """Convergence de la prévision à Montsouris : température OBSERVÉE (6 min,
+    trait plein épais, couleur de référence Montsouris) surchargée des courbes
+    de prévision émises à divers reculs (lead 0 = dernière prévision, puis J-6h,
+    J-12h… en ambre de plus en plus pâle et pointillé). `vintage_series_df` au
+    format long [valid_time, lead_h, temperature] (cf. logic.vintage_comparison_series).
+
+    Une série vide (lead sans données — historique trop court pour ce recul)
+    n'est jamais tracée : pas de trace fantôme, comme comparaison_stations pour
+    une station muette."""
+    ref = next((s for s in C.OBS_STATIONS if s.get("reference")), C.OBS_STATIONS[0])
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=prevu["date"], y=prevu[prevu_col], mode="lines+markers",
-        name="Prévu (HD, point unique Paris)",
-        line=dict(color=_ink(), width=2.5, dash="dash"), marker=dict(size=7),
-        hovertemplate="%{x|%a %d %b}<br>Prévu : %{y:.1f} °C<extra></extra>"))
-    for station in C.OBS_STATIONS:
-        g = cmp_df[(cmp_df["station_nom"] == station["nom"])
-                   & cmp_df[obs_col].notna()]
+
+    obs = obs_df[obs_df["t"].notna()] if obs_df is not None and not obs_df.empty \
+        else pd.DataFrame(columns=["valid_time", "t"])
+    if not obs.empty:
+        fig.add_trace(go.Scatter(
+            x=obs["valid_time"], y=obs["t"], mode="lines",
+            name=f"Observé ({ref['nom']})",
+            line=dict(color=ref["color"], width=3.5),
+            hovertemplate="Observé · %{x|%a %d %b %Hh%M}<br>%{y:.1f} °C<extra></extra>"))
+
+    leads = (sorted(vintage_series_df["lead_h"].unique())
+             if vintage_series_df is not None and not vintage_series_df.empty else [])
+    lead_max = max(leads) if leads and max(leads) > 0 else 1
+    for h in leads:
+        g = vintage_series_df[(vintage_series_df["lead_h"] == h)
+                              & vintage_series_df["temperature"].notna()] \
+            .sort_values("valid_time")
         if g.empty:
             continue
+        # Opacité dégressive avec le recul (lead 0 = plein, J-24h = pâle).
+        alpha = 1.0 - 0.6 * (h / lead_max)
+        label = "Prévision (dernière)" if h == 0 else f"Prévision J−{h}h"
         fig.add_trace(go.Scatter(
-            x=g["date"], y=g[obs_col], mode="markers", name=station["nom"],
-            marker=dict(color=station["color"], size=10,
-                        line=dict(color="white", width=1)),
-            hovertemplate=f"{station['nom']} · %{{x|%a %d %b}}<br>"
-                          "Observé : %{y:.1f} °C<extra></extra>"))
-    fig.update_layout(title=f"Température {lib} — prévu vs observé",
-                      height=380, template=_plotly_template(),
-                      xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
-                      yaxis_title="°C", legend=dict(orientation="h", y=1.12),
+            x=g["valid_time"], y=_smoothed(g["temperature"]), mode="lines", name=label,
+            line=dict(color=_rgba(_VINTAGE_HEX, alpha),
+                      width=2.5 if h == 0 else 1.6,
+                      dash="solid" if h == 0 else "dot"),
+            hovertemplate=f"{label} · %{{x|%a %d %b %Hh%M}}<br>%{{y:.1f}} °C<extra></extra>"))
+
+    if fig.data:
+        xs = []
+        if not obs.empty:
+            xs += [obs["valid_time"].min(), obs["valid_time"].max()]
+        if leads:
+            xs += [vintage_series_df["valid_time"].min(),
+                   vintage_series_df["valid_time"].max()]
+        _bandes_nocturnes(fig, min(xs), max(xs))
+    fig.update_layout(title=titre, height=430, hovermode="x unified",
+                      template=_plotly_template(), xaxis_title=None,
+                      yaxis_title="Température (°C)",
+                      legend=dict(orientation="h", y=1.08),
                       margin=dict(t=70, l=10, r=10, b=10))
     return fig

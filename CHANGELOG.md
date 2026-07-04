@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.4.9] - 2026-07-04
+Ajouter le graphique de convergence de la prévision Montsouris (vintages vs observé).
+
+Dans le domaine observations, remplace la section « prévision Tx/Tn collait-elle
+à la réalité » par un graphique de convergence : température observée 6 min à
+Montsouris confrontée aux prévisions issues des vintages, émises à différents
+reculs (dernière en date, puis 6/12/18/24 h plus tôt). Le lead 0 retombe sur le
+vintage `bootstrap` (comblement initial) tant qu'aucun vintage `live` n'existe
+encore pour une échéance donnée — le live reprend la main dès qu'il apparaît ;
+les leads 6h+ restent réservés aux vrais vintages, jamais de repli. Les courbes
+de prévision sont lissées (moyenne ~1 h) pour atténuer l'intermittence nocturne
+propre au modèle en couche limite stable, sans toucher à la donnée stockée ni à
+l'observé. Ajout pur au domaine `app/domains/observations/` (logic/charts/page),
+aucune modification du moteur de collecte ni des schémas.
+
 ## [2.4.8] - 2026-07-04
 Remplacer le flux instant 15 min par un flux vintages Montsouris (historique des révisions).
 

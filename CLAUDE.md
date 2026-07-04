@@ -20,7 +20,7 @@ Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
 - **Couches à sens unique** : `app/runtime` ← `app/data/db` ← `app/stats` ← `app/data/runsets` ← {`app/ui`, `app/pages`, `app/domains`}. Jamais d'import entre pages ni entre domaines.
 - **Un phénomène métier = un domaine** `app/domains/<nom>/` (`logic.py`, `charts.py`, `page.py`) enregistré dans `app/domains/__init__.py` (`DOMAIN_PAGES`) — ajouter un domaine ne modifie ni les domaines existants, ni `app/pages/`, ni `meteo_app.py`. Checklist : `docs/CODEMAP.md` § Ajouter un domaine.
 - **Non-régression obligatoire** pour tout refactor/factorisation du dashboard : `tools/check_non_regression.py` (calculs) et `tools/ui_snapshot.py` (rendu AppTest des pages), en mode `capture` AVANT modification puis `check` APRÈS — 100 % identique attendu (mêmes données, même heure pleine ; références non versionnées, cf. codemap). Les deux harnais sont en lecture seule sur les données.
-- `APP_VERSION` reste dans `meteo_app.py` (`export_project.py` l'y lit par regex).
+- `APP_VERSION` reste dans `meteo_app.py` (`export_project.py` l'y lit par regex). **Bump à chaque commit poussé sur `main` qui change un comportement visible** (dashboard ou pipeline/CI) — pas à chaque commit local ni pour un pur détail interne (typo, commentaire). Le message de commit du bump commence par `vX.Y.Z – <résumé>` (convention existante de l'historique).
 
 ## Invariants à NE JAMAIS casser
 

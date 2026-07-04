@@ -69,30 +69,13 @@ def page_run(runs, sig):
     st.title("🚀 Lancer le pipeline")
 
     now_utc = datetime.now(ZoneInfo("UTC"))
-    nearest = run_dual._nearest_cron_hour(now_utc)
-    legacy_slot = run_dual.LEGACY_SLOT_BY_CRON_HOUR.get(nearest)
-    if nearest is not None:
-        poll_info = f"poll de référence le plus proche : **{nearest:02d}:15 UTC**"
+    missing = run_dual._missing_legacy_slots(now_utc)
+    st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}**")
+    if missing:
+        st.info(f"📥 À rattraper côté Météociel : **{', '.join(missing)}** (publié mais pas "
+                "encore en stock) — le double run le scrapera.")
     else:
-        poll_info = "hors créneau cron (aucun poll dans la fenêtre ±1h30)"
-    st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}** · {poll_info}")
-
-    st.markdown("**Horaires conseillés (cron du workflow) :**")
-    rows = []
-    for h in run_dual.CRON_HOURS:
-        slot = run_dual.LEGACY_SLOT_BY_CRON_HOUR.get(h)
-        action = (f"Open-Meteo + scrape Météociel {slot} + contrôle croisé"
-                  if slot else "Open-Meteo seul (Météociel pas encore complet à cette heure)")
-        marker = " ← maintenant" if h == nearest else ""
-        rows.append(f"- **{h:02d}:15 UTC** — {action}{marker}")
-    st.markdown("\n".join(rows))
-
-    if legacy_slot:
-        st.success(f"✅ Créneau favorable au double run : Météociel a fini de publier le "
-                   f"{legacy_slot} (~{'midi' if legacy_slot == '0Z' else 'minuit'} heure de Paris).")
-    else:
-        st.info("ℹ️ Hors créneau Météociel : le double run fonctionnera, mais le scrape legacy "
-               "sera automatiquement sauté (run_dual.py ne le déclenche qu'aux créneaux ci-dessus).")
+        st.success("✅ Stock legacy à jour : rien à rattraper pour l'instant.")
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:

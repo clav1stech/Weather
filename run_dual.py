@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Orchestre le pipeline Open-Meteo (Forecast.py) et, aux runs 0Z/12Z, le scrape
-legacy Météociel (Forecast_legacy.py) + le contrôle croisé entre les deux
-(cf. validate_cross_pipeline.py). Sert au lancement manuel (bouton « Double
-run » du dashboard) — le workflow GitHub Actions, lui, appelle désormais
-Forecast.py (toutes les 2h) et Forecast_legacy.py/validate_cross_pipeline.py
-(aux créneaux 0Z/12Z) séparément, sur des cadences propres à chaque source.
+"""Orchestre le pipeline Open-Meteo (Forecast.py) et, pour les créneaux 0Z/12Z
+du jour déjà publiés côté Météociel, le scrape legacy (Forecast_legacy.py) +
+le contrôle croisé entre les deux (cf. validate_cross_pipeline.py). Sert au
+lancement manuel (bouton « Double run » du dashboard) — le workflow GitHub
+Actions, lui, appelle désormais Forecast.py (toutes les 2h) et
+Forecast_legacy.py/validate_cross_pipeline.py (aux créneaux 0Z/12Z)
+séparément, sur des cadences propres à chaque source.
 
 Météociel ne publie ses runs 0Z/12Z en intégralité qu'avec un net retard (0Z
-complet vers midi heure de Paris, 12Z complet vers minuit) : le scrape legacy
-n'est donc déclenché ici qu'aux appels proches de 10:15 UTC (0Z) et 22:15 UTC
-(12Z), où Open-Meteo a déjà son propre 0Z/12Z mais Météociel vient tout juste
-de finir de publier. Le contrôle croisé compare alors le scrape frais à la
-donnée Open-Meteo déjà archivée sous le même run_date.
-"""
+complet vers midi heure de Paris, 12Z complet vers minuit). Plutôt que de se
+caler sur une fenêtre autour de l'heure de cron (un poll manqué ou en retard
+ratait alors le scrape), on compare le stock (fichiers `legacy/` du jour) à ce
+qui devrait déjà être publié à l'heure actuelle, et on rattrape tout créneau
+manquant — Forecast_legacy.py ne pouvant scraper que le run COURANT du site
+Météociel, ce rattrapage reste borné au jour même (cf. `_run_legacy_scrape`)."""
 
 import datetime as dt
+import os
 import subprocess
 import sys
 
@@ -22,26 +24,34 @@ import Forecast
 import validate_cross_pipeline as validate
 import config as C
 
-# Heure de cron (UTC) où Météociel a fini de publier le run 0Z/12Z correspondant.
-LEGACY_SLOT_BY_CRON_HOUR = {10: "0Z", 22: "12Z"}
-# Cadence réelle du workflow GitHub Actions pour Open-Meteo (Forecast.py, toutes
-# les 2h) — sert de repère d'affichage/gating ici, pas de config du workflow lui-même.
-CRON_HOURS = tuple(range(0, 24, 2))
+# Heure UTC (minute :15) à partir de laquelle Météociel a fini de publier le
+# run 0Z/12Z correspondant en intégralité.
+LEGACY_PUBLISH_HOUR_BY_SLOT = {"0Z": 10, "12Z": 22}
 
 
-def _nearest_cron_hour(now_utc, max_dist_h=1.5):
-    """Créneau cron le plus proche, ou None si l'écart dépasse max_dist_h.
+def _legacy_file_path(date_utc, slot):
+    return os.path.join(C.LEGACY_FORECASTS_DIR, f"Forecast-{date_utc:%d%m%Y}-{slot}.xlsx")
 
-    Utilise les minutes pour éviter qu'un run à 08h21 UTC (10h21 Paris) soit
-    rattaché au créneau 10h UTC (écart réel = 1h39, inférieur à 2h entières)."""
-    frac_h = now_utc.hour + now_utc.minute / 60
 
-    def dist(h):
-        d = abs(frac_h - h)
-        return min(d, 24 - d)
-
-    best = min(CRON_HOURS, key=dist)
-    return best if dist(best) <= max_dist_h else None
+def _missing_legacy_slots(now_utc):
+    """Créneaux legacy déjà publiés côté Météociel (heure de publication passée)
+    mais absents de `legacy/` — à rattraper, quel que soit l'écart au cron
+    habituel. Forecast_legacy.py nomme le fichier d'après la date de run
+    réellement affichée par Météociel (pas la date système) : selon la
+    disparité de mise à jour entre modèles, ce peut être la veille au moment du
+    poll (ex. juste après minuit UTC, le run 12Z pas encore roulé côté site) —
+    on vérifie donc la présence du fichier à J comme à J-1 avant de conclure à
+    une absence."""
+    missing = []
+    for slot, hour in LEGACY_PUBLISH_HOUR_BY_SLOT.items():
+        publish_at = now_utc.replace(hour=hour, minute=15, second=0, microsecond=0)
+        if now_utc < publish_at:
+            continue
+        today, yesterday = now_utc, now_utc - dt.timedelta(days=1)
+        if not (os.path.exists(_legacy_file_path(today, slot))
+                or os.path.exists(_legacy_file_path(yesterday, slot))):
+            missing.append(slot)
+    return missing
 
 
 def _run_legacy_scrape(run_label):
@@ -63,18 +73,18 @@ def main():
     print("=== Pipeline Open-Meteo ===")
     Forecast.main()
 
-    run_label = LEGACY_SLOT_BY_CRON_HOUR.get(_nearest_cron_hour(now_utc))
-    if run_label is None:
-        print("\nℹ️  Hors créneau Météociel (0Z publié ~10h UTC, 12Z ~22h UTC) — "
-              "pas de scrape legacy à ce poll.")
+    missing = _missing_legacy_slots(now_utc)
+    if not missing:
+        print("\nℹ️  Stock legacy à jour : rien à rattraper côté Météociel pour l'instant.")
         return
 
-    print(f"\n=== Pipeline legacy Météociel ({run_label}) ===")
-    if not _run_legacy_scrape(run_label):
-        return
+    for run_label in missing:
+        print(f"\n=== Pipeline legacy Météociel ({run_label}) ===")
+        if not _run_legacy_scrape(run_label):
+            continue
 
-    print(f"\n=== Contrôle croisé ({run_label}) ===")
-    validate.cross_check(run_label, now_utc)
+        print(f"\n=== Contrôle croisé ({run_label}) ===")
+        validate.cross_check(run_label, now_utc)
 
 
 if __name__ == "__main__":

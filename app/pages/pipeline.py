@@ -29,6 +29,27 @@ def _run_script(*args, timeout=300):
     return proc.returncode, output
 
 
+def _execute(entries):
+    """Exécute une séquence de (label, script, timeout) avec spinner, et renvoie
+    la liste [(label, code, output)] — stockée en session_state puis rendue
+    PLEINE LARGEUR sous les colonnes (le déroulé d'un fetch ne doit pas être
+    tassé dans une des 4 colonnes). code None = exception gérée (timeout/erreur),
+    `output` porte alors le message."""
+    out = []
+    for label, script, timeout in entries:
+        with st.spinner(f"Exécution de {script}…"):
+            try:
+                code, output = _run_script(os.path.join(C.BASE_DIR, script),
+                                           timeout=timeout)
+                out.append((label, code, output or "(aucune sortie)"))
+            except subprocess.TimeoutExpired:
+                out.append((label, None, f"⏱️ Délai dépassé ({timeout} s)."))
+            except Exception as e:  # noqa: BLE001
+                out.append((label, None, f"Erreur : {e}"))
+    st.cache_data.clear()
+    return out
+
+
 def cross_check_log_signature():
     try:
         return os.path.getmtime(C.CROSS_CHECK_LOG_PATH)
@@ -48,88 +69,67 @@ def page_run(runs, sig):
     st.title("🚀 Lancer le pipeline")
 
     now_utc = datetime.now(ZoneInfo("UTC"))
-    nearest = run_dual._nearest_cron_hour(now_utc)
-    legacy_slot = run_dual.LEGACY_SLOT_BY_CRON_HOUR.get(nearest)
-    if nearest is not None:
-        poll_info = f"poll de référence le plus proche : **{nearest:02d}:15 UTC**"
+    missing = run_dual._missing_legacy_slots(now_utc)
+    st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}**")
+    if missing:
+        st.info(f"📥 À rattraper côté Météociel : **{', '.join(missing)}** (publié mais pas "
+                "encore en stock) — le double run le scrapera.")
     else:
-        poll_info = "hors créneau cron (aucun poll dans la fenêtre ±1h30)"
-    st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}** · {poll_info}")
+        st.success("✅ Stock legacy à jour : rien à rattraper pour l'instant.")
 
-    st.markdown("**Horaires conseillés (cron du workflow) :**")
-    rows = []
-    for h in run_dual.CRON_HOURS:
-        slot = run_dual.LEGACY_SLOT_BY_CRON_HOUR.get(h)
-        action = (f"Open-Meteo + scrape Météociel {slot} + contrôle croisé"
-                  if slot else "Open-Meteo seul (Météociel pas encore complet à cette heure)")
-        marker = " ← maintenant" if h == nearest else ""
-        rows.append(f"- **{h:02d}:15 UTC** — {action}{marker}")
-    st.markdown("\n".join(rows))
-
-    if legacy_slot:
-        st.success(f"✅ Créneau favorable au double run : Météociel a fini de publier le "
-                   f"{legacy_slot} (~{'midi' if legacy_slot == '0Z' else 'minuit'} heure de Paris).")
-    else:
-        st.info("ℹ️ Hors créneau Météociel : le double run fonctionnera, mais le scrape legacy "
-               "sera automatiquement sauté (run_dual.py ne le déclenche qu'aux créneaux ci-dessus).")
-
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.subheader("① Open-Meteo seul")
         st.caption("`Forecast.py` : interroge l'API, détecte le cycle par modèle, met à jour "
                   "`data/database_paris.parquet`. ~10-30 s.")
         if st.button("▶️ Lancer Forecast.py", type="secondary"):
-            with st.spinner("Exécution de Forecast.py…"):
-                try:
-                    code, output = _run_script(os.path.join(C.BASE_DIR, "Forecast.py"))
-                    st.code(output or "(aucune sortie)")
-                    if code == 0:
-                        st.success("✅ Pipeline Open-Meteo terminé.")
-                        st.cache_data.clear()
-                    else:
-                        st.error(f"❌ Code de sortie {code}.")
-                except subprocess.TimeoutExpired:
-                    st.error("⏱️ Délai dépassé (5 min).")
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"Erreur : {e}")
+            st.session_state["pipeline_results"] = _execute(
+                [("Pipeline Open-Meteo", "Forecast.py", 300)])
 
     with col2:
         st.subheader("② Double run + contrôle croisé")
         st.caption("`run_dual.py` : Open-Meteo, puis (si créneau favorable) scrape Météociel "
                   "+ comparaison ECMWF/AIFS/GEFS échéance par échéance. ~30-90 s.")
         if st.button("🔁 Lancer le double run", type="primary"):
-            with st.spinner("Exécution de run_dual.py…"):
-                try:
-                    code, output = _run_script(os.path.join(C.BASE_DIR, "run_dual.py"), timeout=600)
-                    st.code(output or "(aucune sortie)")
-                    if code == 0:
-                        st.success("✅ Double run terminé.")
-                        st.cache_data.clear()
-                    else:
-                        st.error(f"❌ Code de sortie {code}.")
-                except subprocess.TimeoutExpired:
-                    st.error("⏱️ Délai dépassé (10 min).")
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"Erreur : {e}")
+            st.session_state["pipeline_results"] = _execute(
+                [("Double run", "run_dual.py", 600)])
 
     with col3:
         st.subheader("③ Tx/Tn haute résolution")
         st.caption("`forecast_t2m_hd.py` : API Forecast standard (Météo-France/DWD ICON), "
                   "met à jour `data/database_paris_t2m.parquet` (flux annexe, 4 j). ~5-15 s.")
         if st.button("🌡️ Lancer Tx/Tn HD", type="secondary"):
-            with st.spinner("Exécution de forecast_t2m_hd.py…"):
-                try:
-                    code, output = _run_script(os.path.join(C.BASE_DIR, "forecast_t2m_hd.py"))
-                    st.code(output or "(aucune sortie)")
-                    if code == 0:
-                        st.success("✅ Pipeline Tx/Tn HD terminé.")
-                        st.cache_data.clear()
-                    else:
-                        st.error(f"❌ Code de sortie {code}.")
-                except subprocess.TimeoutExpired:
-                    st.error("⏱️ Délai dépassé (5 min).")
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"Erreur : {e}")
+            st.session_state["pipeline_results"] = _execute(
+                [("Pipeline Tx/Tn HD", "forecast_t2m_hd.py", 300)])
+
+    with col4:
+        st.subheader("④ Observations + instantané")
+        st.caption("`fetch_observations.py` (paquet horaire Météo-France, "
+                  "4 stations), `fetch_observations_6m.py` (infra-horaire 6 min, "
+                  "4 stations) puis `fetch_instant.py` (Open-Meteo "
+                  "minutely_15, prévision 15 min) — flux annexes indépendants, à "
+                  "la suite. ~15-30 s.")
+        if st.button("📡 Lancer obs + 6 min + instant", type="secondary"):
+            st.session_state["pipeline_results"] = _execute([
+                ("Observations Météo-France", "fetch_observations.py", 60),
+                ("Observations 6 min", "fetch_observations_6m.py", 60),
+                ("Prévision instantanée 15 min", "fetch_instant.py", 60),
+            ])
+
+    # Déroulé de la dernière exécution — rendu PLEINE LARGEUR sous les colonnes
+    # (jamais tassé dans une seule des 4 colonnes ci-dessus).
+    results = st.session_state.get("pipeline_results")
+    if results:
+        st.markdown("#### 📄 Déroulé de la dernière exécution")
+        for label, code, output in results:
+            if code == 0:
+                st.success(f"✅ {label} : terminé.")
+            elif code is None:
+                st.error(f"❌ {label} : {output}")
+                continue
+            else:
+                st.error(f"❌ {label} : code de sortie {code}.")
+            st.code(output)
 
     st.markdown("---")
     st.subheader("🩹 Import ciblé depuis le legacy")

@@ -139,6 +139,160 @@ T2M_MODELS = [
 T2M_FORECAST_DAYS = 7
 
 # --------------------------------------------------------------------------- #
+#  Prévision instantanée haute fréquence 15 min (API Forecast, flux annexe)
+# --------------------------------------------------------------------------- #
+# Flux ANNEXE de TRÈS COURT TERME (cf. fetch_instant.py) : température 2 m,
+# humidité relative et précipitations au pas de 15 MINUTES sur les prochaines
+# ~48 h (endpoint minutely_15). Troisième granularité temporelle du projet, à
+# ne PAS fusionner avec les autres : ensemble T850 (horaire, 16 j, synoptique),
+# Tx/Tn HD (journalier, 7 j), et ici l'infra-horaire 15 min court terme.
+# Affichage/contexte uniquement — n'influence NI la détection canicule, NI la
+# sélection des runs, NI les KPI (t850 reste l'unique pilote).
+#
+# Un seul modèle, meteofrance_seamless (AROME→ARPEGE) : « seamless » = pas de
+# cycle synoptique unique identifiable, donc daté par instant de collecte
+# (fetched_at), comme le flux T2m HD. Pas de secours DWD ICON ici (contrairement
+# au T2m HD) : le besoin est la finesse temporelle locale à court terme, où
+# AROME est le meilleur ; un secours multi-modèles introduirait un arbitrage non
+# souhaité (cf. principe T2M). L'ajout du vent (wind_speed_10m) ne coûterait
+# qu'une ligne dans INSTANT_VARIABLES si le besoin apparaît.
+INSTANT_API_URL = "https://api.open-meteo.com/v1/forecast"
+INSTANT_MODEL = "meteofrance_seamless"
+# api : nom Open-Meteo (paramètre `minutely_15`) ; col : colonne parquet.
+# Unités renvoyées directement exploitables (vérifié) : °C, %, mm — aucun
+# recalcul au parsing, contrairement aux observations MF (Kelvin/Pa).
+INSTANT_VARIABLES = [
+    {"api": "temperature_2m",      "col": "temperature"},
+    {"api": "relative_humidity_2m", "col": "humidite"},
+    {"api": "precipitation",       "col": "precip"},
+]
+# Backfill via past_days : au TOUT PREMIER run (parquet absent), on amorce
+# l'historique avec plusieurs jours d'un coup ; aux runs suivants, un past_days
+# modeste suffit à combler un éventuel trou de cron sans re-télécharger tout
+# l'historique (la fenêtre future ~48 h est de toute façon toujours renvoyée).
+INSTANT_BACKFILL_PAST_DAYS_INIT = 7   # premier run (base vide) : contexte utile
+INSTANT_BACKFILL_PAST_DAYS = 1        # runs suivants : rattrapage de trou de cron
+
+# --------------------------------------------------------------------------- #
+#  Observations temps réel Météo-France (API DPObs — flux annexe séparé)
+# --------------------------------------------------------------------------- #
+# Flux ANNEXE d'OBSERVATIONS de surface (cf. fetch_observations.py) : 4 stations
+# parisiennes choisies pour leur contraste d'exposition à l'îlot de chaleur
+# urbain (ICU). Affichage/contexte uniquement — n'influence NI la détection
+# canicule, NI la sélection des runs, NI les KPI (t850 reste l'unique pilote).
+#
+# Authentification : header "apikey" (pas d'OAuth2), clé lue EXCLUSIVEMENT via
+# la variable d'environnement METEOFRANCE_API_KEY (secret GitHub Actions en CI,
+# .env gitignoré en local) — jamais en dur ici ni ailleurs dans le code.
+#
+# Endpoint « Paquet Observation » (contexte DPPaquetObs/v2 — la clé couvre v2,
+# PAS v1 qui répond 403) : un seul GET /paquet/horaire?id-departement=…
+# renvoie les observations horaires de TOUTES les stations du département sur
+# une fenêtre glissante de plusieurs jours (~5 j constatés, ≥ 24 h garantis
+# par la doc). Préféré au mono-station DPObs /station/horaire (une seule obs
+# par appel) : amorçage/réamorçage de l'historique en un poll, et rattrapage
+# automatique des heures manquées si le cron saute (panne CI, quota).
+OBS_API_BASE = "https://public-api.meteofrance.fr/public/DPPaquetObs/v2"
+OBS_DEPARTEMENT = "75"                    # département couvert par le paquet
+OBS_API_KEY_ENV = "METEOFRANCE_API_KEY"   # nom de la variable d'env portant la clé
+
+# id        : id_station DPObs (8 chiffres, vérifié via /liste-stations)
+# nom       : nom court affiché
+# reseau    : RADOME (instrumentation complète) ou ETENDU (température/pluie seules)
+# reference : True = station de référence (Montsouris) — seule station dont
+#             humidité/vent/pression sont affichés (les stations ETENDU ne
+#             publient pas ces variables : absence STRUCTURELLE, pas un bug).
+# icu       : exposition à l'îlot de chaleur — "urbain" (tissu dense, retient
+#             la chaleur la nuit) ou "aere" (parc/bois, se refroidit bien).
+#             Champ EXPLICITE : ne pas le déduire du réseau (la coïncidence
+#             ETENDU=urbain / RADOME=aéré est propre à CES 4 stations).
+# profil    : exposition ICU en toutes lettres, affichée pour situer la station.
+# color     : couleur d'affichage (comparaison inter-stations).
+OBS_STATIONS = [
+    {"id": "75114001", "nom": "Montsouris",   "lat": 48.821667, "lon": 2.337833,
+     "alt": 75, "reseau": "RADOME", "reference": True,  "icu": "aere",
+     "color": "#1F618D",
+     "profil": "parc du sud de Paris — station de référence historique"},
+    {"id": "75110001", "nom": "Lariboisière", "lat": 48.882833, "lon": 2.352000,
+     "alt": 55, "reseau": "ETENDU", "reference": False, "icu": "urbain",
+     "color": "#C0392B",
+     "profil": "nord de Paris, tissu urbain dense (ICU marqué)"},
+    {"id": "75106001", "nom": "Luxembourg",   "lat": 48.844833, "lon": 2.338500,
+     "alt": 50, "reseau": "ETENDU", "reference": False, "icu": "urbain",
+     "color": "#B9770E",
+     "profil": "rive gauche, proche Saint-Germain-des-Prés (urbain)"},
+    {"id": "75116008", "nom": "Longchamp",    "lat": 48.854833, "lon": 2.233667,
+     "alt": 27, "reseau": "RADOME", "reference": False, "icu": "aere",
+     "color": "#1E8449",
+     "profil": "bois de Boulogne, très végétalisé et aéré"},
+]
+
+# Variables collectées depuis /station/horaire — api = champ JSON DPObs,
+# col = colonne parquet, conv = conversion appliquée AU PARSING (avant stockage,
+# pour que le parquet soit directement comparable aux données Open-Meteo) :
+#   "kelvin"    : K → °C (t/td/tx/tn sont renvoyés en Kelvin par l'API) ;
+#   "pa_to_hpa" : Pa → hPa (pres/pmer) ;
+#   None        : valeur stockée telle quelle (u en %, dd en °, ff en m/s,
+#                 rr1 en mm, ray_glo01 en J/m²).
+# Une variable absente/null (stations ETENDU : humidité, vent, pression) reste
+# NaN — jamais de valeur inventée, jamais d'erreur.
+OBS_VARIABLES = [
+    {"api": "t",         "col": "t",         "conv": "kelvin"},
+    {"api": "td",        "col": "td",        "conv": "kelvin"},
+    {"api": "tx",        "col": "tx",        "conv": "kelvin"},
+    {"api": "tn",        "col": "tn",        "conv": "kelvin"},
+    {"api": "u",         "col": "humidite",  "conv": None},
+    {"api": "dd",        "col": "vent_dir",  "conv": None},
+    {"api": "ff",        "col": "vent_ff",   "conv": None},
+    {"api": "rr1",       "col": "precip_1h", "conv": None},
+    {"api": "pres",      "col": "pression",  "conv": "pa_to_hpa"},
+    {"api": "pmer",      "col": "pression_mer", "conv": "pa_to_hpa"},
+    {"api": "ray_glo01", "col": "rayonnement",  "conv": None},
+]
+
+# --------------------------------------------------------------------------- #
+#  Observations INFRA-HORAIRES 6 min (DPPaquetObs — flux annexe séparé)
+# --------------------------------------------------------------------------- #
+# Flux ANNEXE de FRAÎCHEUR : même API, même clé, même déduplication
+# (station_id, valid_time), mais endpoint /paquet/infrahoraire-6m — une mesure
+# toutes les 6 min au lieu d'une par heure (cf. fetch_observations_6m.py →
+# parquet séparé data/database_paris_observations_6m.parquet). SEUL usage :
+# rafraîchir la dernière température (et les valeurs INSTANTANÉES : humidité,
+# vent, pression) des cartes « temps réel » — le flux horaire reste l'unique
+# source de la comparaison inter-stations et des Tx/Tn journaliers (grille
+# horaire indispensable à JOUR_COMPLET_MIN_H). Affichage/contexte uniquement,
+# n'influence NI la détection canicule, NI la sélection des runs, NI les KPI.
+#
+# ACCÈS : endpoint /paquet/infrahoraire-6m servi par le contexte v2 (OBS_API_BASE),
+# mais interrogé PAR STATION (paramètre `id_station`, un appel par station) — le
+# filtre `id-departement` du flux horaire y renvoie 400. Constaté en conditions
+# réelles : chaque appel renvoie ~4,4 j de points 6 min (fenêtre bien plus large
+# que les 24 h documentés → backfill initial naturel en un poll).
+#
+# STRUCTUREL : les 4 stations répondent au 6 min, mais l'INSTRUMENTATION diffère.
+# RADOME (Montsouris, Longchamp) publie t/td/u/vent/rafales/rr_per (+ pression
+# à Montsouris seule, Longchamp ne la publiant pas, comme en horaire) ; ETENDU
+# (Lariboisière, Luxembourg) ne publie QUE t et rr_per — le reste est null par
+# niveau d'instrumentation, jamais une panne → NaN, jamais une valeur inventée.
+# Uniquement des grandeurs INSTANTANÉES converties AU PARSING comme l'horaire
+# (jamais tx/tn ni rr1 horaire ; rr_per est le cumul 6 min de la période, pas
+# rr1). Noms de champs DPPaquetObs 6 min propres à ce flux : rafales ddraf10/raf10
+# (≠ ddraf/raf), précipitation rr_per (≠ rr1).
+OBS_6M_ENDPOINT = "/paquet/infrahoraire-6m"
+OBS_6M_VARIABLES = [
+    {"api": "t",       "col": "t",            "conv": "kelvin"},
+    {"api": "td",      "col": "td",           "conv": "kelvin"},
+    {"api": "u",       "col": "humidite",     "conv": None},
+    {"api": "dd",      "col": "vent_dir",     "conv": None},
+    {"api": "ff",      "col": "vent_ff",      "conv": None},
+    {"api": "ddraf10", "col": "raf_dir",      "conv": None},
+    {"api": "raf10",   "col": "raf",          "conv": None},
+    {"api": "rr_per",  "col": "precip_6m",    "conv": None},
+    {"api": "pres",    "col": "pression",     "conv": "pa_to_hpa"},
+    {"api": "pmer",    "col": "pression_mer", "conv": "pa_to_hpa"},
+]
+
+# --------------------------------------------------------------------------- #
 #  Stockage
 # --------------------------------------------------------------------------- #
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -147,6 +301,15 @@ DB_PATH = os.path.join(DATA_DIR, "database_paris.parquet")
 # Parquet SÉPARÉ pour le flux Tx/Tn HD : pas un ensemble (aucun `member`), le
 # mélanger à DB_PATH casserait la sémantique de la base plate principale.
 DB_T2M_PATH = os.path.join(DATA_DIR, "database_paris_t2m.parquet")
+# Parquet SÉPARÉ pour les observations Météo-France (une ligne par
+# (station, heure d'observation), append-only) — même principe d'isolement.
+DB_OBS_PATH = os.path.join(DATA_DIR, "database_paris_observations.parquet")
+# Parquet SÉPARÉ pour les observations infra-horaires 6 min (fraîcheur des
+# cartes temps réel, stations RADOME seules) — jamais mélangé au flux horaire.
+DB_OBS_6M_PATH = os.path.join(DATA_DIR, "database_paris_observations_6m.parquet")
+# Parquet SÉPARÉ pour la prévision instantanée 15 min (une ligne par échéance
+# quart-horaire, upsert sur validtime) — flux distinct, jamais mélangé.
+DB_INSTANT_PATH = os.path.join(DATA_DIR, "database_paris_instant.parquet")
 
 # Une série (model, member) entièrement NaN (modèle indisponible ce run) n'est
 # pas stockée. Les modèles qui s'arrêtent tôt gardent en revanche leurs lignes
@@ -318,3 +481,24 @@ SCHEMA = ["run_date", "model", "member", "valid_time"] + VAR_COLS
 # Flux Tx/Tn HD — l'ordre de T2M_LABELS EST l'ordre de priorité d'affichage.
 T2M_LABELS = [m["label"] for m in T2M_MODELS]
 T2M_SCHEMA = ["fetched_at", "model", "target_date", "tx", "tn"]
+# Flux observations Météo-France. valid_time = validity_time de l'API (heure de
+# l'observation, UTC tz-naïf) — PAS reference_time, qui est l'heure de
+# production du lot côté Météo-France (identique pour toutes les stations et
+# renouvelée à chaque poll pour une même observation : en faire la clé
+# dupliquerait chaque obs à chaque poll). Clé de déduplication :
+# (station_id, valid_time).
+OBS_STATION_IDS = [s["id"] for s in OBS_STATIONS]
+OBS_NOM_BY_ID = {s["id"]: s["nom"] for s in OBS_STATIONS}
+OBS_COLOR_BY_NOM = {s["nom"]: s["color"] for s in OBS_STATIONS}
+OBS_STATION_BY_ID = {s["id"]: s for s in OBS_STATIONS}
+OBS_VAR_COLS = [v["col"] for v in OBS_VARIABLES]
+OBS_SCHEMA = ["valid_time", "station_id", "station_nom"] + OBS_VAR_COLS
+OBS_6M_VAR_COLS = [v["col"] for v in OBS_6M_VARIABLES]
+OBS_6M_SCHEMA = ["valid_time", "station_id", "station_nom"] + OBS_6M_VAR_COLS
+# Flux prévision instantanée 15 min. Clé de déduplication = `validtime` SEUL
+# (upsert, dernière prévision connue conservée) : c'est une prévision révisable,
+# pas un fait acquis comme une observation — on garde l'estimation la plus
+# fraîche de chaque échéance, sans historique des révisions (table légère).
+# `fetched_at` reste stocké comme MÉTA (fraîcheur de la valeur), pas dans la clé.
+INSTANT_VAR_COLS = [v["col"] for v in INSTANT_VARIABLES]
+INSTANT_SCHEMA = ["validtime", "fetched_at"] + INSTANT_VAR_COLS

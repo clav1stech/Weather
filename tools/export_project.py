@@ -138,7 +138,15 @@ def collect_files(profile, only=None):
         if not path.is_file():
             continue
         rel_parts = path.relative_to(project_dir).parts
-        if any(part in excluded_dirs for part in rel_parts[:-1]):
+        # "data" exclu SEULEMENT en premier niveau (le data/ racine, données
+        # binaires) : un `any(part in ...)` sur tous les segments exclurait à
+        # tort app/data/ (code, module central du dashboard, cf. CODEMAP) qui
+        # partage le même nom. Les autres dossiers exclus (__pycache__, golden…)
+        # gardent le matching « à toute profondeur », nécessaire pour __pycache__
+        # qui réapparaît sous chaque sous-package.
+        if rel_parts[0] == "data" or any(
+            part in (excluded_dirs - {"data"}) for part in rel_parts[:-1]
+        ):
             continue
         if path.name in excluded_files:
             continue

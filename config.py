@@ -327,6 +327,49 @@ DB_OBS_6M_PATH = os.path.join(DATA_DIR, "database_paris_observations_6m.parquet"
 # distinct, jamais mélangé.
 DB_VINTAGE_PATH = os.path.join(DATA_DIR, "database_paris_montsouris_vintages.parquet")
 
+# --------------------------------------------------------------------------- #
+#  Déclenchement à distance du workflow — NON UTILISÉ actuellement (dormant)
+# --------------------------------------------------------------------------- #
+# Alternative écartée au profit du snapshot en direct ci-dessous (plus simple,
+# pas de PAT à gérer) : conservée telle quelle, secret et code compris
+# (app/services/github_dispatch.py), au cas où ce choix serait reconsidéré.
+# Le dashboard public ne collecte JAMAIS lui-même : il se contente de déclencher
+# (workflow_dispatch) le job CI existant, qui reste l'unique écrivain des
+# parquets. Dépôt visé — jamais en dur ailleurs que config.
+GITHUB_DISPATCH_OWNER = "clav1stech"
+GITHUB_DISPATCH_REPO = "Weather"
+GITHUB_DISPATCH_WORKFLOW = "run_forecast.yml"
+# Nom du secret st.secrets portant le PAT fine-grained (Actions: write only,
+# scopé à ce seul dépôt) — jamais versionné, à configurer manuellement dans les
+# secrets Streamlit Cloud, cf. CLAUDE.md.
+GITHUB_DISPATCH_TOKEN_SECRET = "GITHUB_DISPATCH_TOKEN"
+# Cooldown mini entre deux déclenchements publics du flux 6 min — aligné sur sa
+# cadence naturelle (10,25,40,55) pour qu'un utilisateur ne fasse jamais mieux
+# qu'attendre le prochain créneau de toute façon. Empêche le spam/l'épuisement
+# du quota Actions par un public anonyme non authentifié.
+GITHUB_DISPATCH_COOLDOWN_S = 600  # 10 min
+# Fichier d'horodatage du dernier déclenchement, partagé par tous les visiteurs
+# tant que le conteneur Streamlit Cloud vit (PAS st.session_state seul, trivial
+# à contourner par un simple refresh) — mais ne survit pas à un redémarrage du
+# conteneur (limite documentée, acceptable : pire cas = un cooldown remis à
+# zéro, jamais un abus permanent). Hors data/ : jamais un parquet de données.
+GITHUB_DISPATCH_STATE_PATH = os.path.join(BASE_DIR, ".runtime_state", "obs6m_dispatch_last.txt")
+
+# --------------------------------------------------------------------------- #
+#  Snapshot EN DIRECT du bouton « Rafraîchir » (page Observations)
+# --------------------------------------------------------------------------- #
+# Le bouton interroge l'API Météo-France 6 min À LA DEMANDE et affiche le
+# résultat une seule fois (aperçu de la session en cours) — il n'écrit JAMAIS
+# dans data/database_paris_observations_6m.parquet (dashboard toujours en
+# lecture seule) : la base réelle ne se réactualise qu'au prochain cycle du
+# cron GitHub Actions habituel (10,25,40,55). Nécessite le secret st.secrets
+# METEOFRANCE_API_KEY (même nom que OBS_API_KEY_ENV ci-dessus, mais lu depuis
+# st.secrets côté dashboard — le pipeline, lui, le lit d'un .env/secret CI).
+# Cooldown court : protège seulement l'API Météo-France d'un abus de clics
+# d'un public anonyme, pas un système CI à préserver (pas de quota Actions ici).
+OBS_LIVE_REFRESH_COOLDOWN_S = 60
+OBS_LIVE_REFRESH_STATE_PATH = os.path.join(BASE_DIR, ".runtime_state", "obs6m_live_last.txt")
+
 # Une série (model, member) entièrement NaN (modèle indisponible ce run) n'est
 # pas stockée. Les modèles qui s'arrêtent tôt gardent en revanche leurs lignes
 # NaN de queue jusqu'à 16 j (grille horaire uniforme).

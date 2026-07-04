@@ -15,6 +15,10 @@ indépendante.
   runs, contrôle de présence des modèles).
 - **Contrôle croisé** : un scraper legacy (Météociel) sert de source
   indépendante pour valider les données Open-Meteo aux cycles 0Z/12Z.
+- **Observations en direct** : quatre stations Météo-France parisiennes
+  (flux annexes horaire + 6 min), avec un bouton public « Voir un aperçu
+  instantané » qui interroge l'API en direct sans jamais écrire en base
+  (cf. § Secrets ci-dessous).
 
 ## Modèles suivis
 
@@ -73,6 +77,7 @@ app/
   data/                       accès parquet, sélection de runs, import legacy
   stats/                      statistiques d'ensemble (tolérantes NaN), climatologie
   ui/                         thème, composants, graphiques génériques
+  services/                   intégrations externes (ex. aperçu en direct API Météo-France)
   domains/<nom>/              un phénomène météo = un domaine (ex. canicule)
   pages/                      pages transverses (vue d'ensemble, exploration…)
 tools/                       harnais de non-régression, export du projet
@@ -85,6 +90,34 @@ Pour une carte complète du code, voir [`docs/CODEMAP.md`](docs/CODEMAP.md).
 Les invariants du projet (intégrité des données, historique des runs,
 détection de fraîcheur, vues combinées…) sont documentés dans
 [`CLAUDE.md`](CLAUDE.md).
+
+## Secrets (Streamlit Cloud)
+
+La page « Observations en direct » propose un bouton public « Voir un aperçu
+instantané » : il interroge l'API Météo-France 6 min **en direct** et affiche
+le résultat une seule fois, sans jamais l'écrire en base — la base réelle
+(`data/database_paris_observations_6m.parquet`) continue de se réactualiser
+uniquement via le cron GitHub Actions habituel (≤ 15 min). Nécessite le même
+secret que le pipeline, mais côté app cette fois, dans les réglages Streamlit
+Cloud (Settings → Secrets), **jamais** dans `.env` ni versionné :
+
+```toml
+METEOFRANCE_API_KEY = "..."
+```
+
+En son absence, le bouton affiche un message d'indisponibilité sans jamais
+planter la page.
+
+*Alternative dormante* : une implémentation par déclenchement à distance du
+workflow (`workflow_dispatch`) existe dans le code
+(`app/services/github_dispatch.py`) mais n'est plus appelée par la page —
+conservée au cas où ce choix serait reconsidéré. Elle nécessiterait alors un
+second secret, un PAT GitHub **fine-grained** scopé au seul dépôt `Weather`
+avec uniquement la permission **Actions: write** :
+
+```toml
+GITHUB_DISPATCH_TOKEN = "github_pat_..."
+```
 
 ## Non-régression
 

@@ -23,6 +23,8 @@ from app.data.observations import (
     latest_obs, load_obs, obs_signature, obs_window)
 from app.data.observations_6m import latest_obs_6m, load_obs_6m, obs_6m_signature
 from app.data.vintages import load_vintages, vintages_signature
+from app.services import cooldown
+from app.services.live_observations import fetch_live_snapshot
 from app.domains.observations.charts import (
     comparaison_stations, ecart_icu_chart, vintage_comparison_chart)
 from app.domains.observations.logic import (
@@ -38,16 +40,17 @@ def _cols_cartes():
     return st.columns(len(C.OBS_STATIONS))
 
 
-def _champ_frais(row_h, row_6m, col):
-    """Valeur la plus FRAÎCHE de la colonne `col` entre l'obs horaire et l'obs
-    6 min d'une même station : le 6 min prime dès qu'il porte cette colonne avec
-    une valeur non-NaN et un horodatage plus récent (grandeurs instantanées —
-    température, humidité, vent, pression). Les colonnes propres au flux horaire
-    (precip_1h, tx/tn : cumuls/extrêmes horaires absents du 6 min) retombent
-    naturellement sur l'horaire. Retourne (valeur ou NaN, horodatage ou None).
-    `row_6m` None = station sans 6 min (ETENDU, ou base 6 min absente)."""
+def _champ_frais(col, *rows):
+    """Valeur la plus FRAÎCHE de la colonne `col` parmi plusieurs sources d'une
+    même station (obs horaire, obs 6 min, aperçu en direct du bouton) : la
+    source la plus récente prime dès qu'elle porte cette colonne avec une
+    valeur non-NaN (grandeurs instantanées — température, humidité, vent,
+    pression). Les colonnes propres au flux horaire (precip_1h, tx/tn :
+    cumuls/extrêmes horaires absents du 6 min et de l'aperçu en direct)
+    retombent naturellement sur l'horaire. Retourne (valeur ou NaN, horodatage
+    ou None). Une source absente se passe simplement `None`."""
     best_val, best_t = float("nan"), None
-    for r in (row_h, row_6m):
+    for r in rows:
         if r is None or col not in r or pd.isna(r[col]) or pd.isna(r["valid_time"]):
             continue
         if best_t is None or r["valid_time"] > best_t:
@@ -55,13 +58,15 @@ def _champ_frais(row_h, row_6m, col):
     return best_val, best_t
 
 
-def _carte_station(col, station, row_h, row_6m, now_local):
+def _carte_station(col, station, row_h, row_6m, row_live, now_local):
     """Carte « temps réel » d'une station : température + heure d'observation.
     Cadre bordé à hauteur naturelle (contenu identique d'une carte à l'autre :
     nom + métrique + horodatage → cartes de même hauteur, aucun CSS requis). La
-    température affichée est la plus fraîche entre l'horaire et l'infra-horaire
-    6 min (`row_6m`, stations RADOME seules — None ailleurs). `row_h`/`row_6m`
-    tous deux None = station sans la moindre observation en base. Les mesures
+    température affichée est la plus fraîche entre l'horaire, l'infra-horaire
+    6 min (`row_6m`, stations RADOME seules) et l'aperçu en direct du bouton
+    (`row_live`, session en cours seulement — remplace les autres sources dès
+    qu'il est plus frais, ce qu'il est presque toujours juste après un clic).
+    Les trois `None` = station sans la moindre observation. Les mesures
     communes (humidité, vent, pluie, pression) ne sont volontairement PAS ici :
     elles ne valent qu'à Montsouris mais décrivent tout Paris (variables
     homogènes à cette échelle) — les afficher dans son rectangle donnerait à
@@ -69,14 +74,14 @@ def _carte_station(col, station, row_h, row_6m, now_local):
     `_conditions_generales`."""
     with col, st.container(border=True):
         st.markdown(f"**{station['nom']}**")
-        if row_h is None and row_6m is None:
+        if row_h is None and row_6m is None and row_live is None:
             st.info("Pas encore d'observation en base.")
             return
-        t, t_time = _champ_frais(row_h, row_6m, "t")
+        t, t_time = _champ_frais("t", row_h, row_6m, row_live)
         # Température absente à ce poll : on horodate quand même avec l'obs la
         # plus récente disponible (au moins une existe, cf. garde ci-dessus).
         if t_time is None:
-            t_time = max(r["valid_time"] for r in (row_h, row_6m)
+            t_time = max(r["valid_time"] for r in (row_h, row_6m, row_live)
                          if r is not None and pd.notna(r["valid_time"]))
         t_txt = f"{t:.1f} °C" if pd.notna(t) else "—"
         st.metric("Température", t_txt,
@@ -91,20 +96,21 @@ def _carte_station(col, station, row_h, row_6m, now_local):
             st.caption(heure)
 
 
-def _conditions_generales(row_ref_h, row_ref_6m):
+def _conditions_generales(row_ref_h, row_ref_6m, row_ref_live):
     """Bloc unique « conditions générales » (humidité, vent, pluie, pression) —
     séparé des rectangles par station : ces variables, plus homogènes que la
     température à l'échelle de Paris, ne sont mesurées qu'à Montsouris mais
     décrivent toute l'agglomération. Grandeurs instantanées rafraîchies au 6 min
-    quand il est plus frais (`row_ref_6m`) ; la pluie (cumul 1 h) reste horaire.
-    `row_ref_h`/`row_ref_6m` tous deux None → rien affiché."""
-    if row_ref_h is None and row_ref_6m is None:
+    ou à l'aperçu en direct quand l'un des deux est plus frais (`row_ref_6m`,
+    `row_ref_live`) ; la pluie (cumul 1 h) reste horaire (absente des deux
+    autres sources). Les trois `None` → rien affiché."""
+    if row_ref_h is None and row_ref_6m is None and row_ref_live is None:
         return
-    hum, _ = _champ_frais(row_ref_h, row_ref_6m, "humidite")
-    ff, _ = _champ_frais(row_ref_h, row_ref_6m, "vent_ff")
-    dd, _ = _champ_frais(row_ref_h, row_ref_6m, "vent_dir")
-    pr1, _ = _champ_frais(row_ref_h, row_ref_6m, "precip_1h")
-    pmer, _ = _champ_frais(row_ref_h, row_ref_6m, "pression_mer")
+    hum, _ = _champ_frais("humidite", row_ref_h, row_ref_6m, row_ref_live)
+    ff, _ = _champ_frais("vent_ff", row_ref_h, row_ref_6m, row_ref_live)
+    dd, _ = _champ_frais("vent_dir", row_ref_h, row_ref_6m, row_ref_live)
+    pr1, _ = _champ_frais("precip_1h", row_ref_h, row_ref_6m, row_ref_live)
+    pmer, _ = _champ_frais("pression_mer", row_ref_h, row_ref_6m, row_ref_live)
     détails = []
     if pd.notna(hum):
         détails.append(("💧 Humidité", f"{hum:.0f} %"))
@@ -125,6 +131,48 @@ def _conditions_generales(row_ref_h, row_ref_6m):
     cols = _cols_cartes()
     for c, (label, valeur) in zip(cols, détails):
         c.metric(label, valeur)
+
+
+_LIVE_SNAPSHOT_KEY = "obs_live_snapshot"  # st.session_state — jamais persisté sur disque
+
+
+def _bouton_rafraichissement():
+    """Bouton public (visiteurs anonymes de l'app Cloud) : interroge l'API
+    Météo-France 6 min EN DIRECT et stocke le résultat dans st.session_state
+    (propre à cette session de navigateur, jamais écrit sur disque) — le
+    dashboard n'écrit JAMAIS lui-même en base (invariant lecture seule), la
+    base réelle ne se réactualise qu'au prochain cron GitHub Actions habituel
+    (≤ 15 min). Un `st.rerun()` fait relire ce snapshot dès le haut de la page
+    : les cartes « temps réel » l'affichent DIRECTEMENT à la place des
+    valeurs stockées (`_champ_frais` retient la source la plus fraîche), sans
+    bloc séparé. Cooldown vérifié AVANT tout appel réseau : garde-fou
+    anti-abus d'un public anonyme sur l'API Météo-France, cf.
+    app/services/cooldown."""
+    ok, remaining = cooldown.can(C.OBS_LIVE_REFRESH_STATE_PATH,
+                                  C.OBS_LIVE_REFRESH_COOLDOWN_S)
+    if not ok:
+        st.button("🔄 Voir un aperçu instantané", disabled=True,
+                  help=f"Réessayez dans ~{int(remaining) + 1} s.")
+        return
+    if not st.button("🔄 Voir un aperçu instantané",
+                      help="Interroge l'API Météo-France en direct : les "
+                           "cartes ci-dessus affichent aussitôt ce relevé à "
+                           "la place des valeurs stockées — non enregistré "
+                           "en base, juste affiché pour cette visite ; la "
+                           "base réelle se réactualise au prochain cron "
+                           "(≤ 15 min)."):
+        return
+    with st.spinner("Interrogation de l'API Météo-France…"):
+        resultats, erreurs = fetch_live_snapshot()
+    if resultats is None:
+        # Pré-condition non remplie (clé absente) : aucun appel réseau tenté,
+        # le cooldown n'a donc pas lieu d'être consommé.
+        st.error(erreurs[0])
+        return
+    cooldown.record(C.OBS_LIVE_REFRESH_STATE_PATH)
+    st.session_state[_LIVE_SNAPSHOT_KEY] = {
+        "data": resultats, "erreurs": erreurs, "time": datetime.now()}
+    st.rerun()
 
 
 def _section_convergence_prevision():
@@ -224,13 +272,27 @@ def page_observations(runs, sig):
     # comparaison inter-stations ni les Tx/Tn (grille horaire).
     latest6 = latest_obs_6m(obs_6m_signature())
     by_nom6 = {r["station_nom"]: r for _, r in latest6.iterrows()}
+    # Aperçu en direct du bouton (st.session_state, propre à cette session de
+    # navigateur, jamais persisté) : source la plus fraîche dès qu'elle existe,
+    # remplace donc les cartes ci-dessous sans bloc séparé (cf. _champ_frais).
+    live = st.session_state.get(_LIVE_SNAPSHOT_KEY)
+    by_nom_live = live["data"] if live else {}
     cols = _cols_cartes()
     for col, station in zip(cols, C.OBS_STATIONS):
         _carte_station(col, station, by_nom.get(station["nom"]),
-                       by_nom6.get(station["nom"]), now_local)
+                       by_nom6.get(station["nom"]),
+                       by_nom_live.get(station["nom"]), now_local)
     ref = next((s for s in C.OBS_STATIONS if s["reference"]), None)
     if ref is not None:
-        _conditions_generales(by_nom.get(ref["nom"]), by_nom6.get(ref["nom"]))
+        _conditions_generales(by_nom.get(ref["nom"]), by_nom6.get(ref["nom"]),
+                              by_nom_live.get(ref["nom"]))
+    if live is not None:
+        st.caption(f"Aperçu en direct du {live['time']:%d/%m à %Hh%M:%S} — "
+                   "non enregistré, affiché pour cette visite seulement.")
+        if live["erreurs"]:
+            st.warning("Station(s) indisponible(s) à l'instant : "
+                       + ", ".join(live["erreurs"]))
+    _bouton_rafraichissement()
 
     # ── Bloc 2 : comparaison inter-stations (ICU) ────────────────────────────
     st.subheader("🌃 L'écart ville / verdure, heure par heure")

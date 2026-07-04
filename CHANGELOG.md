@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.4.10] - 2026-07-04
+Ajouter un aperçu en direct des observations 6 min sur la page publique.
+
+Bouton « Voir un aperçu instantané » sur la page Observations : interroge
+l'API Météo-France 6 min à la demande et affiche le relevé directement dans
+les cartes « temps réel » existantes (remplace les valeurs stockées dès qu'il
+est plus frais, via `_champ_frais` généralisé à trois sources) — jamais écrit
+en base, jamais persisté au-delà de la session du visiteur ; la base réelle
+continue de se réactualiser uniquement par le cron GitHub Actions habituel.
+Cooldown fichier (`app/services/cooldown.py`) avant tout appel réseau, garde-
+fou contre un abus de clics d'un public anonyme sur l'API Météo-France.
+Nécessite le secret `METEOFRANCE_API_KEY` côté Streamlit Cloud (cf. README).
+Une alternative par déclenchement à distance du workflow GitHub Actions
+(`app/services/github_dispatch.py`) a été explorée puis mise de côté (dormante,
+non appelée) au profit de cette solution plus simple, sans PAT à gérer.
+
 ## [2.4.9] - 2026-07-04
 Ajouter le graphique de convergence de la prévision Montsouris (vintages vs observé).
 

@@ -19,6 +19,10 @@ Thumbs.db
 .env
 .env.*
 
+# Secrets Streamlit locaux (ex. GITHUB_DISPATCH_TOKEN) — en prod, vivent dans
+# les Secrets Streamlit Cloud, jamais dans un fichier versionné.
+.streamlit/secrets.toml
+
 # Environnement virtuel local (macOS)
 .venv/
 
@@ -30,3 +34,7 @@ tools/golden/
 # sur le poste (+ OneDrive), jamais poussées : le workflow ne committe que
 # data/*.parquet de premier niveau, ce dossier n'y entre pas.
 data/backups/
+
+# État local du cooldown de déclenchement à distance (bouton « Rafraîchir »)
+# — horodatage éphémère, jamais une donnée du projet.
+.runtime_state/

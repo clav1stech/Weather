@@ -32,9 +32,9 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF horaires ; obs6m = observations 6 min ; instant = prévision 15 min)"
+        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF horaires ; obs6m = observations 6 min ; instant = prévision 15 min ; all = tous les flux)"
         type: choice
-        options: [both, api, legacy, t2m, obs, obs6m, instant]
+        options: [both, api, legacy, t2m, obs, obs6m, instant, all]
         default: both
       legacy_run:
         description: "Cycle Météociel (si target=legacy ou both). 6Z/18Z : manuel only, AIFS/GEFS uniquement (ECMWF ENS absent à ces cycles)."
@@ -46,7 +46,7 @@ jobs:
   fetch-api:
     if: |
       (github.event_name == 'workflow_dispatch' &&
-      (github.event.inputs.target == 'both' || github.event.inputs.target == 'api')) ||
+      (github.event.inputs.target == 'both' || github.event.inputs.target == 'api' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '15 */2 * * *'
     runs-on: ubuntu-latest
     concurrency:
@@ -84,7 +84,7 @@ jobs:
     # (le cron 2h croise fatalement fetch-api ; sans groupe commun, courses de
     # push malgré le pull --rebase). Cron décalé de 30 min pour limiter la file.
     if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 't2m') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 't2m' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '45 */2 * * *'
     runs-on: ubuntu-latest
     concurrency:
@@ -126,7 +126,7 @@ jobs:
     # ne l'affiche jamais, même partiellement). Même concurrency.group que les
     # autres jobs : la contention est sur le PUSH git du repo, pas les fichiers.
     if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'obs') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'obs' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '20 * * * *'
     runs-on: ubuntu-latest
     concurrency:
@@ -168,7 +168,7 @@ jobs:
     # concurrency.group que les autres jobs (contention sur le PUSH git, pas les
     # fichiers). Cadence 15 min : c'est la fraîcheur temps réel des cartes RADOME.
     if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'obs6m') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'obs6m' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '10,25,40,55 * * * *'
     runs-on: ubuntu-latest
     concurrency:
@@ -211,7 +211,7 @@ jobs:
     # contention est sur le PUSH git du repo, pas les fichiers. Le backfill
     # past_days est géré par le script (large au 1er run, modeste ensuite).
     if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'instant') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'instant' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '5,35 * * * *'
     runs-on: ubuntu-latest
     concurrency:
@@ -248,7 +248,7 @@ jobs:
   scrape-legacy:
     if: |
       (github.event_name == 'workflow_dispatch' &&
-      (github.event.inputs.target == 'both' || github.event.inputs.target == 'legacy')) ||
+      (github.event.inputs.target == 'both' || github.event.inputs.target == 'legacy' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '15 10 * * *' ||
       github.event.schedule == '15 22 * * *'
     runs-on: ubuntu-latest

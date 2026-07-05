@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.4.11] - 2026-07-05
+Ajouter Z500 par modèle et les variations T850 J-1/J-2 aux tableaux d'export d'Explorer un run.
+
+Dans l'onglet 🧾 Tableaux, chaque modèle gagne une colonne de médiane Z500
+(contexte synoptique, silencieusement absente si la variable n'est pas
+disponible sur le run) ainsi que deux colonnes de variation de la médiane
+T850 vs le run le plus proche de J-1 et J-2 (nouvelle fonction
+`n_days_before_sub`, calquée sur `previous_runs_sub` mais ciblant une échéance
+calendaire plutôt que le cycle précédent immédiat, avec repli sur le run
+disponible le plus proche). Retire aussi de la page Observations la mention
+des données manquantes par réseau, redondante avec le fait que humidité/vent/
+pression ne sont de toute façon affichés que pour la station de référence.
+
 ## [2.4.10] - 2026-07-04
 Ajouter un aperçu en direct des observations 6 min sur la page publique.
 

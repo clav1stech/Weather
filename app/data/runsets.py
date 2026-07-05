@@ -193,6 +193,30 @@ def previous_runs_sub(sig, sub):
     return pd.concat(frames, ignore_index=True)
 
 
+def n_days_before_sub(sig, sub, days):
+    """Pool « run le plus proche de J-`days` » : pour chaque couple (modèle,
+    run) présent dans `sub`, le run de CE modèle dont le run_date est le PLUS
+    PROCHE de (run_date − `days` jours), parmi les runs STRICTEMENT antérieurs
+    au run affiché (jamais un cycle postérieur ou le run lui-même). Sert aux
+    colonnes de variation T850 J-1/J-2 des tableaux d'export — contrairement à
+    previous_runs_sub (cycle précédent immédiat, quel qu'il soit), on vise ici
+    une cible calendaire, avec repli sur le cycle disponible le plus proche si
+    l'exact J-`days` n'existe pas. None si aucun modèle n'a d'antécédent."""
+    df = load_db(sig)
+    frames = []
+    for (model, rd), _ in sub.groupby(["model", "run_date"]):
+        mdf = df[(df["model"] == model) & (df["run_date"] < rd)].dropna(subset=[VAR])
+        if mdf.empty:
+            continue
+        target = pd.Timestamp(rd) - pd.Timedelta(days=days)
+        dates = mdf["run_date"].unique()
+        closest = min(dates, key=lambda d: abs(pd.Timestamp(d) - target))
+        frames.append(df[(df["model"] == model) & (df["run_date"] == closest)])
+    if not frames:
+        return None
+    return pd.concat(frames, ignore_index=True)
+
+
 # Backfill inter-runs, ÉCHÉANCE PAR ÉCHÉANCE : pour chaque modèle PRINCIPAL, on
 # part du run courant (sa portion réellement fraîche, cf. Forecast.mask_stale_tail
 # côté pipeline — au-delà, NaN) et on comble les échéances encore NaN avec celles

@@ -233,7 +233,7 @@ def page_observations(runs, sig):
                "données d'observation officielles (API DPObs). La température "
                "est rafraîchie **toutes les quelques minutes** (flux 6 min).")
 
-    with st.expander("❓ Pourquoi ces 4 stations — et pourquoi certaines mesures manquent"):
+    with st.expander("❓ Pourquoi ces 4 stations"):
         lignes = "\n".join(
             f"- **{s['nom']}** ({s['reseau']}, alt. {s['alt']} m) — {s['profil']}."
             for s in C.OBS_STATIONS)
@@ -245,13 +245,6 @@ def page_observations(runs, sig):
             "Longchamp) se refroidissent bien plus vite. En journée, les quatre "
             "thermomètres racontent presque la même histoire — une seule mesure "
             "(Montsouris, la référence historique) suffit alors.\n\n"
-            "**Certaines mesures ne sont disponibles que sur 2 stations sur 4.** "
-            "Lariboisière et Luxembourg appartiennent au réseau « étendu », "
-            "moins instrumenté : elles ne publient que la température et les "
-            "précipitations — humidité, vent et pression n'y sont **pas "
-            "mesurés** (ce n'est pas une panne). Ces variables étant bien plus "
-            "homogènes que la température à l'échelle de Paris, celles de "
-            "Montsouris suffisent : elles ne sont affichées que là.\n\n"
             "La comparaison entre stations porte donc uniquement sur la "
             "**température**, seule variable mesurée partout.")
 

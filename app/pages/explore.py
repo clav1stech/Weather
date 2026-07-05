@@ -8,7 +8,7 @@ import streamlit as st
 import config as C
 from app.data.db import run_slice, utc_cycle
 from app.data.runsets import (
-    latest_run_sub, main_labels_expected_at, previous_runs_sub)
+    latest_run_sub, main_labels_expected_at, n_days_before_sub, previous_runs_sub)
 from app.stats.ensemble import (
     daily_aggregate, divergence, model_data, multimodel_cutoff, super_ensemble,
     var_median)
@@ -117,18 +117,23 @@ def page_explore(runs, sig):
     with tab_tbl:
         st.caption("Tableaux larges, pensés pour l'export vers une analyse externe "
                    "(IA) : stats du super-ensemble enrichies, par modèle, de la "
-                   "médiane, du contrôle (member 0), du nombre de membres actifs et "
-                   "du Δ de médiane vs le run précédent de chaque modèle — plus une "
-                   "table détaillée par modèle.")
+                   "médiane, du contrôle (member 0), du nombre de membres actifs, "
+                   "de la médiane Z500 (contexte, si disponible) et du Δ T850 de "
+                   "médiane vs le run précédent ainsi que vs le run le plus proche "
+                   "de J-1/J-2 de chaque modèle — plus une table détaillée par "
+                   "modèle.")
         prev_sub = previous_runs_sub(sig, sub)
+        j1_sub = n_days_before_sub(sig, sub, days=1)
+        j2_sub = n_days_before_sub(sig, sub, days=2)
         tables = {
             "Super-ensemble (infra-journalier)":
-                lambda: enriched_super_table(sub, prev_sub),
+                lambda: enriched_super_table(sub, prev_sub, j1_sub, j2_sub),
             "Super-ensemble (journalier 12h)":
-                lambda: daily_aggregate(enriched_super_table(sub, prev_sub)),
+                lambda: daily_aggregate(enriched_super_table(sub, prev_sub, j1_sub, j2_sub)),
         }
         for m in present:
-            tables[f"Modèle — {m}"] = (lambda m=m: model_table(sub, m, prev_sub))
+            tables[f"Modèle — {m}"] = (
+                lambda m=m: model_table(sub, m, prev_sub, j1_sub, j2_sub))
         choice = st.selectbox("Table", list(tables), key="tbl_sheet")
         raw = tables[choice]()
         if raw is not None:

@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.4.12] - 2026-07-06
+Exclure les runs expirés de la carte des révisions run-à-run (Convergence) ; renommer le seuil "Canicule exceptionnelle" en "Canicule" sur le graphique d'évolution de la chaleur prévue.
+
+Sur la page Convergence, la carte des révisions run-à-run (§3) n'affiche plus
+en colonne les runs dont la dernière échéance prévue est déjà passée : le
+delta de médiane reste calculé sur l'historique complet (chaque run comparé à
+son vrai run précédent, même si celui-ci a depuis disparu de l'axe affiché),
+seul l'affichage des colonnes est filtré après coup, et les lignes de dates
+cibles devenues entièrement vides sont retirées. Sur la page canicule, le
+libellé de seuil au-dessus du graphique "Évolution de la chaleur prévue"
+passe de "Canicule exceptionnelle" à "Canicule".
+
 ## [2.4.11] - 2026-07-05
 Ajouter Z500 par modèle et les variations T850 J-1/J-2 aux tableaux d'export d'Explorer un run.
 

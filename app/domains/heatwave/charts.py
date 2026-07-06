@@ -32,7 +32,7 @@ def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
                   annotation_text=f"Chaleur notable — {seuil_chaleur:.0f} °C",
                   annotation_position="top left", annotation_font=dict(color="#E67E22", size=12))
     fig.add_hline(y=seuil_canicule, line=dict(color="#E74C3C", width=2, dash="dash"),
-                  annotation_text=f"Canicule exceptionnelle — {seuil_canicule:.0f} °C",
+                  annotation_text=f"Canicule — {seuil_canicule:.0f} °C",
                   annotation_position="top left", annotation_font=dict(color="#C0392B", size=12))
     fig.update_layout(title=titre, height=440, hovermode="x unified", template=_plotly_template(),
                       xaxis_title=None, yaxis_title="Température à 850 hPa (°C)",

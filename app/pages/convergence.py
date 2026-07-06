@@ -220,8 +220,17 @@ def page_convergence(runs, sig):
     st.caption(
         "Rouge = le run a **revu à la hausse** la prévision vs le run précédent. "
         "Bleu = révision à la baisse. Blanc = pas de changement = prévision stable et fiable.")
+    # Le diff se calcule sur TOUS les runs (y compris expirés) pour que chaque run
+    # affiché reste comparé à son run précédent réel, même si celui-ci a disparu de
+    # l'axe affiché ensuite. Un run est « expiré » quand sa dernière échéance
+    # (dernier `target`) est déjà passée : il ne représente plus qu'une prévision
+    # entièrement réalisée, sans intérêt pour lire les révisions en cours — on ne
+    # l'exclut qu'après coup, comme colonne affichée.
     pivot = long.pivot_table(index="target", columns="run_dt", values="median").sort_index()
     delta_pivot = pivot.diff(axis=1)
+    last_target_by_run = long.groupby("run_dt")["target"].max()
+    active_runs = [c for c in delta_pivot.columns if last_target_by_run.get(c, pd.NaT) >= today]
+    delta_pivot = delta_pivot[active_runs].dropna(axis=0, how="all")
     if not delta_pivot.empty:
         abs_max = max(delta_pivot.abs().max().max(), 0.5)
         heat = go.Figure(data=go.Heatmap(

@@ -26,13 +26,18 @@ _CYCLES_BY_LABEL = {m["label"]: m["cycles"] for m in C.MODELS}
 _LEGACY_FILE_RE = re.compile(r"Forecast-(\d{8})-(.+)\.xlsx$", re.IGNORECASE)
 
 
-def openmeteo_presence(sig):
+@st.cache_data(show_spinner=False)
+def openmeteo_presence(_sig):
     """Une ligne par (run_date, modèle) présent dans le parquet Open-Meteo :
     nb de membres, première/dernière échéance RÉELLE (valeur non-NaN), horizon
     (lead, en heures) et cycle synoptique. `expected` = ce modèle publie-t-il à ce
     cycle (config `cycles`) — sert à distinguer une absence anormale d'un cycle où
-    le modèle ne tourne simplement pas (ex. GEM à 6Z/18Z)."""
-    df = load_db(sig)
+    le modèle ne tourne simplement pas (ex. GEM à 6Z/18Z).
+
+    Cachée (clé `_sig`, invalidée comme load_db par redéploiement / Rafraîchir) :
+    balayage groupby O(N) de toute la base, sinon repayé à chaque rerun des pages
+    Convergence et Contrôle. Le résultat (une ligne par run×modèle) est minuscule."""
+    df = load_db(_sig)
     cols = ["run_date", "model", "n_members", "first_vt", "last_vt",
             "lead_h", "run_utc", "cycle_h", "expected"]
     if df.empty:

@@ -243,7 +243,8 @@ BACKFILL_HORIZON_TOLERANCE_H = 40
 MODEL_HORIZON_H = {m["label"]: m.get("horizon_h") for m in C.MODELS}
 
 
-def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
+def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK,
+                         run_slicer=run_slice):
     """Lignes du run `pos` (index dans `runs`, trié du plus récent au plus
     ancien), en complétant, échéance par échéance, les NaN des modèles PRINCIPAUX
     avec les runs antérieurs (pos+1 → pos+max_lookback) — priorité au plus frais.
@@ -251,7 +252,14 @@ def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
     Retourne (sub_complet, sources) où `sources` mappe chaque modèle principal à
     la liste des run_date effectivement utilisés (le run courant en premier s'il
     a contribué, puis les runs antérieurs ayant comblé des échéances manquantes ;
-    liste vide si le modèle est introuvable dans toute la fenêtre)."""
+    liste vide si le modèle est introuvable dans toute la fenêtre).
+
+    `run_slicer(sig, run_date)` : fournisseur des lignes d'un run — par défaut
+    run_slice (scan O(N) de la base). Quand cette fonction est appelée en boucle
+    sur tous les runs (Convergence), l'appelant peut injecter un index local
+    {run_date → lignes} construit une seule fois, supprimant le rescan redondant
+    (même sortie, cf. convergence_long). Défaut inchangé → harnais/autres appelants
+    non affectés."""
     n = len(runs)
     run_start = runs.iloc[pos]["run_date"]  # cycle (heure locale) du run analysé
     frames, sources = [], {}
@@ -260,7 +268,7 @@ def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
         horizon = MODEL_HORIZON_H.get(model)
         for j in range(pos, min(pos + max_lookback + 1, n)):
             cand_run_date = runs.iloc[j]["run_date"]
-            cand = run_slice(sig, cand_run_date)
+            cand = run_slicer(sig, cand_run_date)
             cand = cand[cand["model"] == model]
             if cand.empty:
                 continue
@@ -294,7 +302,7 @@ def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
         sources[model] = used
     # Modèles d'appoint (non principaux) : jamais backfillés, uniquement si présents
     # au run courant (mêmes échéances à venir, pour rester cohérent avec ci-dessus).
-    current = run_slice(sig, run_start)
+    current = run_slicer(sig, run_start)
     extra = current[(~current["model"].isin(C.MAIN_LABELS))
                     & (current["valid_time"] >= run_start)]
     if not extra.empty:
@@ -304,10 +312,11 @@ def completed_pooled_sub(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
     return pd.concat(frames, ignore_index=True), sources
 
 
-def completed_super_ensemble_daily(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK):
+def completed_super_ensemble_daily(runs, pos, sig, max_lookback=BACKFILL_MAX_LOOKBACK,
+                                   run_slicer=run_slice):
     """Super-ensemble journalier du run `pos`, modèles principaux complétés
     échéance par échéance. Retourne (df_daily, sources) — voir completed_pooled_sub."""
-    sub_complet, sources = completed_pooled_sub(runs, pos, sig, max_lookback)
+    sub_complet, sources = completed_pooled_sub(runs, pos, sig, max_lookback, run_slicer)
     if sub_complet is None:
         return None, sources
     return daily_aggregate(super_ensemble(sub_complet)), sources
@@ -324,6 +333,56 @@ def _convergence_runs(runs):
     recent = runs.index < 2
     main_cycle = runs["run_date"].apply(lambda d: utc_cycle(d).hour in (0, 12))
     return runs[recent | main_cycle].reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def convergence_long(_sig):
+    """Cœur lourd de la page Convergence, calculé UNE fois par donnée (clé `_sig`,
+    invalidée comme load_db). Retourne (long, backfill_src) :
+      • long : format long (run_dt / lead / target / median / p10 / p90) — médiane
+        et P10/P90 JOURNALIÈRES de chaque run affiché, super-ensemble COMPLÉTÉ
+        (backfill échéance par échéance des modèles principaux) et limité aux
+        journées À VENIR de chaque run (target ≥ jour du cycle) ;
+      • backfill_src : {run_date → sources} (cf. completed_pooled_sub).
+
+    Optimisation clé face à la croissance de l'historique : un index LOCAL des
+    lignes par run_date, construit une seule fois par un unique groupby puis
+    libéré à la sortie (n'est PAS mis en cache — pas de seconde copie persistante
+    de la base en mémoire), remplace le rescan O(N) que run_slice referait à
+    chaque run × chaque fenêtre de backfill. Sortie strictement identique à la
+    boucle historique (mêmes lignes, même ordre) : seul le chemin d'accès change."""
+    runs_full = list_runs(_sig).reset_index(drop=True)
+    runs = _convergence_runs(runs_full)
+    if len(runs) < 2:
+        return pd.DataFrame(columns=["run_dt", "lead", "target",
+                                     "median", "p10", "p90"]), {}
+    full_pos = {rd: i for i, rd in enumerate(runs_full["run_date"])}
+    df = load_db(_sig)
+    slices = {rd: g for rd, g in df.groupby("run_date", sort=False)}
+    _empty = df.iloc[0:0]
+    slicer = lambda _s, rd: slices.get(rd, _empty)
+    records = []
+    backfill_src = {}
+    for pos in range(len(runs)):
+        r = runs.iloc[pos]
+        syn, sources = completed_super_ensemble_daily(
+            runs_full, full_pos[r["run_date"]], _sig, run_slicer=slicer)
+        backfill_src[r["run_date"]] = sources
+        if syn is None or syn.empty:
+            continue
+        for _, row in syn.iterrows():
+            target = pd.Timestamp(row["valid_time"]).normalize()
+            run_dt = pd.Timestamp(r["run_date"])
+            if target < run_dt.normalize():
+                continue
+            lead = (pd.Timestamp(row["valid_time"]) - run_dt).total_seconds() / 86400
+            records.append({"run_dt": r["run_date"], "lead": lead, "target": target,
+                            "median": row.get("Médiane"), "p10": row.get("P10"),
+                            "p90": row.get("P90")})
+    long = pd.DataFrame(records)
+    if not long.empty:
+        long = long.dropna(subset=["median"])
+    return long, backfill_src
 
 
 @st.cache_data(show_spinner=False)

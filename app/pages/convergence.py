@@ -14,7 +14,7 @@ from plotly.subplots import make_subplots
 from app.data.db import _run_utc_naive, utc_cycle
 from app.data.presence import openmeteo_presence
 from app.data.runsets import (
-    _convergence_runs, completed_super_ensemble_daily, main_labels_expected_at)
+    _convergence_runs, convergence_long, main_labels_expected_at)
 from app.ui.theme import _ink, _plotly_template, _rgba
 
 
@@ -25,40 +25,22 @@ def page_convergence(runs, sig):
         "prévision d'une même date a évolué d'un run à l'autre** : si elle se stabilise, "
         "on peut s'y fier ; si elle bouge encore beaucoup, l'incertitude reste forte.")
 
-    runs_full = runs.reset_index(drop=True)  # historique complet, AVANT le filtre d'affichage
     runs = _convergence_runs(runs)
     if len(runs) < 2:
         st.warning("Il faut au moins 2 runs pour analyser la convergence.")
         return
 
-    # --- Historique commun : médiane/P10/P90 journalières de CHAQUE run (recalcul brut) ---
+    # --- Historique commun : médiane/P10/P90 journalières de CHAQUE run ---
     # Un modèle principal absent d'un run est backfillé depuis le run antérieur le plus
     # proche qui le contient (jusqu'à n-3) : on compare ainsi des super-ensembles à
     # modèles comparables, pas « 4 modèles vs 1 ». backfill_src : {run_date -> sources}.
-    # La recherche se fait sur `runs_full` (tous les cycles, pas seulement 0Z/12Z) : le
-    # filtre d'affichage de `_convergence_runs` allège l'axe des runs tracés mais ne doit
-    # pas faire disparaître un run 6Z/18Z par ailleurs valide de la recherche de backfill.
-    full_pos = {rd: i for i, rd in enumerate(runs_full["run_date"])}
-    records = []
-    backfill_src = {}
-    for pos in range(len(runs)):
-        r = runs.iloc[pos]
-        syn, sources = completed_super_ensemble_daily(runs_full, full_pos[r["run_date"]], sig)
-        backfill_src[r["run_date"]] = sources
-        if syn is None or syn.empty:
-            continue
-        for _, row in syn.iterrows():
-            target = pd.Timestamp(row["valid_time"]).normalize()
-            run_dt = pd.Timestamp(r["run_date"])
-            if target < run_dt.normalize():
-                continue
-            # Délai réel run → échéance (en jours, fractionnaire) : sépare les cycles
-            # d'un même jour → supprime les dents de scie du graphique de convergence.
-            lead = (pd.Timestamp(row["valid_time"]) - run_dt).total_seconds() / 86400
-            records.append({"run_dt": r["run_date"], "lead": lead, "target": target,
-                            "median": row.get("Médiane"), "p10": row.get("P10"),
-                            "p90": row.get("P90")})
-    long = pd.DataFrame(records).dropna(subset=["median"])
+    # La recherche se fait sur tous les cycles (pas seulement 0Z/12Z) : le filtre
+    # d'affichage de `_convergence_runs` allège l'axe des runs tracés mais ne fait pas
+    # disparaître un run 6Z/18Z par ailleurs valide de la recherche de backfill.
+    # Ce calcul lourd (une passe de backfill par run affiché) est mémoïsé par
+    # convergence_long (clé de donnée) : recalculé une seule fois par run, pas à
+    # chaque interaction de la page.
+    long, backfill_src = convergence_long(sig)
     if long.empty:
         st.warning("Données insuffisantes.")
         return

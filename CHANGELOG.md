@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.5.0] - 2026-07-06
+Performance : pages Convergence et Contrôle des runs nettement plus réactives, sans aucun changement de valeur affichée.
+
+Le cœur lourd de la page Convergence (une passe de backfill inter-runs par run
+affiché) est désormais mémoïsé (convergence_long) et calculé une seule fois par
+donnée au lieu d'être recalculé à chaque interaction : les rendus successifs
+passent de ~3 s à instantané. Ce calcul remplace en interne le rescan complet de
+la base (run_slice, O(nombre total de lignes)) par un index local des lignes par
+run construit une seule fois puis libéré — le 1er rendu est ~2× plus rapide et le
+coût cesse de croître aussi vite avec l'historique. openmeteo_presence (balayage
+de toute la base, utilisé par Convergence et Contrôle) est mis en cache. Sortie
+strictement identique (non-régression calculs et rendu vérifiée à 100 %).
+
 ## [2.4.12] - 2026-07-06
 Exclure les runs expirés de la carte des révisions run-à-run (Convergence) ; renommer le seuil "Canicule exceptionnelle" en "Canicule" sur le graphique d'évolution de la chaleur prévue.
 

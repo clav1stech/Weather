@@ -25,6 +25,8 @@ Dashboard météo (Streamlit) des prévisions d'ensemble T850 à Paris.
   - **Y** : réservé aux gros changements nécessitant une branche dédiée (chantier structurant) — remet Z à 0.
   - **X** : jamais décidé par Claude, uniquement sur demande explicite de l'utilisateur.
   Le message de commit du bump commence par `vX.Y.Z – <résumé>` (convention existante de l'historique).
+- **Tags et releases GitHub : un seul tag/release par version Y** (ex. `v2.4`, `v2.5`), pas un par Z. Le tag `vX.Y` est **mobile** : à chaque bump Z sur cette ligne, on le retague (`git tag -f`/suppression+recréation) sur le nouveau commit plutôt que de créer `vX.Y.Z`. Le corps de la release s'enrichit au fil des Z (ne pas écraser l'historique des sections précédentes). Ne créer un nouveau tag/release que pour un nouveau Y.
+- **Passage en "Latest" : uniquement sur demande explicite de l'utilisateur.** Une release mise à jour (nouveau Y ou Z enrichi) reste en l'état (souvent Pre-release) tant que l'utilisateur n'a pas dit de la promouvoir — ne jamais le faire de sa propre initiative, même après un bump Z.
 
 ## Invariants à NE JAMAIS casser
 

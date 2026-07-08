@@ -218,14 +218,18 @@ OBS_API_KEY_ENV = "METEOFRANCE_API_KEY"   # nom de la variable d'env portant la 
 #             humidité/vent/pression sont affichés (les stations ETENDU ne
 #             publient pas ces variables : absence STRUCTURELLE, pas un bug).
 # icu       : exposition à l'îlot de chaleur — "urbain" (tissu dense, retient
-#             la chaleur la nuit) ou "aere" (parc/bois, se refroidit bien).
+#             la chaleur la nuit), "aere" (parc/bois, se refroidit bien) ou
+#             "neutre" (exclue du calcul d'écart ICU : Montsouris, malgré son
+#             profil de parc, reste en pratique proche des stations urbaines
+#             la nuit — cf. écart observé empiriquement en juillet 2026 — donc
+#             ni franchement urbaine ni franchement aérée pour cette mesure).
 #             Champ EXPLICITE : ne pas le déduire du réseau (la coïncidence
 #             ETENDU=urbain / RADOME=aéré est propre à CES 4 stations).
 # profil    : exposition ICU en toutes lettres, affichée pour situer la station.
 # color     : couleur d'affichage (comparaison inter-stations).
 OBS_STATIONS = [
     {"id": "75114001", "nom": "Montsouris",   "lat": 48.821667, "lon": 2.337833,
-     "alt": 75, "reseau": "RADOME", "reference": True,  "icu": "aere",
+     "alt": 75, "reseau": "RADOME", "reference": True,  "icu": "neutre",
      "color": "#1F618D",
      "profil": "parc du sud de Paris — station de référence historique"},
     {"id": "75110001", "nom": "Lariboisière", "lat": 48.882833, "lon": 2.352000,

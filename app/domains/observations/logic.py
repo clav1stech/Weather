@@ -5,8 +5,10 @@ stations, confrontation Tx/Tn prévus (flux HD) vs observés.
 
 Les groupes de stations viennent du champ EXPLICITE `icu` de
 config.OBS_STATIONS (« urbain » = tissu dense qui retient la chaleur la nuit,
-« aere » = parc/bois qui se refroidit bien) — jamais déduits du réseau, dont
-la coïncidence avec l'exposition est propre à ce choix de 4 stations."""
+« aere » = parc/bois qui se refroidit bien, « neutre » = exclue du calcul —
+cas de Montsouris, qui reste en pratique proche de l'urbain la nuit malgré
+son profil de parc) — jamais déduits du réseau, dont la coïncidence avec
+l'exposition est propre à ce choix de 4 stations."""
 
 import pandas as pd
 

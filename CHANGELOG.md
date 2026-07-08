@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.5.1] - 2026-07-08
+Exclure Montsouris du calcul de l'écart ICU (page Observations).
+
+Montsouris était classée station "aérée" mais reste en pratique proche des
+stations urbaines la nuit, ce qui diluait l'écart ICU affiché. Nouvelle
+valeur `"neutre"` pour le champ `icu` de `OBS_STATIONS` : Montsouris est
+exclue du calcul d'écart (le groupe aéré ne comprend plus que Longchamp),
+tout en restant affichée sur les graphiques et dans le texte explicatif.
+
 ## [2.5.0] - 2026-07-06
 Performance : pages Convergence et Contrôle des runs nettement plus réactives, sans aucun changement de valeur affichée.
 

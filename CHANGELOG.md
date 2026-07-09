@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.5.2] - 2026-07-09
+CI : évite les conflits de push git sur les parquets binaires du pipeline.
+
+Un `git pull --rebase` ne sait pas fusionner deux écritures concurrentes
+d'un même fichier binaire (conflit non auto-résoluble, contrairement à du
+texte) — risque rencontré en pratique malgré le `concurrency.group`
+partagé, en particulier sur le job à cadence la plus rapprochée
+(`fetch-observations-6m`, 15 min). Les 5 jobs dont le flux repose sur
+`persist()`/dédup par clé (`fetch-api`, `fetch-t2m-hd`, `fetch-observations`,
+`fetch-observations-6m`, `fetch-vintages`) ne tentent plus ce merge côté
+git : en cas d'échec de push, ils repartent de l'état distant à jour et
+relancent leur script de collecte, qui recalcule la fusion sur cette base
+fraîche. `scrape-legacy` garde le `pull --rebase` (son contrôle croisé
+n'est pas idempotent). Aucun changement de comportement du dashboard.
+
 ## [2.5.1] - 2026-07-08
 Exclure Montsouris du calcul de l'écart ICU (page Observations).
 

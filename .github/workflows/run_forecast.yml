@@ -64,21 +64,30 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch Open-Meteo (API)
-        run: python Forecast.py
-
-      - name: Commit and Push Database
+      - name: Fetch and Push Database
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
           shopt -s nullglob
-          git add data/*.parquet
-          git diff-index --quiet HEAD || git commit -m "Pipeline: base Open-Meteo synchronisée"
+          # Les parquets sont binaires : un `git pull --rebase` ne sait pas
+          # fusionner deux écritures concurrentes (conflit non auto-résoluble,
+          # contrairement à du texte) — on ne tente donc jamais ce merge côté
+          # git. En cas d'échec de push, on repart de l'état distant à jour et
+          # on relance la collecte : Forecast.py recalcule la fusion via
+          # persist() (dédup par (run_date, modèle), anti-régression) sur
+          # cette base fraîche, ce qui est toujours correct.
           n=0
-          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+          while true; do
+            python Forecast.py
+            git add data/*.parquet
+            git diff-index --quiet HEAD && break
+            git commit -m "Pipeline: base Open-Meteo synchronisée"
+            git push && break
             n=$((n + 1))
             [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
             sleep $((RANDOM % 10 + 5))
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
           done
 
   fetch-t2m-hd:
@@ -106,25 +115,31 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch Open-Meteo Tx/Tn HD
-        run: python forecast_t2m_hd.py
-
-      - name: Commit and Push T2m Database
+      - name: Fetch and Push T2m Database
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
-          # Le fichier peut ne pas exister au tout premier run si l'API n'a rien
-          # renvoyé d'exploitable (le script sort alors sans écrire) — pas d'échec
-          # (if explicite : `[ -f ] && …` faux ferait tomber le shell `bash -e`).
-          if [ -f data/database_paris_t2m.parquet ]; then
-            git add data/database_paris_t2m.parquet
-          fi
-          git diff-index --quiet HEAD || git commit -m "Pipeline: base Tx/Tn HD synchronisée"
+          # Le parquet est binaire : un `git pull --rebase` ne sait pas fusionner
+          # deux écritures concurrentes — on ne tente donc jamais ce merge côté
+          # git. En cas d'échec de push, on repart de l'état distant à jour et on
+          # relance la collecte : forecast_t2m_hd.py recalcule la fusion via
+          # persist() sur cette base fraîche, ce qui est toujours correct.
           n=0
-          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+          while true; do
+            python forecast_t2m_hd.py
+            # Le fichier peut ne pas exister au tout premier run si l'API n'a rien
+            # renvoyé d'exploitable (le script sort alors sans écrire).
+            if [ -f data/database_paris_t2m.parquet ]; then
+              git add data/database_paris_t2m.parquet
+            fi
+            git diff-index --quiet HEAD && break
+            git commit -m "Pipeline: base Tx/Tn HD synchronisée"
+            git push && break
             n=$((n + 1))
             [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
             sleep $((RANDOM % 10 + 5))
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
           done
 
   fetch-observations:
@@ -152,26 +167,34 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch Météo-France Observations
+      - name: Fetch and Push Observations Database
         env:
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
-        run: python fetch_observations.py
-
-      - name: Commit and Push Observations Database
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
-          # Le fichier peut ne pas exister au tout premier run si aucune station
-          # n'a répondu (le script sort alors sans écrire) — pas d'échec.
-          if [ -f data/database_paris_observations.parquet ]; then
-            git add data/database_paris_observations.parquet
-          fi
-          git diff-index --quiet HEAD || git commit -m "Pipeline: observations Météo-France synchronisées"
+          # Le parquet est binaire : un `git pull --rebase` ne sait pas fusionner
+          # deux écritures concurrentes — on ne tente donc jamais ce merge côté
+          # git. En cas d'échec de push, on repart de l'état distant à jour et on
+          # relance la collecte : fetch_observations.py recalcule la fusion via
+          # persist() (dédup par (station_id, valid_time)) sur cette base
+          # fraîche, ce qui est toujours correct (paquet en fenêtre glissante).
           n=0
-          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+          while true; do
+            python fetch_observations.py
+            # Le fichier peut ne pas exister au tout premier run si aucune
+            # station n'a répondu (le script sort alors sans écrire).
+            if [ -f data/database_paris_observations.parquet ]; then
+              git add data/database_paris_observations.parquet
+            fi
+            git diff-index --quiet HEAD && break
+            git commit -m "Pipeline: observations Météo-France synchronisées"
+            git push && break
             n=$((n + 1))
             [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
             sleep $((RANDOM % 10 + 5))
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
           done
 
   fetch-observations-6m:
@@ -198,26 +221,38 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch Météo-France Observations 6 min
+      - name: Fetch and Push Observations 6 min Database
         env:
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
-        run: python fetch_observations_6m.py
-
-      - name: Commit and Push Observations 6 min Database
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
-          # Le fichier peut ne pas exister au tout premier run si aucune station
-          # RADOME n'a répondu (le script sort alors sans écrire) — pas d'échec.
-          if [ -f data/database_paris_observations_6m.parquet ]; then
-            git add data/database_paris_observations_6m.parquet
-          fi
-          git diff-index --quiet HEAD || git commit -m "Pipeline: observations 6 min synchronisées"
+          # Cadence la plus rapprochée des 6 jobs (15 min) : la plus exposée à
+          # une collision de push malgré le concurrency.group partagé (file
+          # d'attente GitHub non garantie, cf. note du job fetch-api). Le
+          # parquet étant binaire, un `git pull --rebase` ne sait pas fusionner
+          # deux écritures concurrentes (conflit non auto-résoluble, contrairement
+          # à du texte) — on ne tente donc jamais ce merge côté git. En cas
+          # d'échec de push, on repart de l'état distant à jour et on relance la
+          # collecte : fetch_observations_6m.py recalcule la fusion via
+          # persist() (dédup par clé (station_id, valid_time)) sur cette base
+          # fraîche, ce qui est toujours correct (fenêtre glissante de l'API).
           n=0
-          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+          while true; do
+            python fetch_observations_6m.py
+            # Le fichier peut ne pas exister au tout premier run si aucune
+            # station RADOME n'a répondu (le script sort alors sans écrire).
+            if [ -f data/database_paris_observations_6m.parquet ]; then
+              git add data/database_paris_observations_6m.parquet
+            fi
+            git diff-index --quiet HEAD && break
+            git commit -m "Pipeline: observations 6 min synchronisées"
+            git push && break
             n=$((n + 1))
             [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
             sleep $((RANDOM % 10 + 5))
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
           done
 
   fetch-vintages:
@@ -247,24 +282,32 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch Open-Meteo Montsouris vintages (minutely_15)
-        run: python fetch_montsouris_vintages.py
-
-      - name: Commit and Push Vintages Database
+      - name: Fetch and Push Vintages Database
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
-          # Le fichier peut ne pas exister si l'API n'a rien renvoyé
-          # d'exploitable (le script sort alors sans écrire) — pas d'échec.
-          if [ -f data/database_paris_montsouris_vintages.parquet ]; then
-            git add data/database_paris_montsouris_vintages.parquet
-          fi
-          git diff-index --quiet HEAD || git commit -m "Pipeline: prévision Montsouris vintages 15 min synchronisée"
+          # Le parquet est binaire : un `git pull --rebase` ne sait pas fusionner
+          # deux écritures concurrentes — on ne tente donc jamais ce merge côté
+          # git. En cas d'échec de push, on repart de l'état distant à jour et on
+          # relance la collecte : fetch_montsouris_vintages.py recalcule la
+          # fusion via persist() (append + compaction, fonctions pures) sur
+          # cette base fraîche, ce qui est toujours correct.
           n=0
-          until git pull --rebase origin "${GITHUB_REF_NAME}" && git push; do
+          while true; do
+            python fetch_montsouris_vintages.py
+            # Le fichier peut ne pas exister si l'API n'a rien renvoyé
+            # d'exploitable (le script sort alors sans écrire).
+            if [ -f data/database_paris_montsouris_vintages.parquet ]; then
+              git add data/database_paris_montsouris_vintages.parquet
+            fi
+            git diff-index --quiet HEAD && break
+            git commit -m "Pipeline: prévision Montsouris vintages 15 min synchronisée"
+            git push && break
             n=$((n + 1))
             [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
             sleep $((RANDOM % 10 + 5))
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
           done
 
   scrape-legacy:
@@ -311,6 +354,15 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
+          # Contrairement aux autres jobs, on garde ici le `pull --rebase` :
+          # validate_cross_pipeline.py APPEND une ligne à data/cross_check_log.csv
+          # (mode="a") à chaque appel, donc rejouer le scrape+contrôle croisé
+          # dans une boucle de retry dupliquerait cette ligne — pas idempotent
+          # comme les flux persist()/dédup par clé des autres jobs. Le csv est
+          # du texte (mergeable par git) et les xlsx légacy sont des fichiers
+          # NEUFS par (date, cycle) : un conflit binaire n'y est possible que si
+          # deux runs ciblent exactement le même (date, cycle), cas rare vu la
+          # cadence 2×/j sur créneaux réservés — accepté tel quel.
           shopt -s nullglob
           git add legacy/*.xlsx data/*.csv
           git diff-index --quiet HEAD || git commit -m "Pipeline: scrape legacy + contrôle croisé (${{ steps.run_label.outputs.label }})"

@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.5.3] - 2026-07-16
+Sidebar : suppression du compteur « Prévisions archivées » et bloc allégé.
+
+Le nombre brut de runs en base grossit sans fin et ne dit rien de la
+fraîcheur/fiabilité des données. La sidebar ne garde que l'essentiel :
+dernier run, heure de rafraîchissement, statut complet/partiel, bouton
+Rafraîchir ; les mentions statiques (mise à jour auto, sources, version)
+sont regroupées en un seul bloc. (issue #11)
+
 ## [2.5.2] - 2026-07-09
 CI : évite les conflits de push git sur les parquets binaires du pipeline.
 

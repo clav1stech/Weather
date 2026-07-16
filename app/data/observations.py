@@ -80,6 +80,28 @@ def obs_window(_sig, hours):
 
 
 @st.cache_data(show_spinner=False)
+def txtn_du_jour(_sig, jour):
+    """Tx/Tn observés « jusqu'à présent » du jour civil `jour` (minuit, heure
+    de Paris), par station : max des tx horaires / min des tn horaires depuis
+    00h00. À la différence de daily_txtn_obs (jours révolus, complétude jugée
+    par l'appelant), AUCUNE exigence de complétude : la valeur est par nature
+    provisoire sur un jour en cours — l'appelant doit la présenter comme telle
+    (« depuis 00 h »), jamais comme un extrême définitif du jour. Stations sans
+    observation ce jour : absentes du résultat (NaN partiels tolérés)."""
+    df = load_obs(_sig)
+    cols = ["station_id", "tx", "tn"]
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    jour = pd.Timestamp(jour).normalize()
+    d = df[(df["valid_time"] >= jour) & (df["valid_time"] < jour + pd.Timedelta(days=1))]
+    if d.empty:
+        return pd.DataFrame(columns=cols)
+    out = (d.groupby("station_id", as_index=False)
+             .agg(tx=("tx", "max"), tn=("tn", "min")))
+    return out[cols].reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
 def daily_txtn_obs(_sig):
     """Tx/Tn OBSERVÉS par (station, jour civil de Paris) : max des tx horaires /
     min des tn horaires (tx/tn API = extrêmes de l'heure écoulée, donc leurs

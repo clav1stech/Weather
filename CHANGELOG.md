@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.5.5] - 2026-07-16
+Observations : min/max provisoires du jour sur les cartes station.
+
+Chaque carte « temps réel » affiche, sous la température, le min/max
+observé depuis 00 h (heure de Paris) du jour civil en cours — ligne
+discrète (caption), « — » si donnée absente, hauteur et alignement des
+4 cartes inchangés. Calcul dédié `txtn_du_jour` (flux horaire seul, sans
+exigence de complétude, valeur explicitement provisoire) — distinct de
+`daily_txtn_obs`, réservé aux jours révolus quasi complets. Affichage
+seul : aucune influence sur la détection canicule ni les KPI. (issue #12)
+
 ## [2.5.4] - 2026-07-16
 Canicule : la durée d'épisode tolère les creux chauds d'un jour.
 

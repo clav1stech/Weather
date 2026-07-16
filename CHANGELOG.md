@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.5.4] - 2026-07-16
+Canicule : la durée d'épisode tolère les creux chauds d'un jour.
+
+La durée affichée était calculée sur des séquences strictement consécutives
+de jours ≥ 50 % de probabilité : un seul jour intermédiaire légèrement sous
+ce seuil faisait retomber « Durée de l'épisode » de 6 jours à 1 jour du
+jour au lendemain. Nouvelle fonction pure `episode_chaleur`
+(heatwave/logic.py, testée dans tests/) : un jour sous le seuil de
+probabilité mais dont la médiane reste ≥ seuil chaleur relie deux jours
+confirmés sans couper l'épisode — les creux ne font que relier, jamais
+étendre le début ou la fin. Le détail (jours confirmés vs creux) se lit au
+survol de la métrique ; le badge Statut canicule garde sa définition
+stricte, inchangée. (issue #14)
+
 ## [2.5.3] - 2026-07-16
 Sidebar : suppression du compteur « Prévisions archivées » et bloc allégé.
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.5.6] - 2026-07-16
+Convergence Montsouris : tableau d'écarts prévision − observé sous le graphique.
+
+Pour chaque recul (dernière prévision, J−6 h, J−12 h, J−18 h, J−24 h) :
+écart au dernier point observé, à l'instant du min observé et à l'instant
+du max observé sur la fenêtre de 48 h. Les références min/max sont celles
+de la température OBSERVÉE ; la prévision est comparée lissée, exactement
+comme elle est tracée (lissage mutualisé dans `lisser_prevision`,
+observations/logic.py, réutilisé par le graphique). Appariement au point
+de prévision le plus proche à ± 10 min, sinon « — » — jamais de valeur
+interpolée. Lecture seule des flux, `vintage_comparison_series` inchangé.
+(issue #13)
+
 ## [2.5.5] - 2026-07-16
 Observations : min/max provisoires du jour sur les cartes station.
 

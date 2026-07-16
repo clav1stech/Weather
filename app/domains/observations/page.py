@@ -29,7 +29,7 @@ from app.domains.observations.charts import (
     comparaison_stations, ecart_icu_chart, vintage_comparison_chart)
 from app.domains.observations.logic import (
     OBS_CARTE_ALERTE_H, ecart_icu_series, obs_est_perimee,
-    verdict_icu_nocturne, vintage_comparison_series)
+    tableau_ecarts_convergence, verdict_icu_nocturne, vintage_comparison_series)
 
 
 def _cols_cartes():
@@ -229,6 +229,34 @@ def _section_convergence_prevision():
     st.plotly_chart(vintage_comparison_chart(
         obs_ref, series, "Prévision vs observé — Montsouris (48 h)"),
         width="stretch")
+
+    # Tableau d'écarts prévision − observé aux trois instants de référence de
+    # la fenêtre (dernier point observé, min et max OBSERVÉS). Prévision lissée
+    # comme au tracé (cf. tableau_ecarts_convergence) : le tableau chiffre ce
+    # que les courbes montrent. Sans observé, rien à chiffrer → pas de tableau.
+    tab = tableau_ecarts_convergence(series, obs_ref if not obs_ref.empty else None)
+    if not tab.empty:
+        o = obs_ref.dropna(subset=["t"])
+        t_min = o.loc[o["t"].idxmin()]
+        t_max = o.loc[o["t"].idxmax()]
+
+        def _fmt(v):
+            return f"{v:+.1f}" if pd.notna(v) else "—"
+
+        disp = pd.DataFrame({
+            "Recul": ["Dernière prévision" if h == 0 else f"J−{h} h"
+                      for h in tab["lead_h"]],
+            "Écart actuel (°C)": tab["ecart_actuel"].map(_fmt),
+            "Écart au min observé (°C)": tab["ecart_min"].map(_fmt),
+            "Écart au max observé (°C)": tab["ecart_max"].map(_fmt),
+        })
+        st.dataframe(disp, hide_index=True, width="stretch")
+        st.caption("Écart = prévision − observé (**positif : le modèle voyait "
+                   "trop chaud**), sur les courbes de prévision lissées telles "
+                   "que tracées ci-dessus. Références observées sur la fenêtre : "
+                   f"min {t_min['t']:.1f} °C le {t_min['valid_time']:%d/%m à %Hh%M}, "
+                   f"max {t_max['t']:.1f} °C le {t_max['valid_time']:%d/%m à %Hh%M}. "
+                   "« — » : pas de point de prévision à cet instant pour ce recul.")
 
 
 def page_observations(runs, sig):

@@ -143,6 +143,74 @@ def vintage_comparison_series(vintages_df, obs6m_df=None,
     return pd.DataFrame(rows, columns=cols)
 
 
+# Lissage AFFICHAGE SEUL des séries de PRÉVISION (jamais l'observé) : la nuit,
+# la couche limite stable fait osciller la température à 2 m du modèle d'un pas
+# de 15 min à l'autre (intermittence de mélange/découplage — un vrai signal du
+# modèle, pas du bruit de collecte) qui parasite la lecture de la convergence.
+# Moyenne glissante centrée ~1 h (5 pas de 15 min) ; la donnée stockée reste
+# brute. Partagé entre le tracé (charts) et le tableau d'écarts : les deux
+# doivent montrer exactement la même courbe.
+LISSAGE_PREVISION_PTS = 5
+
+
+def lisser_prevision(series):
+    return series.rolling(window=LISSAGE_PREVISION_PTS, center=True,
+                          min_periods=1).mean()
+
+
+# Tolérance d'appariement (minutes) entre la grille de prévision (15 min) et
+# la grille observée (6 min) : l'écart maximal entre un instant observé et le
+# point de prévision le plus proche est de 7,5 min — au-delà de 10 min, la
+# prévision n'a réellement pas de point sur cet instant (cellule vide, jamais
+# d'interpolation).
+ECART_APPARIEMENT_MIN = 10.0
+
+
+def tableau_ecarts_convergence(series, obs_df, tol_min=ECART_APPARIEMENT_MIN):
+    """Écarts prévision − observé (°C, positif = le modèle voyait trop chaud)
+    aux trois instants de référence de la fenêtre affichée : dernier point
+    OBSERVÉ (« actuel »), instant du MIN observé, instant du MAX observé —
+    le min/max de référence est celui de la température observée, pas de la
+    prévision. Une ligne par recul (lead_h) présent dans `series` (sortie de
+    vintage_comparison_series, déjà restreinte à la fenêtre du graphique).
+
+    La prévision est comparée LISSÉE (lisser_prevision), comme elle est tracée
+    — le tableau doit chiffrer ce que l'œil voit sur les courbes, pas une
+    donnée brute que le graphique ne montre pas ; l'observé reste brut, comme
+    au tracé. Appariement au point de prévision le plus proche à ± tol_min,
+    sinon NaN (l'appelant affiche « — », jamais de valeur inventée).
+
+    DataFrame [lead_h, ecart_actuel, ecart_min, ecart_max] ; vide si l'un des
+    deux flux manque (dégradation silencieuse, comme le reste du domaine)."""
+    cols = ["lead_h", "ecart_actuel", "ecart_min", "ecart_max"]
+    if (series is None or series.empty
+            or obs_df is None or obs_df.empty):
+        return pd.DataFrame(columns=cols)
+    obs = obs_df.dropna(subset=["t"]).sort_values("valid_time")
+    if obs.empty:
+        return pd.DataFrame(columns=cols)
+    reperes = [("ecart_actuel", obs.iloc[-1]),
+               ("ecart_min", obs.loc[obs["t"].idxmin()]),
+               ("ecart_max", obs.loc[obs["t"].idxmax()])]
+    tol = pd.Timedelta(minutes=tol_min)
+    rows = []
+    for h in sorted(series["lead_h"].unique()):
+        g = (series[(series["lead_h"] == h) & series["temperature"].notna()]
+             .sort_values("valid_time").reset_index(drop=True))
+        row = {"lead_h": int(h)}
+        prev = lisser_prevision(g["temperature"])
+        for cle, ref in reperes:
+            if g.empty:
+                row[cle] = float("nan")
+                continue
+            dist = (g["valid_time"] - ref["valid_time"]).abs()
+            i = dist.idxmin()
+            row[cle] = (float(prev.iloc[i] - ref["t"])
+                        if dist.iloc[i] <= tol else float("nan"))
+        rows.append(row)
+    return pd.DataFrame(rows, columns=cols)
+
+
 def obs_est_perimee(valid_time_local, now_local, seuil_h=OBS_PERIMEE_H):
     """L'observation est-elle trop ancienne pour être présentée comme
     « en direct » ? (les deux instants en heure de Paris, tz-naïfs). `seuil_h`

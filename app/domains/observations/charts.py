@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 
 import config as C
 from app.ui.theme import _ink, _plotly_template, _rgba
-from app.domains.observations.logic import NUIT_DEBUT_H, NUIT_FIN_H
+from app.domains.observations.logic import NUIT_DEBUT_H, NUIT_FIN_H, lisser_prevision
 
 
 def _bandes_nocturnes(fig, t_min, t_max):
@@ -78,17 +78,9 @@ def ecart_icu_chart(ecarts):
 # coup « les prévisions convergent vers l'observé à mesure que le lead diminue ».
 _VINTAGE_HEX = "#E67E22"
 
-# Lissage AFFICHAGE SEUL des courbes de PRÉVISION (jamais l'observé, qui n'a pas
-# ce problème) : la nuit, la couche limite stable fait osciller la température
-# à 2 m d'un pas de 15 min à l'autre (intermittence de mélange/découplage propre
-# au modèle, cf. logic) — un vrai signal du modèle, pas du bruit de collecte,
-# mais qui parasite la lecture de la convergence. Moyenne glissante centrée sur
-# ~1 h (4 pas de 15 min) ; la donnée stockée reste brute, seul le tracé lisse.
-_SMOOTH_WINDOW_PTS = 5
-
-
-def _smoothed(series):
-    return series.rolling(window=_SMOOTH_WINDOW_PTS, center=True, min_periods=1).mean()
+# Le lissage des courbes de prévision vit dans logic (lisser_prevision) : il
+# est partagé avec le tableau d'écarts, qui doit chiffrer exactement la même
+# courbe que celle tracée ici.
 
 
 def vintage_comparison_chart(obs_df, vintage_series_df, titre):
@@ -126,7 +118,7 @@ def vintage_comparison_chart(obs_df, vintage_series_df, titre):
         alpha = 1.0 - 0.6 * (h / lead_max)
         label = "Prévision (dernière)" if h == 0 else f"Prévision J−{h}h"
         fig.add_trace(go.Scatter(
-            x=g["valid_time"], y=_smoothed(g["temperature"]), mode="lines", name=label,
+            x=g["valid_time"], y=lisser_prevision(g["temperature"]), mode="lines", name=label,
             line=dict(color=_rgba(_VINTAGE_HEX, alpha),
                       width=2.5 if h == 0 else 1.6,
                       dash="solid" if h == 0 else "dot"),

@@ -241,10 +241,12 @@ def page_observations(runs, sig):
             f"{lignes}\n\n"
             "**L'îlot de chaleur urbain** se lit surtout **la nuit** : le tissu "
             "urbain dense (Lariboisière, Luxembourg) restitue la chaleur "
-            "accumulée le jour, tandis que les zones végétalisées (Montsouris, "
-            "Longchamp) se refroidissent bien plus vite. En journée, les quatre "
-            "thermomètres racontent presque la même histoire — une seule mesure "
-            "(Montsouris, la référence historique) suffit alors.\n\n"
+            "accumulée le jour, tandis que les zones aérées (Longchamp) se "
+            "refroidissent bien plus vite. Montsouris (la référence historique), "
+            "malgré son profil de parc, reste en pratique proche des stations "
+            "urbaines la nuit — elle n'entre donc pas dans le calcul de l'écart "
+            "ICU ci-dessous, mais reste affichée pour comparaison. En journée, "
+            "les quatre thermomètres racontent presque la même histoire.\n\n"
             "La comparaison entre stations porte donc uniquement sur la "
             "**température**, seule variable mesurée partout.")
 
@@ -313,7 +315,8 @@ def page_observations(runs, sig):
                        f"({', '.join(s['nom'] for s in C.OBS_STATIONS if s['icu'] == 'urbain')}) "
                        "− moyenne des stations aérées "
                        f"({', '.join(s['nom'] for s in C.OBS_STATIONS if s['icu'] == 'aere')}), "
-                       "aux heures où les deux groupes ont des mesures.")
+                       "aux heures où les deux groupes ont des mesures. Montsouris "
+                       "n'entre pas dans ce calcul (cf. « Pourquoi ces 4 stations »).")
 
     # ── Bloc 3 : convergence de la prévision (vintages) ──────────────────────
     _section_convergence_prevision()

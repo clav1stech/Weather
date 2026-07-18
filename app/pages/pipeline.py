@@ -102,6 +102,19 @@ def page_run(runs, sig):
             st.session_state["pipeline_results"] = _execute(
                 [("Pipeline Tx/Tn HD", "forecast_t2m_hd.py", 300)])
 
+    # Les trois flux annexes d'observation/prévision fine : indépendants
+    # (parquets, crons et scripts séparés), donc relançables isolément — le
+    # bouton groupé reste le geste courant (tout remettre à jour d'un coup),
+    # les boutons unitaires servent au diagnostic d'un flux en particulier
+    # sans consommer les appels API des deux autres.
+    _FLUX_OBS = [
+        ("Observations Météo-France", "fetch_observations.py", 60,
+         "🛰️ Obs horaires seules"),
+        ("Observations 6 min", "fetch_observations_6m.py", 60,
+         "⏱️ Obs 6 min seules"),
+        ("Prévision Montsouris (vintages 15 min)", "fetch_montsouris_vintages.py", 60,
+         "🔭 Vintages seuls"),
+    ]
     with col4:
         st.subheader("④ Observations + vintages")
         st.caption("`fetch_observations.py` (paquet horaire Météo-France, "
@@ -110,11 +123,13 @@ def page_run(runs, sig):
                   "minutely_15, prévision Montsouris 15 min) — flux annexes "
                   "indépendants, à la suite. ~15-30 s.")
         if st.button("📡 Lancer obs + 6 min + vintages", type="secondary"):
-            st.session_state["pipeline_results"] = _execute([
-                ("Observations Météo-France", "fetch_observations.py", 60),
-                ("Observations 6 min", "fetch_observations_6m.py", 60),
-                ("Prévision Montsouris (vintages 15 min)", "fetch_montsouris_vintages.py", 60),
-            ])
+            st.session_state["pipeline_results"] = _execute(
+                [(label, script, timeout) for label, script, timeout, _ in _FLUX_OBS])
+        st.caption("Ou un seul flux, isolément :")
+        for label, script, timeout, bouton in _FLUX_OBS:
+            if st.button(bouton, type="secondary"):
+                st.session_state["pipeline_results"] = _execute(
+                    [(label, script, timeout)])
 
     # Déroulé de la dernière exécution — rendu PLEINE LARGEUR sous les colonnes
     # (jamais tassé dans une seule des 4 colonnes ci-dessus).

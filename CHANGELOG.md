@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.6.1] - 2026-07-19
+Pipeline : relance isolée de chaque flux d'observation + note vintages corrigée.
+
+La colonne ④ de la page « Lancer le pipeline » (locale) propose, sous le
+bouton groupé existant, un bouton par flux (obs horaires, obs 6 min,
+vintages) : les trois flux étant indépendants (parquets, crons et scripts
+séparés), un diagnostic ciblé ne doit pas consommer les appels API des deux
+autres. Côté doc, la note CLAUDE.md « aucun affichage dashboard branché »
+du flux vintages était obsolète : le graphique de convergence Montsouris et
+son tableau d'écarts sont branchés sur la page Observations. La frontière
+public/local reste intacte (aucune collecte persistée depuis la page
+publique ; l'aperçu live y est déjà attenant aux cartes temps réel).
+(issue #21)
+
 ## [2.6.0] - 2026-07-19
 Observations : fraîcheur du graphique inter-stations (message + prolongement 6 min).
 

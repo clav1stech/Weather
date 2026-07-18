@@ -28,11 +28,21 @@ def _bandes_nocturnes(fig, t_min, t_max):
         day += pd.Timedelta(days=1)
 
 
-def comparaison_stations(dfw, titre):
+def comparaison_stations(dfw, titre, complement_6m=None):
     """Température observée des 4 stations sur la fenêtre (couleurs config,
     bandes grises = nuits). Une station sans données sur la fenêtre est
-    simplement absente (jamais de trace vide trompeuse)."""
+    simplement absente (jamais de trace vide trompeuse).
+
+    `complement_6m` (optionnel) : mesures 6 min POSTÉRIEURES à la dernière
+    heure consolidée du flux horaire (cf. obs_6m_depuis) — tracées en POINTILLÉ
+    dans la couleur de leur station, raccordées au dernier point horaire, pour
+    prolonger la lecture jusqu'aux relevés les plus frais. Marquage volontaire :
+    le trait plein est la donnée horaire consolidée (celle des calculs), le
+    pointillé un aperçu 6 min qui ne couvre que les stations RADOME — deux
+    courbes sur quatre s'arrêtant plus tôt est l'état normal, pas un trou."""
     fig = go.Figure()
+    comp = complement_6m if complement_6m is not None else pd.DataFrame()
+    t_max_global = dfw["valid_time"].max()
     for station in C.OBS_STATIONS:
         g = dfw[(dfw["station_nom"] == station["nom"]) & dfw["t"].notna()]
         if g.empty:
@@ -43,8 +53,26 @@ def comparaison_stations(dfw, titre):
             marker=dict(size=4),
             hovertemplate=f"{station['nom']} · %{{x|%a %d %b %Hh%M}}<br>"
                           "%{y:.1f} °C<extra></extra>"))
+        if comp.empty:
+            continue
+        g6 = comp[(comp["station_nom"] == station["nom"]) & comp["t"].notna()] \
+            .sort_values("valid_time")
+        if g6.empty:
+            continue
+        # Raccord visuel : le pointillé démarre au dernier point horaire de la
+        # station (sinon un trait flottant suggérerait une rupture de mesure).
+        dernier = g.sort_values("valid_time").iloc[-1]
+        xs = pd.concat([pd.Series([dernier["valid_time"]]), g6["valid_time"]])
+        ys = pd.concat([pd.Series([dernier["t"]]), g6["t"]])
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys, mode="lines", name=f"{station['nom']} (6 min)",
+            showlegend=False,
+            line=dict(color=station["color"], width=1.6, dash="dot"),
+            hovertemplate=f"{station['nom']} · 6 min · %{{x|%a %d %b %Hh%M}}<br>"
+                          "%{y:.1f} °C<extra></extra>"))
+        t_max_global = max(t_max_global, g6["valid_time"].max())
     if fig.data:
-        _bandes_nocturnes(fig, dfw["valid_time"].min(), dfw["valid_time"].max())
+        _bandes_nocturnes(fig, dfw["valid_time"].min(), t_max_global)
     fig.update_layout(title=titre, height=430, hovermode="x unified",
                       template=_plotly_template(), xaxis_title=None,
                       yaxis_title="Température observée (°C)",

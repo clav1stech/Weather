@@ -5,12 +5,15 @@ fetch_observations_6m.py).
 
 Même contrat que app/data/observations.py : lecture seule, dégradation
 silencieuse (parquet absent/vide/corrompu → DataFrame vide, jamais d'exception),
-stockage UTC tz-naïf converti vers l'heure de Paris à la lecture. SEUL usage :
-fournir la dernière mesure INSTANTANÉE (température, humidité, vent, pression)
-des stations RADOME pour rafraîchir les cartes « temps réel » — le flux horaire
-(observations.py) reste l'unique source de la comparaison inter-stations et des
-Tx/Tn journaliers. L'absence de 6 min est un état NORMAL (stations ETENDU sans
-ce produit, flux plus récent que la base, API indisponible)."""
+stockage UTC tz-naïf converti vers l'heure de Paris à la lecture. Deux usages,
+tous deux d'AFFICHAGE : la dernière mesure INSTANTANÉE (température, humidité,
+vent, pression) des stations RADOME pour rafraîchir les cartes « temps réel »,
+et le prolongement pointillé du graphique inter-stations au-delà de la dernière
+heure consolidée du flux horaire (obs_6m_depuis). Le flux horaire
+(observations.py) reste la source EXCLUSIVE de tous les CALCULS : écart ICU,
+Tx/Tn journaliers, min/max du jour. L'absence de 6 min est un état NORMAL
+(stations ETENDU sans ce produit, flux plus récent que la base, API
+indisponible)."""
 
 import os
 
@@ -49,6 +52,20 @@ def load_obs_6m(_sig):
     s = pd.to_datetime(df["valid_time"])
     df["valid_time"] = s.dt.tz_localize("UTC").dt.tz_convert(LOCAL_TZ).dt.tz_localize(None)
     return df
+
+
+@st.cache_data(show_spinner=False)
+def obs_6m_depuis(_sig, debut):
+    """Mesures 6 min STRICTEMENT postérieures à `debut` (heure de Paris,
+    tz-naïf) : le complément de fraîcheur du graphique inter-stations, au-delà
+    de la dernière heure consolidée du flux horaire (qui accuse un délai de
+    publication de quelques heures côté API Météo-France). Seules les stations
+    RADOME y figurent en pratique — un complément à deux courbes sur quatre est
+    l'état normal, l'affichage doit le dire. Vide si rien de plus frais."""
+    df = load_obs_6m(_sig)
+    if df.empty or pd.isna(pd.Timestamp(debut)):
+        return df.iloc[0:0]
+    return df[df["valid_time"] > pd.Timestamp(debut)].reset_index(drop=True)
 
 
 @st.cache_data(show_spinner=False)

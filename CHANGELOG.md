@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.6.2] - 2026-07-19
+Canicule : calendrier du risque lisible sur mobile (case compacte).
+
+Sur un viewport de ~375 px, les 16 cases du calendrier font ~20 px chacune :
+l'empilement Tx/Tn/glyphe ≈ se superposait en une ligne illisible. La case ne
+montre plus que l'essentiel — couleur du risque (probabilité T850, inchangée)
+et Tx au sol en chiffre nu (sans flèche, glyphe ni « ° », l'unité est dans la
+légende) ; le détail (Tn, modèle, fiabilité) se lit au survol ou d'un tap sur
+mobile. Rendu vérifié en 375 px et en desktop via captures navigateur
+avant/après. Aucun changement du Statut canicule ni de ses calculs. (issue #16)
+
 ## [2.6.1] - 2026-07-19
 Pipeline : relance isolée de chaque flux d'observation + note vintages corrigée.
 

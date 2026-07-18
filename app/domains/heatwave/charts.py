@@ -46,28 +46,16 @@ CANICULE_SCALE = [
 ]
 
 
-def _fmt_txtn_cell(tx, tn, glyph):
-    """Texte de case « ≈ ↑Tx ↓Tn » (°C entiers) — tolère qu'une des deux valeurs
-    manque (valeur daily null côté API) : on affiche ce qui existe, rien de plus.
-    `glyph` (« ≈ » ou vide) préfixe la ligne Tx pour signaler une valeur peu
-    fiable (source unique ou forte divergence, cf. logic.incertitude_txtn)."""
-    parts = []
-    if pd.notna(tx):
-        parts.append(f"↑{tx:.0f}°")
-    if pd.notna(tn):
-        parts.append(f"↓{tn:.0f}°")
-    cell = "<br>".join(parts)
-    return f"{glyph} {cell}" if (cell and glyph) else cell
-
-
 def calendrier_risques(jours, seuil, txtn=None):
     """Calendrier du risque : couleur pilotée par la probabilité T850 UNIQUEMENT.
     `txtn` (DataFrame _TXTN_COLS, cf. app/data/t2m.py) est un simple appui
-    d'affichage : Tx/Tn haute résolution en texte dans les cases couvertes
-    (J → J+6), rien sur les autres. Un « ≈ » marque les jours peu fiables
-    (source unique au-delà de J+3, ou forte divergence MF/ICON) ; le détail se
-    lit au survol. txtn None/vide → figure strictement identique à l'affichage
-    sans ce flux (absence = cas normal)."""
+    d'affichage : la Tx haute résolution en texte dans les cases couvertes
+    (J → J+6), rien sur les autres. La case est volontairement MINIMALE —
+    couleur du risque + Tx seule — pour rester lisible sur un viewport mobile
+    (~375 px : ~16 cases de ~20 px, toute info supplémentaire se superpose) ;
+    le détail (Tn, modèle, fiabilité — source unique au-delà de J+3 ou forte
+    divergence MF/ICON) vit au survol/tap. txtn None/vide → figure strictement
+    identique à l'affichage sans ce flux (absence = cas normal)."""
     texts = [
         f"{d:%a %d %b}<br>{_canicule_label(p)}"
         f"<br>Médiane : {m:.1f} °C · P90 : {p90:.1f} °C"
@@ -88,14 +76,18 @@ def calendrier_risques(jours, seuil, txtn=None):
                 cells.append("")
                 hovers.append(hover)
                 continue
-            glyph, _, fiab_phrase = incertitude_txtn(
+            _, _, fiab_phrase = incertitude_txtn(
                 r.ecart_tx, r.ecart_tn, r.solo, r.model, r.model_alt)
-            cell = _fmt_txtn_cell(r.tx, r.tn, glyph)
-            cells.append(cell)
-            if cell:
-                sol = " · ".join(p for p in (
-                    f"max {r.tx:.1f} °C" if pd.notna(r.tx) else "",
-                    f"min {r.tn:.1f} °C" if pd.notna(r.tn) else "") if p)
+            # Case compacte : la Tx seule, sans flèche, glyphe ni « ° » (sur
+            # ~375 px une case fait ~20 px — chaque signe de plus fait se
+            # toucher les cases voisines ; la légende dit l'unité). Une Tn nue
+            # serait indistinguable d'une Tx, une Tx absente laisse la case
+            # vide (la couleur du risque reste, le survol porte le reste).
+            cells.append(f"{r.tx:.0f}" if pd.notna(r.tx) else "")
+            sol = " · ".join(p for p in (
+                f"max {r.tx:.1f} °C" if pd.notna(r.tx) else "",
+                f"min {r.tn:.1f} °C" if pd.notna(r.tn) else "") if p)
+            if sol:
                 hover += (f"<br>Au sol : {sol} ({r.model}, haute résolution)"
                           f"<br>Fiabilité : {fiab_phrase}")
             hovers.append(hover)

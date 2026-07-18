@@ -21,8 +21,8 @@ from app.ui.components import complete_runs_caption
 from app.domains.heatwave.charts import (
     calendrier_risques, confiance_chart, ligne_de_flottaison, tendance_heatmap)
 from app.domains.heatwave.logic import (
-    PROB_CANICULE_QUASI, PROB_RISQUE_MARQUE, PROB_RISQUE_MODERE, signal_synoptique,
-    tendance_recente)
+    PROB_CANICULE_QUASI, PROB_RISQUE_MARQUE, PROB_RISQUE_MODERE, episode_chaleur,
+    signal_synoptique, tendance_recente)
 
 
 def page_grand_public(runs, sig):
@@ -178,23 +178,31 @@ def page_grand_public(runs, sig):
         else:
             c2.metric("Durée prévue", "—")
     else:
-        duree = 1
-        dts = sorted(high_dates)
-        for a, b in zip(dts, dts[1:]):
-            if (b - a).days == 1:
-                duree += 1
-            else:
-                break
+        # Durée/fin d'épisode TOLÉRANTES aux creux chauds (episode_chaleur) :
+        # un jour sous PROB_CANICULE_QUASI mais ≥ seuil_chaleur en médiane ne
+        # coupe pas l'épisode affiché. Le badge Statut, lui, reste strict
+        # (aujourd'hui ∈ high_set), définition inchangée.
         if today in high_set:
-            fin = today
-            while fin + pd.Timedelta(days=1) in high_set:
-                fin += pd.Timedelta(days=1)
+            ep_cours = episode_chaleur(jours, seuil_chaleur, depuis=today)
             c1.metric("Statut canicule", "🔴 En cours",
-                      help=f"Au moins jusqu'au {fin:%a %d %b}")
+                      help=f"Au moins jusqu'au {ep_cours['fin']:%a %d %b}")
         else:
             prochaine = next((d for d in high_dates if d > today), high_dates[0])
             c1.metric("Prochaine canicule", prochaine.strftime("%a %d %b"))
-        c2.metric("Durée de l'épisode", f"{duree} jour{'s' if duree > 1 else ''}")
+        ep = episode_chaleur(jours, seuil_chaleur)
+        if ep["jours_creux"]:
+            aide = (f"Du {ep['debut']:%a %d %b} au {ep['fin']:%a %d %b} : "
+                    f"{ep['jours_canicule']} jour{'s' if ep['jours_canicule'] > 1 else ''} "
+                    f"de canicule probable (≥ {PROB_CANICULE_QUASI:.0%}) et "
+                    f"{ep['jours_creux']} jour{'s' if ep['jours_creux'] > 1 else ''} "
+                    f"de creux — probabilité moindre mais chaleur notable maintenue "
+                    f"(≥ {seuil_chaleur:.0f} °C @850) : l'épisode ne s'interrompt pas.")
+        else:
+            aide = (f"Du {ep['debut']:%a %d %b} au {ep['fin']:%a %d %b}, "
+                    f"jours consécutifs de canicule probable "
+                    f"(≥ {PROB_CANICULE_QUASI:.0%}).")
+        c2.metric("Durée de l'épisode",
+                  f"{ep['duree']} jour{'s' if ep['duree'] > 1 else ''}", help=aide)
     c3.metric("Pic de risque", f"{pic['prob'] * 100:.0f} %",
               help=f"{pic['date']:%a %d %b} · médiane {pic['Médiane']:.1f} °C")
 

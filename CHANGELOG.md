@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.5.6] - 2026-07-16
+Convergence Montsouris : tableau d'écarts prévision − observé sous le graphique.
+
+Pour chaque recul (dernière prévision, J−6 h, J−12 h, J−18 h, J−24 h) :
+écart au dernier point observé, à l'instant du min observé et à l'instant
+du max observé sur la fenêtre de 48 h. Les références min/max sont celles
+de la température OBSERVÉE ; la prévision est comparée lissée, exactement
+comme elle est tracée (lissage mutualisé dans `lisser_prevision`,
+observations/logic.py, réutilisé par le graphique). Appariement au point
+de prévision le plus proche à ± 10 min, sinon « — » — jamais de valeur
+interpolée. Lecture seule des flux, `vintage_comparison_series` inchangé.
+(issue #13)
+
+## [2.5.5] - 2026-07-16
+Observations : min/max provisoires du jour sur les cartes station.
+
+Chaque carte « temps réel » affiche, sous la température, le min/max
+observé depuis 00 h (heure de Paris) du jour civil en cours — ligne
+discrète (caption), « — » si donnée absente, hauteur et alignement des
+4 cartes inchangés. Calcul dédié `txtn_du_jour` (flux horaire seul, sans
+exigence de complétude, valeur explicitement provisoire) — distinct de
+`daily_txtn_obs`, réservé aux jours révolus quasi complets. Affichage
+seul : aucune influence sur la détection canicule ni les KPI. (issue #12)
+
+## [2.5.4] - 2026-07-16
+Canicule : la durée d'épisode tolère les creux chauds d'un jour.
+
+La durée affichée était calculée sur des séquences strictement consécutives
+de jours ≥ 50 % de probabilité : un seul jour intermédiaire légèrement sous
+ce seuil faisait retomber « Durée de l'épisode » de 6 jours à 1 jour du
+jour au lendemain. Nouvelle fonction pure `episode_chaleur`
+(heatwave/logic.py, testée dans tests/) : un jour sous le seuil de
+probabilité mais dont la médiane reste ≥ seuil chaleur relie deux jours
+confirmés sans couper l'épisode — les creux ne font que relier, jamais
+étendre le début ou la fin. Le détail (jours confirmés vs creux) se lit au
+survol de la métrique ; le badge Statut canicule garde sa définition
+stricte, inchangée. (issue #14)
+
+## [2.5.3] - 2026-07-16
+Sidebar : suppression du compteur « Prévisions archivées » et bloc allégé.
+
+Le nombre brut de runs en base grossit sans fin et ne dit rien de la
+fraîcheur/fiabilité des données. La sidebar ne garde que l'essentiel :
+dernier run, heure de rafraîchissement, statut complet/partiel, bouton
+Rafraîchir ; les mentions statiques (mise à jour auto, sources, version)
+sont regroupées en un seul bloc. (issue #11)
+
 ## [2.5.2] - 2026-07-09
 CI : évite les conflits de push git sur les parquets binaires du pipeline.
 

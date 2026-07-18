@@ -29,7 +29,7 @@ from app.pages.overview import page_overview
 from app.pages.pipeline import page_run
 from app.ui.theme import GLOBAL_CSS
 
-APP_VERSION = "2.5.2"
+APP_VERSION = "2.5.6"
 
 st.set_page_config(page_title="Dashboard Météo — Ensembles Paris",
                    page_icon="🌡️", layout="wide")
@@ -60,8 +60,9 @@ def main():
     st.sidebar.title("🌦️ Navigation")
     page = st.sidebar.radio("Aller à", list(renderers))
     st.sidebar.markdown("---")
-    st.sidebar.metric("Prévisions archivées", len(runs),
-                      help="Nombre de runs (calculs) disponibles dans la base")
+    # Bloc fraîcheur : l'essentiel seulement — dernier run, heure de collecte,
+    # statut complet/partiel. Pas de compteur cumulatif (le nombre total de runs
+    # archivés grossit sans fin et ne dit rien de la fiabilité des données).
     if not runs.empty:
         st.sidebar.caption(f"Dernière : {runs.iloc[0]['label']}")
         refreshed_at, complete, missing = latest_refresh_status(runs, sig)
@@ -75,13 +76,11 @@ def main():
         st.cache_data.clear()
         st.rerun()
     st.sidebar.markdown("---")
-    st.sidebar.markdown("<small>🕐 **Mise à jour automatique**<br>"
-                        "4×/jour via Open-Meteo — runs 0Z/6Z/12Z/18Z "
-                        "(GEM : 0Z/12Z uniquement)</small>",
+    st.sidebar.markdown("<small>🕐 **Mise à jour automatique** 4×/jour via "
+                        "Open-Meteo — runs 0Z/6Z/12Z/18Z (GEM : 0Z/12Z)<br>"
+                        "Données : ECMWF · NOAA · ECCC<br>"
+                        f"Version {APP_VERSION}</small>",
                         unsafe_allow_html=True)
-    st.sidebar.markdown("<small>Données : ECMWF · NOAA · ECCC</small>",
-                        unsafe_allow_html=True)
-    st.sidebar.markdown(f"<small>Version {APP_VERSION}</small>", unsafe_allow_html=True)
 
     renderers[page](runs, sig)
 

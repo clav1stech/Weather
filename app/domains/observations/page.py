@@ -20,7 +20,7 @@ import streamlit as st
 import config as C
 from app.runtime import LOCAL_TZ
 from app.data.observations import (
-    latest_obs, load_obs, obs_signature, obs_window)
+    latest_obs, load_obs, obs_signature, obs_window, txtn_du_jour)
 from app.data.observations_6m import latest_obs_6m, load_obs_6m, obs_6m_signature
 from app.data.vintages import load_vintages, vintages_signature
 from app.services import cooldown
@@ -29,7 +29,7 @@ from app.domains.observations.charts import (
     comparaison_stations, ecart_icu_chart, vintage_comparison_chart)
 from app.domains.observations.logic import (
     OBS_CARTE_ALERTE_H, ecart_icu_series, obs_est_perimee,
-    verdict_icu_nocturne, vintage_comparison_series)
+    tableau_ecarts_convergence, verdict_icu_nocturne, vintage_comparison_series)
 
 
 def _cols_cartes():
@@ -58,7 +58,7 @@ def _champ_frais(col, *rows):
     return best_val, best_t
 
 
-def _carte_station(col, station, row_h, row_6m, row_live, now_local):
+def _carte_station(col, station, row_h, row_6m, row_live, now_local, txtn=None):
     """Carte « temps réel » d'une station : température + heure d'observation.
     Cadre bordé à hauteur naturelle (contenu identique d'une carte à l'autre :
     nom + métrique + horodatage → cartes de même hauteur, aucun CSS requis). La
@@ -86,6 +86,14 @@ def _carte_station(col, station, row_h, row_6m, row_live, now_local):
         t_txt = f"{t:.1f} °C" if pd.notna(t) else "—"
         st.metric("Température", t_txt,
                   help=f"Station {station['reseau']} · alt. {station['alt']} m")
+        # Min/max PROVISOIRES du jour civil en cours (depuis 00 h, flux horaire
+        # seul — cf. txtn_du_jour) : ligne présente sur TOUTES les cartes, « — »
+        # si donnée absente, pour garder hauteur et alignement identiques.
+        tn = txtn["tn"] if txtn is not None else float("nan")
+        tx = txtn["tx"] if txtn is not None else float("nan")
+        tn_txt = f"{tn:.1f}°" if pd.notna(tn) else "—"
+        tx_txt = f"{tx:.1f}°" if pd.notna(tx) else "—"
+        st.caption(f"Depuis 00 h : min {tn_txt} · max {tx_txt}")
         heure = f"Le {t_time:%d/%m à %Hh%M}"
         # Rouge si l'obs a plus d'OBS_CARTE_ALERTE_H (1 h) — seuil resserré vs
         # OBS_PERIMEE_H (3 h) : avec le flux 6 min, une obs vieille d'1 h+ est
@@ -222,6 +230,34 @@ def _section_convergence_prevision():
         obs_ref, series, "Prévision vs observé — Montsouris (48 h)"),
         width="stretch")
 
+    # Tableau d'écarts prévision − observé aux trois instants de référence de
+    # la fenêtre (dernier point observé, min et max OBSERVÉS). Prévision lissée
+    # comme au tracé (cf. tableau_ecarts_convergence) : le tableau chiffre ce
+    # que les courbes montrent. Sans observé, rien à chiffrer → pas de tableau.
+    tab = tableau_ecarts_convergence(series, obs_ref if not obs_ref.empty else None)
+    if not tab.empty:
+        o = obs_ref.dropna(subset=["t"])
+        t_min = o.loc[o["t"].idxmin()]
+        t_max = o.loc[o["t"].idxmax()]
+
+        def _fmt(v):
+            return f"{v:+.1f}" if pd.notna(v) else "—"
+
+        disp = pd.DataFrame({
+            "Recul": ["Dernière prévision" if h == 0 else f"J−{h} h"
+                      for h in tab["lead_h"]],
+            "Écart actuel (°C)": tab["ecart_actuel"].map(_fmt),
+            "Écart au min observé (°C)": tab["ecart_min"].map(_fmt),
+            "Écart au max observé (°C)": tab["ecart_max"].map(_fmt),
+        })
+        st.dataframe(disp, hide_index=True, width="stretch")
+        st.caption("Écart = prévision − observé (**positif : le modèle voyait "
+                   "trop chaud**), sur les courbes de prévision lissées telles "
+                   "que tracées ci-dessus. Références observées sur la fenêtre : "
+                   f"min {t_min['t']:.1f} °C le {t_min['valid_time']:%d/%m à %Hh%M}, "
+                   f"max {t_max['t']:.1f} °C le {t_max['valid_time']:%d/%m à %Hh%M}. "
+                   "« — » : pas de point de prévision à cet instant pour ce recul.")
+
 
 def page_observations(runs, sig):
     st.title("🏙️ Observations en direct")
@@ -272,11 +308,16 @@ def page_observations(runs, sig):
     # remplace donc les cartes ci-dessous sans bloc séparé (cf. _champ_frais).
     live = st.session_state.get(_LIVE_SNAPSHOT_KEY)
     by_nom_live = live["data"] if live else {}
+    # Min/max provisoires du jour civil en cours, par station (flux horaire
+    # seul — le 6 min ne porte pas tx/tn, l'aperçu en direct non plus).
+    txtn_jour = txtn_du_jour(obs_sig, now_local.normalize())
+    by_id_txtn = {r["station_id"]: r for _, r in txtn_jour.iterrows()}
     cols = _cols_cartes()
     for col, station in zip(cols, C.OBS_STATIONS):
         _carte_station(col, station, by_nom.get(station["nom"]),
                        by_nom6.get(station["nom"]),
-                       by_nom_live.get(station["nom"]), now_local)
+                       by_nom_live.get(station["nom"]), now_local,
+                       txtn=by_id_txtn.get(station["id"]))
     ref = next((s for s in C.OBS_STATIONS if s["reference"]), None)
     if ref is not None:
         _conditions_generales(by_nom.get(ref["nom"]), by_nom6.get(ref["nom"]),

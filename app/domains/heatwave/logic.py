@@ -28,6 +28,51 @@ def _canicule_label(prob):
     return "🟢 Pas de signal de canicule"
 
 
+def episode_chaleur(jours, seuil_chaleur, seuil_prob=PROB_CANICULE_QUASI, depuis=None):
+    """Bornes de l'épisode de chaleur englobant les jours de canicule probable
+    (prob ≥ seuil_prob), pour l'AFFICHAGE de la durée/fin d'épisode — le badge
+    « Statut canicule » garde sa définition stricte, inchangée.
+
+    Un jour intermédiaire repassant sous seuil_prob ne coupe PAS l'épisode
+    tant que sa médiane reste ≥ seuil_chaleur (creux « chaud » au sein d'un
+    épisode réel : sans cette tolérance, un seul jour à 45 % de probabilité au
+    milieu de six jours confirmés ferait retomber la durée affichée à 1 jour).
+    Les creux ne font que RELIER deux jours confirmés : l'épisode commence et
+    finit toujours sur un jour de canicule probable, jamais sur un creux. Un
+    jour sous seuil_chaleur en médiane, ou absent de `jours`, coupe l'épisode.
+
+    `jours` : sortie de daily_risk (colonnes date, prob, Médiane).
+    `depuis` : ancre optionnelle — l'épisode retourné démarre au premier jour
+    de canicule probable ≥ depuis (par défaut, le tout premier).
+    Retourne None si aucun jour de canicule probable, sinon un dict
+    {debut, fin, duree, jours_canicule, jours_creux} (durée en jours
+    calendaires, canicule + creux = durée)."""
+    if jours is None or jours.empty:
+        return None
+    d = jours.dropna(subset=["prob"]).sort_values("date")
+    high = d.loc[d["prob"] >= seuil_prob, "date"].tolist()
+    if depuis is not None:
+        high = [x for x in high if x >= depuis]
+    if not high:
+        return None
+    med = dict(zip(d["date"], d["Médiane"]))
+    debut = fin = high[0]
+    jours_canicule = 1
+    for nxt in high[1:]:
+        # Jours calendaires entre le dernier jour retenu et le prochain jour
+        # confirmé : tous doivent être des creux chauds pour relier les deux.
+        creux = pd.date_range(fin, nxt, freq="D")[1:-1]
+        if all(pd.notna(med.get(c)) and med[c] >= seuil_chaleur for c in creux):
+            fin = nxt
+            jours_canicule += 1
+        else:
+            break
+    duree = (fin - debut).days + 1
+    return {"debut": debut, "fin": fin, "duree": duree,
+            "jours_canicule": jours_canicule,
+            "jours_creux": duree - jours_canicule}
+
+
 # Indice de tendance récente (grand public) : fenêtre de runs considérée et
 # seuils (°C) de qualification des révisions. |Δ| < STABLE = stable ;
 # ≥ STRONG = révision nette. La fenêtre ~66 h ≈ les runs des 3 derniers jours

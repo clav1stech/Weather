@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.5.7] - 2026-07-19
+Observations : horodatages « maintenant » en heure de Paris explicite.
+
+L'aperçu instantané et les contrôles de fraîcheur de la page Observations
+utilisaient `datetime.now()` nu — heure système du serveur, donc UTC sur
+Streamlit Cloud, incohérente avec les autres horodatages de la page.
+Horodatage du snapshot live et `now_local` (alertes de fraîcheur, borne du
+jour civil des min/max provisoires) désormais calculés en `LOCAL_TZ`,
+conformément à la convention du dashboard (stockage UTC, conversion à
+l'affichage). Cooldown et donnée du snapshot inchangés. (issue #15)
+
 ## [2.5.6] - 2026-07-16
 Convergence Montsouris : tableau d'écarts prévision − observé sous le graphique.
 

@@ -178,8 +178,11 @@ def _bouton_rafraichissement():
         st.error(erreurs[0])
         return
     cooldown.record(C.OBS_LIVE_REFRESH_STATE_PATH)
+    # Horodatage en heure de Paris explicite : datetime.now() nu vaudrait
+    # l'heure système du serveur (UTC sur Streamlit Cloud), incohérente avec
+    # tous les autres horodatages de la page (convention : affichage LOCAL_TZ).
     st.session_state[_LIVE_SNAPSHOT_KEY] = {
-        "data": resultats, "erreurs": erreurs, "time": datetime.now()}
+        "data": resultats, "erreurs": erreurs, "time": datetime.now(LOCAL_TZ)}
     st.rerun()
 
 
@@ -292,7 +295,10 @@ def page_observations(runs, sig):
                 "(fetch_observations.py, cron horaire). Revenez dans une heure.")
         return
 
-    now_local = pd.Timestamp(datetime.now())
+    # « Maintenant » en heure de Paris tz-naïf (comme les valid_time chargés) :
+    # datetime.now() nu vaudrait l'heure serveur (UTC sur Streamlit Cloud) et
+    # fausserait les alertes de fraîcheur et la borne du jour civil (txtn).
+    now_local = pd.Timestamp(datetime.now(LOCAL_TZ)).tz_localize(None)
 
     # ── Bloc 1 : temps réel ──────────────────────────────────────────────────
     st.subheader("📍 Dernières observations")

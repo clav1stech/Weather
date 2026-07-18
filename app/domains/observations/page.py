@@ -64,7 +64,7 @@ def _carte_station(col, station, row_h, row_6m, row_live, now_local, txtn=None):
     Cadre bordé à hauteur naturelle (contenu identique d'une carte à l'autre :
     nom + métrique + horodatage → cartes de même hauteur, aucun CSS requis). La
     température affichée est la plus fraîche entre l'horaire, l'infra-horaire
-    6 min (`row_6m`, stations RADOME seules) et l'aperçu en direct du bouton
+    6 min (`row_6m`, les 4 stations publient la température à ce pas) et l'aperçu en direct du bouton
     (`row_live`, session en cours seulement — remplace les autres sources dès
     qu'il est plus frais, ce qu'il est presque toujours juste après un clic).
     Les trois `None` = station sans la moindre observation. Les mesures
@@ -305,9 +305,10 @@ def page_observations(runs, sig):
     st.subheader("📍 Dernières observations")
     latest = latest_obs(obs_sig)
     by_nom = {r["station_nom"]: r for _, r in latest.iterrows()}
-    # Fraîcheur infra-horaire 6 min (stations RADOME seules) : flux séparé qui
-    # ne rafraîchit QUE les valeurs instantanées affichées ici — jamais la
-    # comparaison inter-stations ni les Tx/Tn (grille horaire).
+    # Fraîcheur infra-horaire 6 min (les 4 stations, instrumentation inégale —
+    # cf. fetch_observations_6m.py) : flux séparé qui ne rafraîchit QUE les
+    # valeurs instantanées affichées ici — jamais la comparaison inter-stations
+    # ni les Tx/Tn (grille horaire).
     latest6 = latest_obs_6m(obs_6m_signature())
     by_nom6 = {r["station_nom"]: r for _, r in latest6.iterrows()}
     # Aperçu en direct du bouton (st.session_state, propre à cette session de
@@ -350,7 +351,8 @@ def page_observations(runs, sig):
         # API Météo-France — normal, pas une panne). Deux réponses d'affichage,
         # sans toucher aux calculs (écart ICU, Tx/Tn : horaire seul) :
         # dire jusqu'où va la donnée consolidée, et prolonger les courbes en
-        # pointillé avec les mesures 6 min plus fraîches (RADOME seules).
+        # pointillé avec les mesures 6 min plus fraîches (température publiée
+        # aux 4 stations — le prolongement suit simplement qui a un point récent).
         fin_horaire = dfw.loc[dfw["t"].notna(), "valid_time"].max()
         comp6 = obs_6m_depuis(obs_6m_signature(), fin_horaire)
         if not comp6.empty:
@@ -364,8 +366,7 @@ def page_observations(runs, sig):
         if noms_6m:
             message += (" Au-delà, les courbes en **pointillé** prolongent la "
                         "lecture avec les relevés 6 min plus frais — "
-                        f"{' et '.join(noms_6m)} seulement, les autres stations "
-                        "ne publiant pas ce flux.")
+                        f"disponibles à l'instant pour {' et '.join(noms_6m)}.")
         else:
             message += (" Un aperçu plus récent existe via les cartes "
                         "temps réel ci-dessus (flux 6 min / aperçu instantané).")

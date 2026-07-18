@@ -5,15 +5,19 @@ fetch_observations_6m.py).
 
 Même contrat que app/data/observations.py : lecture seule, dégradation
 silencieuse (parquet absent/vide/corrompu → DataFrame vide, jamais d'exception),
-stockage UTC tz-naïf converti vers l'heure de Paris à la lecture. Deux usages,
-tous deux d'AFFICHAGE : la dernière mesure INSTANTANÉE (température, humidité,
-vent, pression) des stations RADOME pour rafraîchir les cartes « temps réel »,
-et le prolongement pointillé du graphique inter-stations au-delà de la dernière
-heure consolidée du flux horaire (obs_6m_depuis). Le flux horaire
-(observations.py) reste la source EXCLUSIVE de tous les CALCULS : écart ICU,
-Tx/Tn journaliers, min/max du jour. L'absence de 6 min est un état NORMAL
-(stations ETENDU sans ce produit, flux plus récent que la base, API
-indisponible)."""
+stockage UTC tz-naïf converti vers l'heure de Paris à la lecture. Les 4
+stations publient ce flux, avec une instrumentation inégale : RADOME
+(Montsouris, Longchamp) publie tout, ETENDU (Lariboisière, Luxembourg) ne
+renseigne que température et pluie 6 min (le reste NaN, structurel — cf.
+fetch_observations_6m.py). Deux usages, tous deux d'AFFICHAGE : la dernière
+mesure INSTANTANÉE (température, humidité, vent, pression — selon
+disponibilité par station) pour rafraîchir les cartes « temps réel », et le
+prolongement pointillé du graphique inter-stations au-delà de la dernière
+heure consolidée du flux horaire (obs_6m_depuis, température seule — publiée
+aux 4 stations). Le flux horaire (observations.py) reste la source EXCLUSIVE
+de tous les CALCULS : écart ICU, Tx/Tn journaliers, min/max du jour. Un flux
+6 min absent/vide/corrompu est un état NORMAL (flux plus récent que la base,
+API indisponible)."""
 
 import os
 
@@ -59,9 +63,11 @@ def obs_6m_depuis(_sig, debut):
     """Mesures 6 min STRICTEMENT postérieures à `debut` (heure de Paris,
     tz-naïf) : le complément de fraîcheur du graphique inter-stations, au-delà
     de la dernière heure consolidée du flux horaire (qui accuse un délai de
-    publication de quelques heures côté API Météo-France). Seules les stations
-    RADOME y figurent en pratique — un complément à deux courbes sur quatre est
-    l'état normal, l'affichage doit le dire. Vide si rien de plus frais."""
+    publication de quelques heures côté API Météo-France). La température,
+    seule variable utilisée par ce complément, est publiée aux 4 stations
+    (RADOME comme ETENDU) — une station sans point récent y est simplement
+    absente, cas normal (poll manqué, station momentanément muette). Vide si
+    rien de plus frais."""
     df = load_obs_6m(_sig)
     if df.empty or pd.isna(pd.Timestamp(debut)):
         return df.iloc[0:0]
@@ -71,9 +77,10 @@ def obs_6m_depuis(_sig, debut):
 @st.cache_data(show_spinner=False)
 def latest_obs_6m(_sig):
     """Dernière mesure 6 min de CHAQUE station présente en base (dans l'ordre de
-    config.OBS_STATIONS). Seules les stations RADOME y figurent en pratique ;
-    une station sans 6 min est simplement absente du résultat — l'appelant
-    retombe alors sur l'observation horaire."""
+    config.OBS_STATIONS) — les 4 stations y figurent normalement, avec un
+    contenu inégal (ETENDU : température/pluie seules, cf. module). Une
+    station sans la moindre ligne 6 min est simplement absente du résultat —
+    l'appelant retombe alors sur l'observation horaire."""
     df = load_obs_6m(_sig)
     if df.empty:
         return df

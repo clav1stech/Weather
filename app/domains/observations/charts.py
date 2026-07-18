@@ -38,8 +38,10 @@ def comparaison_stations(dfw, titre, complement_6m=None):
     dans la couleur de leur station, raccordées au dernier point horaire, pour
     prolonger la lecture jusqu'aux relevés les plus frais. Marquage volontaire :
     le trait plein est la donnée horaire consolidée (celle des calculs), le
-    pointillé un aperçu 6 min qui ne couvre que les stations RADOME — deux
-    courbes sur quatre s'arrêtant plus tôt est l'état normal, pas un trou."""
+    pointillé un aperçu 6 min — la température étant publiée aux 4 stations,
+    toutes peuvent en principe en bénéficier ; une station sans point 6 min
+    récent (poll manqué, station momentanément muette) garde simplement son
+    trait plein sans prolongement, sans que ce soit un cas d'erreur."""
     fig = go.Figure()
     comp = complement_6m if complement_6m is not None else pd.DataFrame()
     t_max_global = dfw["valid_time"].max()

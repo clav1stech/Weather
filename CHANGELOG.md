@@ -33,11 +33,10 @@ Le flux horaire consolidé accuse structurellement quelques heures de retard
 panne). Deux réponses d'affichage : un message indique jusqu'où va la donnée
 horaire consolidée, et les courbes de température sont prolongées en
 pointillé par les mesures 6 min plus fraîches (`obs_6m_depuis`), raccordées
-au dernier point horaire — stations RADOME seules (Montsouris, Longchamp),
-les stations ETENDU ne publiant pas ce flux. Fusion calculée au rendu
-uniquement : l'écart ICU, les Tx/Tn journaliers et les min/max du jour
-restent calculés sur l'horaire seul (frontière documentée dans CLAUDE.md).
-(issue #22)
+au dernier point horaire — la température étant publiée par les 4 stations
+à ce pas, toutes peuvent en bénéficier. Fusion calculée au rendu uniquement :
+l'écart ICU, les Tx/Tn journaliers et les min/max du jour restent calculés
+sur l'horaire seul (frontière documentée dans CLAUDE.md). (issue #22)
 
 ## [2.5.7] - 2026-07-19
 Observations : horodatages « maintenant » en heure de Paris explicite.

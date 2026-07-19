@@ -14,6 +14,14 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.3.0] - 2026-07-19
+- Archivage hot/cold : mécanique générique `core/pipeline/hot_cold.py`
+  (sauvegardes datées, vérification stricte de non-perte, dry-run), rollover
+  hebdomadaire des trois parquets neige vers `*_archive` (fenêtre 45 j, job CI
+  `rollover-snow`), lecture hot+cold côté dashboard (convergence,
+  observations). Côté canicule : activation PRÉPARÉE mais non déclenchée
+  (script + job CI manuels, procédure post-merge documentée).
+
 ## [0.2.0] - 2026-07-19
 - Page Observations — stations Météo-France des Alpes du Nord (DPPaquetObs
   département 74) : Combloux / Mont d'Arbois / Aiguille du Midi en référence,

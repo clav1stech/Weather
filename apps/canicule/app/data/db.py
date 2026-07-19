@@ -17,16 +17,30 @@ from app.runtime import LOCAL_TZ
 
 
 def db_signature():
-    """Signature (mtime) du fichier → invalide le cache au moindre nouveau run."""
-    try:
-        return os.path.getmtime(C.DB_PATH)
-    except OSError:
-        return None
+    """Signature (mtimes hot + archive) → invalide le cache au moindre nouveau
+    run comme après un rollover hot/cold. Tant que l'archive n'existe pas
+    (archivage canicule non activé), seule la composante hot varie — clé de
+    cache opaque, aucun appelant n'en inspecte le contenu."""
+    sigs = []
+    for path in (C.DB_PATH, C.DB_ARCHIVE_PATH):
+        try:
+            sigs.append(os.path.getmtime(path))
+        except OSError:
+            sigs.append(None)
+    return None if sigs[0] is None else tuple(sigs)
 
 
 @st.cache_data(show_spinner=False)
 def load_db(_sig):
     """Base complète. run_date / valid_time convertis UTC → heure de Paris (naïf).
+
+    Si le parquet COLD de l'archivage hot/cold existe (rollover canicule activé
+    un jour — cf. config.DB_ARCHIVE_PATH), il est concaténé AVANT le hot : la
+    base vue du dashboard reste l'historique ENTIER, aucun run archivé ne
+    disparaît d'Explorer/Contrôle et les harnais de non-régression restent
+    identiques avant/après un rollover. Archive absente (cas actuel) →
+    comportement strictement inchangé. La lecture hot-seul des pages
+    interactives (gain mémoire, design §3) est un chantier ultérieur distinct.
 
     Filtre aussi les modèles legacy qui auraient pu rester dans un parquet plus
     ancien (ex. AIGEFS/ICON retirés de config.MODELS) — évite tout crash sur des
@@ -34,6 +48,13 @@ def load_db(_sig):
     if _sig is None or not os.path.exists(C.DB_PATH):
         return pd.DataFrame(columns=C.SCHEMA)
     df = pd.read_parquet(C.DB_PATH)
+    if os.path.exists(C.DB_ARCHIVE_PATH):
+        archive = pd.read_parquet(C.DB_ARCHIVE_PATH)
+        df = pd.concat([archive, df], ignore_index=True)
+        # Recouvrement hot/archive impossible après un rollover sain, mais la
+        # lecture ne doit pas en dépendre : dédup défensive, hot prioritaire.
+        df = df.drop_duplicates(subset=["run_date", "model", "member", "valid_time"],
+                                keep="last")
     df = df[df["model"].isin(C.MODEL_LABELS)].reset_index(drop=True)
     for col in ("run_date", "valid_time"):
         s = pd.to_datetime(df[col])

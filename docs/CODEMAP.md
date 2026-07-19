@@ -93,8 +93,13 @@ restent intactes.
   `pipeline/fetch_observations.py` (observations Météo-France Alpes du Nord,
   DPPaquetObs dept 74 → `data/db_obs_alpes.parquet`, mécanique générique
   `core/pipeline/observations.py`, domaine `domains/observations/`, job CI
-  horaire `fetch-snow-obs` à :30).
-  Versioning séparé :
+  horaire `fetch-snow-obs` à :30) et `pipeline/rollover.py` (archivage
+  hot/cold des trois parquets neige vers `*_archive.parquet`, mécanique
+  `core/pipeline/hot_cold.py`, job CI hebdo `rollover-snow` — côté canicule
+  ce mécanisme est PRÉPARÉ mais non déclenché : `tools/rollover_canicule.py`
+  + job CI `rollover-canicule` en workflow_dispatch seul, procédure
+  d'activation post-merge dans `docs/DESIGN_archivage_pipeline.md` §7,
+  analyse sur copie via `tools/archive_hot_cold_dry_run.py`). Versioning séparé :
   `SNOW_APP_VERSION` dans `snow_app.py`, changelog `apps/snow/docs/CHANGELOG.md`,
   tags `snow-vX.Y`.
 - `tools/` — utilitaires hors exploitation : harnais de non-régression

@@ -317,6 +317,14 @@ OBS_6M_VARIABLES = [
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DB_PATH = os.path.join(DATA_DIR, "database_paris.parquet")
+# Parquet COLD de l'archivage hot/cold (docs/DESIGN_archivage_pipeline.md,
+# mécanique core/pipeline/hot_cold.py) — NON ACTIVÉ tant que l'utilisateur n'a
+# pas validé la bascule : le fichier n'existe pas encore, le dashboard le relit
+# de façon transparente dès qu'il apparaîtra (load_db concatène hot + archive).
+# Le rollover se lance via tools/rollover_canicule.py (workflow_dispatch
+# manuel uniquement, jamais un cron tant que non validé).
+DB_ARCHIVE_PATH = os.path.join(DATA_DIR, "database_paris_archive.parquet")
+HOT_RETENTION_DAYS = 35   # fenêtre HOT (design §3 : horizon 16 j + convergence + marge)
 # Parquet SÉPARÉ pour le flux Tx/Tn HD : pas un ensemble (aucun `member`), le
 # mélanger à DB_PATH casserait la sémantique de la base plate principale.
 DB_T2M_PATH = os.path.join(DATA_DIR, "database_paris_t2m.parquet")

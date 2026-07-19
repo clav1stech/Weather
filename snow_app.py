@@ -29,7 +29,7 @@ from apps.snow.app.pages.convergence import page_convergence
 from apps.snow.app.pages.explore import page_explore
 from apps.snow.app.ui.theme import GLOBAL_CSS
 
-SNOW_APP_VERSION = "0.2.0"
+SNOW_APP_VERSION = "0.3.0"
 
 st.set_page_config(page_title="Dashboard Neige — Megève",
                    page_icon="🏔️", layout="wide")

@@ -36,13 +36,23 @@ on:
     # Observations Météo-France Alpes du Nord (flux annexe neige) : toutes les
     # heures, même cadence que les observations Paris — créneau :30 libre.
     - cron: '30 * * * *'
+    # Rollover hot/cold des parquets neige : hebdomadaire (lundi 03:00 UTC),
+    # minute :00 libre — surtout PAS la même minute qu'un cron horaire (deux
+    # requêtes EN ATTENTE simultanées dans le même concurrency.group : GitHub
+    # annulerait la plus ancienne).
+    - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
       target:
-        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF horaires ; obs6m = observations 6 min ; vintages = prévision Montsouris 15 min ; snow = flux prévision neige Megève ; snow-ensemble / snow-hd = un seul flux neige ; snow-obs = observations Alpes du Nord ; all = tous les flux)"
+        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF horaires ; obs6m = observations 6 min ; vintages = prévision Montsouris 15 min ; snow = flux prévision neige Megève ; snow-ensemble / snow-hd = un seul flux neige ; snow-obs = observations Alpes du Nord ; snow-rollover = rollover hot/cold neige ; all = tous les flux)"
         type: choice
-        options: [both, api, legacy, t2m, obs, obs6m, vintages, snow, snow-ensemble, snow-hd, snow-obs, all]
+        options: [both, api, legacy, t2m, obs, obs6m, vintages, snow, snow-ensemble, snow-hd, snow-obs, snow-rollover, rollover-canicule, all]
         default: both
+      canicule_rollover_execute:
+        description: "rollover-canicule uniquement : 'execute' pour écrire réellement (défaut : dry-run sans aucune écriture)"
+        type: choice
+        options: ['dry-run', 'execute']
+        default: 'dry-run'
       legacy_run:
         description: "Cycle Météociel (si target=legacy ou both). 6Z/18Z : manuel only, AIFS/GEFS uniquement (ECMWF ENS absent à ces cycles)."
         type: choice
@@ -425,6 +435,112 @@ jobs:
             fi
             git diff-index --quiet HEAD && break
             git commit -m "Pipeline: observations Alpes du Nord synchronisées"
+            git push && break
+            n=$((n + 1))
+            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
+            sleep $((RANDOM % 10 + 5))
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+          done
+
+  rollover-snow:
+    # Rollover HOT/COLD des parquets neige (apps/snow/pipeline/rollover.py,
+    # mécanique core/pipeline/hot_cold.py) : bascule le plus ancien des bases
+    # hot vers les parquets *_archive (append-only), avec sauvegardes datées
+    # (.bak, jamais committées : le glob ci-dessous ne prend que *.parquet) et
+    # vérification stricte de non-perte AVANT toute écriture — en cas de doute
+    # le script sort en erreur sans rien toucher. Hebdomadaire : le hot reste
+    # borné sans multiplier les push. Idempotent : relançable sans effet si
+    # rien à basculer (aucun commit dans ce cas).
+    if: |
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'snow-rollover' || github.event.inputs.target == 'all')) ||
+      github.event.schedule == '0 3 * * 1'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: weather-data-push
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install pandas pyarrow
+
+      - name: Rollover and Push Snow Databases
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          shopt -s nullglob
+          # Même discipline binaire que les autres jobs : jamais de pull
+          # --rebase sur un parquet ; en cas d'échec de push on repart de
+          # l'état distant et on rejoue le rollover (idempotent).
+          n=0
+          while true; do
+            python apps/snow/pipeline/rollover.py
+            for f in apps/snow/data/*.parquet; do git add "$f"; done
+            git diff-index --quiet HEAD && break
+            git commit -m "Pipeline: rollover hot/cold des bases neige"
+            git push && break
+            n=$((n + 1))
+            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
+            sleep $((RANDOM % 10 + 5))
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+          done
+
+  rollover-canicule:
+    # Rollover HOT/COLD de la base canicule (tools/rollover_canicule.py,
+    # mécanique core/pipeline/hot_cold.py) — DÉSACTIVÉ EN AUTOMATIQUE :
+    # AUCUN cron et volontairement EXCLU de target=all. Déclenchement
+    # workflow_dispatch manuel uniquement (target=rollover-canicule), et
+    # l'écriture réelle exige EN PLUS l'input canicule_rollover_execute=execute
+    # (défaut dry-run : rapport sans aucune écriture). Le script refuse de
+    # surcroît toute exécution réelle hors de la branche main. Un cron ne sera
+    # ajouté ici que sur demande explicite de l'utilisateur, après le merge en
+    # main et la validation de la bascule (procédure :
+    # docs/DESIGN_archivage_pipeline.md §7).
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'rollover-canicule'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: weather-data-push
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install pandas pyarrow
+
+      - name: Rollover and Push Canicule Database
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          EXTRA=""
+          [ "${{ github.event.inputs.canicule_rollover_execute }}" = "execute" ] && EXTRA="--execute"
+          # Même discipline binaire que les autres jobs : jamais de pull
+          # --rebase sur un parquet ; en cas d'échec de push on repart de
+          # l'état distant et on rejoue le rollover (idempotent). En dry-run,
+          # rien n'est écrit → aucun commit.
+          n=0
+          while true; do
+            python tools/rollover_canicule.py $EXTRA
+            git add data/database_paris.parquet
+            if [ -f data/database_paris_archive.parquet ]; then
+              git add data/database_paris_archive.parquet
+            fi
+            git diff-index --quiet HEAD && break
+            git commit -m "Pipeline: rollover hot/cold de la base canicule"
             git push && break
             n=$((n + 1))
             [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }

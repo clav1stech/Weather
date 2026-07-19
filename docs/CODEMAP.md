@@ -55,7 +55,7 @@ sous-systèmes indépendants, reliés uniquement par `config.py` et le parquet :
 ┌── CORE (racine, mutualisé entre apps, CONFIG-AGNOSTIQUE) ───────────────┐
 │ core/stats/            ensemble.py (stats paramétrées var/seuil/labels) │
 │                        climato.py (formule cosinus)                     │
-│ core/ui/theme.py       thème clair/sombre, CSS, template Plotly         │
+│ core/ui/               thème partagé + exécution locale/rendu des logs  │
 │ core/services/         cooldown.py, github_dispatch.py, openmeteo.py    │
 │                        (client API générique : fetch_json, multi-points,│
 │                        Metadata API, repli horloge)                     │
@@ -82,9 +82,10 @@ restent intactes.
   `data/db_megeve.parquet` ; `pipeline/fetch_hd.py` flux maille fine AROME
   HD/ICON-D2 → `data/db_megeve_hd.parquet` ; config dans `snow_config.py` —
   nom distinct du config.py racine, jamais de collision sys.path) + dashboard
-  (`apps/snow/app/` : data/db.py + runsets.py, domaine `domains/neige/`
-  — logic/charts/page —, pages explore et convergence, thème ré-exporté de
-  core/). Point d'entrée `snow_app.py` à la racine ; le dashboard s'importe
+  (`apps/snow/app/` : data/db.py + runsets.py + quality.py, domaine
+  `domains/neige/` — logic/charts/page —, pages explore, convergence,
+  contrôle des runs et lancement local, thème ré-exporté de core/). Point
+  d'entrée `snow_app.py` à la racine ; le dashboard s'importe
   sous le namespace explicite `apps.snow.app`, distinct du package canicule
   top-level `app`, afin que les deux cohabitent dans un même processus.
   Parquets dans `apps/snow/data/`, jamais dans `data/` (réservé canicule/Paris). Job CI

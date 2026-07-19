@@ -14,6 +14,13 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.3.1] - 2026-07-19
+- Contrôle opérationnel des runs membres et mean/spread : fraîcheur empirique,
+  portée contiguë, complétude et cycles attendus, calculés avec les mêmes
+  fonctions que le pipeline. Nouvelle page locale de lancement des trois flux,
+  avec logs pleine largeur et simulation du rollover strictement dry-run ;
+  exécution/rendu mutualisés dans `core/ui/pipeline.py`.
+
 ## [0.3.0] - 2026-07-19
 - Archivage hot/cold : mécanique générique `core/pipeline/hot_cold.py`
   (sauvegardes datées, vérification stricte de non-perte, dry-run), rollover

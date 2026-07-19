@@ -5,8 +5,6 @@ contrôle croisé. Seule page qui ÉCRIT dans les données — toujours via les
 garde-fous de app/data/legacy_import.py et Forecast.persist."""
 
 import os
-import subprocess
-import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -17,16 +15,16 @@ import config as C
 import run_dual
 from app.data.legacy_import import import_legacy_run, legacy_import_candidates
 from app.data.presence import legacy_signature
+from core.ui.pipeline import (
+    execute as _core_execute,
+    render_execution_results,
+    run_script as _core_run_script,
+)
 
 
 def _run_script(*args, timeout=300):
-    """Lance un script Python du projet en sous-processus, capture stdout/stderr."""
-    child_env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
-    proc = subprocess.run([sys.executable, *args], cwd=C.BASE_DIR, capture_output=True,
-                          text=True, encoding="utf-8", errors="replace",
-                          timeout=timeout, env=child_env)
-    output = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
-    return proc.returncode, output
+    """Adaptateur historique : exécute un script depuis la racine canicule."""
+    return _core_run_script(C.BASE_DIR, *args, timeout=timeout)
 
 
 def _execute(entries):
@@ -35,19 +33,10 @@ def _execute(entries):
     PLEINE LARGEUR sous les colonnes (le déroulé d'un fetch ne doit pas être
     tassé dans une des 4 colonnes). code None = exception gérée (timeout/erreur),
     `output` porte alors le message."""
-    out = []
-    for label, script, timeout in entries:
-        with st.spinner(f"Exécution de {script}…"):
-            try:
-                code, output = _run_script(os.path.join(C.BASE_DIR, script),
-                                           timeout=timeout)
-                out.append((label, code, output or "(aucune sortie)"))
-            except subprocess.TimeoutExpired:
-                out.append((label, None, f"⏱️ Délai dépassé ({timeout} s)."))
-            except Exception as e:  # noqa: BLE001
-                out.append((label, None, f"Erreur : {e}"))
-    st.cache_data.clear()
-    return out
+    def _historical_runner(_base_dir, *args, timeout):
+        return _run_script(*args, timeout=timeout)
+
+    return _core_execute(entries, base_dir=C.BASE_DIR, runner=_historical_runner)
 
 
 def cross_check_log_signature():
@@ -133,18 +122,7 @@ def page_run(runs, sig):
 
     # Déroulé de la dernière exécution — rendu PLEINE LARGEUR sous les colonnes
     # (jamais tassé dans une seule des 4 colonnes ci-dessus).
-    results = st.session_state.get("pipeline_results")
-    if results:
-        st.markdown("#### 📄 Déroulé de la dernière exécution")
-        for label, code, output in results:
-            if code == 0:
-                st.success(f"✅ {label} : terminé.")
-            elif code is None:
-                st.error(f"❌ {label} : {output}")
-                continue
-            else:
-                st.error(f"❌ {label} : code de sortie {code}.")
-            st.code(output)
+    render_execution_results(st.session_state.get("pipeline_results"))
 
     st.markdown("---")
     st.subheader("🩹 Import ciblé depuis le legacy")

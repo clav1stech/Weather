@@ -26,10 +26,13 @@ from apps.snow.app.data.db import db_signature, list_runs
 from apps.snow.app.data.runsets import latest_refresh_status
 from apps.snow.app.domains import DOMAIN_PAGES
 from apps.snow.app.pages.convergence import page_convergence
+from apps.snow.app.pages.diagnostic import page_diagnostic
 from apps.snow.app.pages.explore import page_explore
+from apps.snow.app.pages.pipeline import page_run
+from apps.snow.app.runtime import IS_LOCAL
 from apps.snow.app.ui.theme import GLOBAL_CSS
 
-SNOW_APP_VERSION = "0.3.0"
+SNOW_APP_VERSION = "0.3.1"
 
 st.set_page_config(page_title="Dashboard Neige — Megève",
                    page_icon="🏔️", layout="wide")
@@ -38,6 +41,10 @@ st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 CORE_PAGES = [
     ("Explorer un run", page_explore),
     ("Convergence des runs", page_convergence),
+    ("Contrôle des runs", page_diagnostic),
+]
+LOCAL_PAGES = [
+    ("Lancer le pipeline", page_run),
 ]
 
 
@@ -45,7 +52,7 @@ def main():
     sig = db_signature()
     runs = list_runs(sig)
 
-    renderers = dict(DOMAIN_PAGES + CORE_PAGES)
+    renderers = dict(DOMAIN_PAGES + CORE_PAGES + (LOCAL_PAGES if IS_LOCAL else []))
 
     st.sidebar.title("🏔️ Navigation")
     page = st.sidebar.radio("Aller à", list(renderers))

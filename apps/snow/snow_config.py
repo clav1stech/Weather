@@ -211,6 +211,10 @@ PALIERS_NEIGE_CM = [1.0, 5.0, 20.0]   # petite / vraie / grosse chute
 # mesuré sur la portée réelle du run stocké, jamais une règle d'heure de cycle).
 FULL_HORIZON_TOLERANCE_H = 24
 
+# Contrôle opérationnel : fenêtre récente assez longue pour couvrir plusieurs
+# cycles de chaque famille sans transformer la page en audit d'archive.
+RUN_QUALITY_LOOKBACK_DAYS = 7
+
 # Couleurs d'affichage par site (graphiques multi-sites).
 SITE_COLORS = {"village": "#1F618D", "sommet": "#7D3C98"}
 

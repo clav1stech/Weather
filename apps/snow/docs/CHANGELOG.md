@@ -14,6 +14,12 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.3.2] - 2026-07-19
+- Vue d'ensemble neige : les traces isolées sous les seuils de pertinence ne
+  sont plus présentées comme un épisode, tout en restant disponibles dans
+  l'exploration brute. Les graphiques exposent désormais P10–P90 par modèle et
+  Min–Max du super-ensemble, avec titres et légendes rendus plus lisibles.
+
 ## [0.3.1] - 2026-07-19
 - Contrôle opérationnel des runs membres et mean/spread : fraîcheur empirique,
   portée contiguë, complétude et cycles attendus, calculés avec les mêmes

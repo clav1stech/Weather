@@ -114,6 +114,21 @@ def test_jours_a_neige_kpi_proba_ou_severite():
     assert list(jours["attendu"].round(1)) == [2.0, 12.0, 22.0]
 
 
+def test_signal_affichable_ecarte_les_traces_isolees_sans_modifier_daily():
+    daily = pd.DataFrame({
+        "date": pd.to_datetime(["2026-07-20", "2026-12-20", "2026-12-21"]),
+        "prob": [0.02, 0.12, 0.03],
+        "attendu": [0.03, 0.20, 0.60],
+        "P90": [0.0, 1.2, 0.0],
+        "n_membres": [100, 100, 100],
+    })
+    before = daily.copy(deep=True)
+    shown = logic.signal_neige_affichable(daily)
+    assert list(shown["date"]) == [pd.Timestamp("2026-12-20"),
+                                    pd.Timestamp("2026-12-21")]
+    pd.testing.assert_frame_equal(daily, before)
+
+
 def test_paliers_neige_encadrent_les_bornes_1_5_20():
     # Bornes validées : petite chute [1,5), vraie chute [5,20), grosse chute [20,+).
     assert logic.palier_neige(0.9)[0] == "—"

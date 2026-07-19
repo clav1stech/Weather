@@ -50,6 +50,8 @@ def page_neige(runs, sig):
 
     # ----------------------------------------------------------------- KPI --
     daily_sommet = logic.daily_snowfall(sommet)
+    signal_sommet = logic.signal_neige_affichable(daily_sommet)
+    t2m_sommet_48h = logic.temperature_mediane_horizon(sommet, 48)
     lpn = logic.lpn_series(village)
     c1, c2, c3, c4 = st.columns(4)
 
@@ -111,10 +113,13 @@ def page_neige(runs, sig):
         st.caption(f"🗺️ Contexte synoptique : {ctx}")
 
     # ------------------------------------------------------------- Graphes --
-    st.subheader("Chutes de neige journalières — Mont d'Arbois (1830 m)")
-    if daily_sommet is not None and not daily_sommet.empty:
-        st.plotly_chart(daily_snow_chart(daily_sommet, "sommet"),
-                        use_container_width=True)
+    st.subheader("Signal neige — Mont d'Arbois (1830 m)")
+    if signal_sommet is not None and not signal_sommet.empty:
+        st.caption("Seuls les jours portant un signal exploitable sont tracés ; "
+                   "les sorties brutes sous tous les seuils de pertinence "
+                   "restent consultables dans Explorer un run.")
+        st.plotly_chart(daily_snow_chart(signal_sommet, "sommet"),
+                        width="stretch")
         # Calendrier compact des jours à neige (paliers validés 1/5/20 cm).
         jours = logic.jours_a_neige(daily_sommet)
         if jours is not None and not jours.empty:
@@ -123,27 +128,40 @@ def page_neige(runs, sig):
                       f"(~{r['attendu']:.0f} cm · {r['prob'] * 100:.0f} %)"
                       for _, r in jours.iterrows()]
             st.markdown(" · ".join(lignes))
+    elif daily_sommet is not None and not daily_sommet.empty:
+        traces = daily_sommet[(daily_sommet["prob"] > 0)
+                              | (daily_sommet["attendu"] > 0)]
+        if traces.empty:
+            st.info("🌤️ Aucun signal de neige sur l'horizon visible.")
+        else:
+            douceur = (f"La température médiane au sommet est d'environ "
+                        f"{t2m_sommet_48h:.0f} °C sur 48 h. "
+                        if t2m_sommet_48h is not None else "")
+            st.info("🌤️ Aucun signal de neige crédible sur l'horizon visible. "
+                    + douceur
+                    + f"Les sorties isolées restent sous {traces['prob'].max() * 100:.1f} % "
+                    f"de probabilité et {traces['attendu'].max():.2f} cm de cumul "
+                    "moyen : elles ne sont pas présentées comme un épisode neigeux.")
     else:
-        st.caption("Pas de données de chutes exploitables dans le pool courant.")
+        st.caption("Variable neige absente du pool courant.")
 
     st.subheader("Limite pluie-neige (iso 0° − "
                  f"{SC.LPN_MARGE_M} m) vs altitude des points")
     if lpn is not None and not lpn.empty:
-        st.plotly_chart(lpn_chart(lpn), use_container_width=True)
+        st.plotly_chart(lpn_chart(lpn), width="stretch")
     else:
         st.caption("Iso 0° absent du pool courant (cas normal selon les modèles).")
 
     st.subheader("Masse d'air et régime (moyenne/longue échéance)")
     for fig in (
-        medians_chart(village, "t850", "t850 — médianes par modèle", "°C",
+        medians_chart(village, "t850", "T850 — médianes et P10–P90", "°C",
                       seuils_h={"neige sommet": SC.SEUIL_T850_NEIGE["sommet"],
                                 "neige village": SC.SEUIL_T850_NEIGE["village"]}),
-        medians_chart(village, "pmsl", "Pression mer — médianes par modèle", "hPa"),
+        medians_chart(village, "pmsl", "Pression — médianes et P10–P90", "hPa"),
         medians_chart(village, "epaisseur",
-                      "Épaisseur 1000-500 hPa — médianes par modèle (seuils de "
-                      "démarrage, à calibrer en fin de saison)", "m",
+                      "Épaisseur 1000–500 hPa — médianes et P10–P90", "m",
                       seuils_h={"repère village": logic.EPAISSEUR_NEIGE_M["village"],
                                 "repère sommet": logic.EPAISSEUR_NEIGE_M["sommet"]}),
     ):
         if fig is not None:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")

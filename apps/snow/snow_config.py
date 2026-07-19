@@ -207,6 +207,15 @@ KPI_NEIGE_PROB_MIN = 0.50
 KPI_NEIGE_CUMUL_MIN_CM = 5.0
 PALIERS_NEIGE_CM = [1.0, 5.0, 20.0]   # petite / vraie / grosse chute
 
+# Seuil d'AFFICHAGE du graphique neige, volontairement plus sensible que le
+# KPI « jour à neige » mais assez haut pour ne pas présenter quelques traces
+# numériques de membres isolés comme un épisode crédible. Les sorties brutes
+# restent stockées et accessibles dans Explorer ; seule la lecture principale
+# est filtrée. Le P90 ≥ 1 cm capte aussi une queue significative même si la
+# probabilité agrégée ou la moyenne restent modestes.
+DISPLAY_NEIGE_PROB_MIN = 0.10
+DISPLAY_NEIGE_EXPECTED_MIN_CM = 0.5
+
 # Horizon plein empirique des vues combinées (même logique que le canicule :
 # mesuré sur la portée réelle du run stocké, jamais une règle d'heure de cycle).
 FULL_HORIZON_TOLERANCE_H = 24

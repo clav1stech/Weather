@@ -83,6 +83,38 @@ def jours_a_neige(daily):
     return daily[mask]
 
 
+def signal_neige_affichable(daily):
+    """Jours méritant un graphique dans la lecture opérationnelle.
+
+    Ce filtre d'AFFICHAGE ne modifie ni les membres ni ``daily_snowfall``. Il
+    retire seulement les traces isolées sous tous les seuils de pertinence :
+    probabilité minimale, cumul moyen minimal, ou P90 atteignant le seuil
+    physique d'un jour neigeux. Il reste plus sensible que ``jours_a_neige``
+    afin de montrer un scénario à surveiller avant qu'il ne devienne un KPI.
+    """
+    if daily is None or daily.empty:
+        return daily
+    mask = (daily["prob"] >= SC.DISPLAY_NEIGE_PROB_MIN) \
+        | (daily["attendu"] >= SC.DISPLAY_NEIGE_EXPECTED_MIN_CM) \
+        | (daily["P90"] >= SC.SEUIL_NEIGE_JOUR_CM)
+    return daily[mask].reset_index(drop=True)
+
+
+def temperature_mediane_horizon(sub_site, horizon_h, now=None):
+    """Médiane T2m du scénario central sur les prochaines ``horizon_h``.
+
+    Résumé d'affichage uniquement : il explique pourquoi des traces neigeuses
+    isolées ne constituent pas un signal cohérent dans une masse d'air douce.
+    """
+    now = now or pd.Timestamp.now()
+    window = sub_site[(sub_site["valid_time"] >= now)
+                      & (sub_site["valid_time"] <= now + pd.Timedelta(hours=horizon_h))]
+    piv = member_matrix(window, "t2m")
+    if piv is None or not piv.notna().any(axis=None):
+        return None
+    return float(piv.median(axis=1).median())
+
+
 def lpn_series(sub_village):
     """Limite pluie-neige par échéance : médiane d'ensemble de l'iso 0°
     (lignes village — variable de zone) − LPN_MARGE_M, avec bande P10-P90

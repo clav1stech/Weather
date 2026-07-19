@@ -29,12 +29,16 @@ on:
     # libres (évite :05/:15/:20/:35/:45). Le paquet étant une fenêtre glissante,
     # chaque poll rattrape tous les points 6 min depuis le précédent.
     - cron: '10,25,40,55 * * * *'
+    # Pipeline neige Megève (apps/snow/pipeline/) : toutes les 2h, UN SEUL job
+    # pour les deux flux (ensemble + maille fine) afin de limiter les push git.
+    # Créneau :35 libre (évite :10/:15/:20/:25/:40/:45/:50/:55).
+    - cron: '35 */2 * * *'
   workflow_dispatch:
     inputs:
       target:
-        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF horaires ; obs6m = observations 6 min ; vintages = prévision Montsouris 15 min ; all = tous les flux)"
+        description: "Job(s) à lancer (both = api + legacy ; t2m = Tx/Tn HD seul ; obs = observations MF horaires ; obs6m = observations 6 min ; vintages = prévision Montsouris 15 min ; snow = pipeline neige Megève complet ; snow-ensemble / snow-hd = un seul flux neige ; all = tous les flux)"
         type: choice
-        options: [both, api, legacy, t2m, obs, obs6m, vintages, all]
+        options: [both, api, legacy, t2m, obs, obs6m, vintages, snow, snow-ensemble, snow-hd, all]
         default: both
       legacy_run:
         description: "Cycle Météociel (si target=legacy ou both). 6Z/18Z : manuel only, AIFS/GEFS uniquement (ECMWF ENS absent à ces cycles)."
@@ -302,6 +306,67 @@ jobs:
             fi
             git diff-index --quiet HEAD && break
             git commit -m "Pipeline: prévision Montsouris vintages 15 min synchronisée"
+            git push && break
+            n=$((n + 1))
+            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
+            sleep $((RANDOM % 10 + 5))
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+          done
+
+  fetch-snow:
+    # Pipeline NEIGE Megève (apps/snow/pipeline/ → parquets séparés
+    # apps/snow/data/db_megeve.parquet et db_megeve_hd.parquet — jamais dans
+    # data/, réservé canicule/Paris). UN SEUL job pour les deux flux afin de
+    # limiter les push git, mais scripts indépendants et relançables isolément
+    # (workflow_dispatch : snow-ensemble / snow-hd). Même concurrency.group que
+    # les autres jobs : la contention est sur le PUSH git, pas les fichiers.
+    if: |
+      (github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.target == 'snow' || github.event.inputs.target == 'snow-ensemble' ||
+       github.event.inputs.target == 'snow-hd' || github.event.inputs.target == 'all')) ||
+      github.event.schedule == '35 */2 * * *'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: weather-data-push
+      cancel-in-progress: false
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: pip install requests pandas pyarrow
+
+      - name: Fetch and Push Snow Databases
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Pipeline"
+          shopt -s nullglob
+          # Sélection des flux : cron et target=snow/all lancent les deux ;
+          # snow-ensemble / snow-hd relancent un flux isolément.
+          RUN_ENS=true; RUN_HD=true
+          [ "${{ github.event.inputs.target }}" = "snow-hd" ] && RUN_ENS=false
+          [ "${{ github.event.inputs.target }}" = "snow-ensemble" ] && RUN_HD=false
+          # Les parquets sont binaires : un `git pull --rebase` ne sait pas
+          # fusionner deux écritures concurrentes — on ne tente donc jamais ce
+          # merge côté git. En cas d'échec de push, on repart de l'état distant
+          # à jour et on relance la collecte : chaque script recalcule la
+          # fusion (dédup par clé, anti-régression) sur cette base fraîche,
+          # ce qui est toujours correct.
+          n=0
+          while true; do
+            [ "$RUN_ENS" = "true" ] && python apps/snow/pipeline/fetch_ensemble.py
+            [ "$RUN_HD" = "true" ] && python apps/snow/pipeline/fetch_hd.py
+            # Les fichiers peuvent ne pas exister au tout premier run si l'API
+            # n'a rien renvoyé d'exploitable (les scripts sortent sans écrire).
+            for f in apps/snow/data/*.parquet; do git add "$f"; done
+            git diff-index --quiet HEAD && break
+            git commit -m "Pipeline: bases neige Megève synchronisées"
             git push && break
             n=$((n + 1))
             [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }

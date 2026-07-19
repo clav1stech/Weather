@@ -6,7 +6,7 @@
 ## Vue d'ensemble
 
 Monorepo : le dashboard canicule (ci-dessous) + `core/` (code mutualisé) +
-`apps/snow/` (squelette vide réservé au futur dashboard neige). Deux
+`apps/snow/` (app neige Megève complète, cf. « Autres emplacements »). Deux
 sous-systèmes indépendants, reliés uniquement par `config.py` et le parquet :
 
 ```
@@ -56,9 +56,15 @@ sous-systèmes indépendants, reliés uniquement par `config.py` et le parquet :
 │ core/stats/            ensemble.py (stats paramétrées var/seuil/labels) │
 │                        climato.py (formule cosinus)                     │
 │ core/ui/theme.py       thème clair/sombre, CSS, template Plotly         │
-│ core/services/         cooldown.py, github_dispatch.py (paramétrés)     │
-│ core/io/atomic.py      écriture parquet atomique (pour futurs pipelines │
-│                        d'apps — le pipeline canicule garde son inline)  │
+│ core/services/         cooldown.py, github_dispatch.py, openmeteo.py    │
+│                        (client API générique : fetch_json, multi-points,│
+│                        Metadata API, repli horloge)                     │
+│ core/io/atomic.py      écriture parquet atomique (pipelines d'apps —    │
+│                        le pipeline canicule garde son inline)           │
+│ core/pipeline/         ensemble_runs.py : persistance générique des     │
+│                        runs d'ensemble (fraîcheur empirique, portée     │
+│                        contiguë, anti-régression, fusion (run, modèle)) │
+│                        — consommée par apps/snow/pipeline/              │
 │ core/testing/          harnais de non-régression (wrappers dans tools/) │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -71,8 +77,21 @@ restent intactes.
 
 **Autres emplacements** :
 - `apps/canicule/app/` — emplacement physique du package `app` (voir schéma) ;
-  `apps/snow/` — squelette vide (app/, pipeline/, data/) du futur dashboard
-  neige : ses parquets vivront dans `apps/snow/data/`, jamais dans `data/`.
+  `apps/snow/` — app neige Megève COMPLÈTE : pipeline de collecte
+  (`pipeline/fetch_ensemble.py` flux Ensemble + Ensemble Mean →
+  `data/db_megeve.parquet` ; `pipeline/fetch_hd.py` flux maille fine AROME
+  HD/ICON-D2 → `data/db_megeve_hd.parquet` ; config dans `snow_config.py` —
+  nom distinct du config.py racine, jamais de collision sys.path) + dashboard
+  (`apps/snow/app/` : data/db.py + runsets.py, domaine `domains/neige/`
+  — logic/charts/page —, pages explore et convergence, thème ré-exporté de
+  core/). Point d'entrée `snow_app.py` à la racine ; le dashboard s'importe
+  sous le namespace explicite `apps.snow.app`, distinct du package canicule
+  top-level `app`, afin que les deux cohabitent dans un même processus.
+  Parquets dans `apps/snow/data/`, jamais dans `data/` (réservé canicule/Paris). Job CI
+  unique `fetch-snow` (run_forecast.yml, cron 2 h à :35, flux relançables
+  isolément via workflow_dispatch snow-ensemble/snow-hd). Versioning séparé :
+  `SNOW_APP_VERSION` dans `snow_app.py`, changelog `apps/snow/docs/CHANGELOG.md`,
+  tags `snow-vX.Y`.
 - `tools/` — utilitaires hors exploitation : harnais de non-régression
   (`check_non_regression.py`, `ui_snapshot.py` — wrappers fins de
   `core/testing/`, mêmes commandes qu'avant), `export_project.py` (snapshot

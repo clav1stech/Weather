@@ -110,6 +110,22 @@ def mean_runs(_sig, base_label, n_runs, kind="mean"):
     return sub[sub["run_date"].isin(keep)]
 
 
+def mean_runs_all(_sig, n_runs):
+    """Runs `_MEAN` comparables pour le consensus « Tous modèles ».
+
+    Un cycle n'entre dans la sélection que si au moins deux familles y sont
+    présentes. La page resserre ensuite sur l'intersection des modèles entre
+    ces cycles : la composition reste stable et une arrivée/disparition de
+    modèle ne peut pas simuler une révision du scénario.
+    """
+    df = mean_db(_sig, "mean")
+    if df.empty:
+        return df
+    by_run = df.groupby("run_date")["model"].nunique()
+    eligible = sorted(by_run[by_run >= 2].index, reverse=True)[:n_runs]
+    return df[df["run_date"].isin(eligible)]
+
+
 def latest_refresh_status(runs, _sig):
     """(instant du dernier run, complet ?, modèles manquants) pour le bloc
     fraîcheur de la sidebar — l'attendu se juge sur expected_cycles du cycle

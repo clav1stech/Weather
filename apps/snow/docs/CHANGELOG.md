@@ -14,6 +14,12 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.3.3] - 2026-07-19
+- Convergence enrichie : nombre de runs paramétrable, bande mean ± spread
+  par modèle, heatmap des révisions sur les pivots météo et mode
+  « Tous modèles » à poids égal sur une composition stable, avec amplitude
+  Min–Max des moyennes du run le plus récent.
+
 ## [0.3.2] - 2026-07-19
 - Vue d'ensemble neige : les traces isolées sous les seuils de pertinence ne
   sont plus présentées comme un épisode, tout en restant disponibles dans

@@ -16,6 +16,17 @@ La navigation = pages des domaines (app/domains/__init__.py, registre) puis
 pages transverses — ajouter un domaine ne modifie pas ce fichier.
 """
 
+import os
+import sys
+
+# Monorepo : le code du dashboard canicule (package app/) vit dans
+# apps/canicule/, le code mutualisé dans core/ (racine). Ce point d'entrée
+# reste à la racine — Streamlit Cloud, les lanceurs locaux et le harnais UI
+# pointent dessus — et expose apps/canicule/ sur sys.path pour que `import app`
+# se résolve ; la racine (dossier de ce script) est déjà sur sys.path, ce qui
+# résout `import config` et `import core`.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "apps", "canicule"))
+
 import streamlit as st
 
 from app.runtime import IS_LOCAL

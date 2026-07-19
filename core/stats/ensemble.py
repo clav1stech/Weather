@@ -1,28 +1,29 @@
 # -*- coding: utf-8 -*-
-"""Matrices de membres & statistiques d'ensemble, tolérantes NaN.
+"""Matrices de membres & statistiques d'ensemble, tolérantes NaN — GÉNÉRIQUES.
 
-Toutes les agrégations ignorent les NaN (pandas, skipna) : l'horizon 16 j doit
-s'afficher proprement même quand les membres se raréfient (~7,5 j). Ces
-fonctions sont génériques (elles reçoivent un sous-ensemble `sub` de la base,
-quel que soit le pool de runs choisi) — aucune logique de sélection de runs ici
-(cf. app/data/runsets.py) ni de seuil métier (cf. app/domains/…)."""
+Toutes les agrégations ignorent les NaN (pandas, skipna) : l'horizon lointain
+doit s'afficher proprement même quand les membres se raréfient. Ces fonctions
+reçoivent un sous-ensemble `sub` de la base, quel que soit le pool de runs
+choisi — aucune logique de sélection de runs ici, ni de seuil métier.
+
+Module config-agnostique (règle core/) : la variable pivotée (`var`), le seuil
+de dépassement (`seuil`) et les listes de modèles (`model_labels`,
+`main_labels`) arrivent en paramètres — chaque app les lie à SA config via son
+adaptateur (cf. apps/canicule/app/stats/ensemble.py), qui conserve les
+signatures historiques."""
 
 import numpy as np
 import pandas as pd
 
-import config as C
-from app.runtime import VAR
-
 _PCT_COLS = ["Min", "P10", "P25", "Médiane", "P75", "P90", "Max"]
 
 
-def member_matrix(sub, var=VAR):
+def member_matrix(sub, var):
     """Pivot membres : index=valid_time, colonnes=(model, member). Tri temporel.
 
-    `var` (défaut : variable principale) permet de pivoter une variable
-    secondaire (ex. z500). Colonne absente de `sub` (parquet antérieur à l'ajout
-    de la variable, run legacy) → None : l'absence d'une variable de contexte
-    est un cas normal, jamais une erreur."""
+    Colonne absente de `sub` (parquet antérieur à l'ajout de la variable, run
+    legacy) → None : l'absence d'une variable de contexte est un cas normal,
+    jamais une erreur."""
     if sub.empty or var not in sub.columns:
         return None
     piv = sub.pivot_table(index="valid_time", columns=["model", "member"], values=var)
@@ -43,14 +44,15 @@ def var_median(sub, var):
     return out[out["n_membres"] > 0].reset_index(drop=True)
 
 
-def super_ensemble(sub):
+def super_ensemble(sub, var, seuil):
     """Super-ensemble : stats par échéance sur TOUS les membres poolés (multi-modèles).
 
-    Médiane / P10 / P90 / Min / Max / Spread + écart-type, proba de dépassement,
-    nb de membres et de modèles actifs. Toutes les agrégations ignorent les NaN
-    (pandas, skipna) → l'horizon 16 j reste tracé même si les membres se raréfient.
+    Médiane / P10 / P90 / Min / Max / Spread + écart-type, proba de dépassement
+    de `seuil`, nb de membres et de modèles actifs. Toutes les agrégations
+    ignorent les NaN (pandas, skipna) → l'horizon reste tracé même si les
+    membres se raréfient.
     """
-    piv = member_matrix(sub)
+    piv = member_matrix(sub, var)
     if piv is None or piv.empty:
         return None
     out = pd.DataFrame({"valid_time": piv.index})
@@ -64,7 +66,6 @@ def super_ensemble(sub):
     out[_PCT_COLS] = out[_PCT_COLS].round(2)
     out["Spread"] = (out["P90"] - out["P10"]).round(2)
     out["Ecart-type"] = piv.std(axis=1).round(2).values
-    seuil = C.SEUIL_CANICULE_850
     out["Proba > seuil"] = (piv.gt(seuil).sum(axis=1) / piv.notna().sum(axis=1)).fillna(0).values
     out["n_membres"] = piv.notna().sum(axis=1).values
     # n_models : nb de modèles ayant ≥1 membre valide à cette échéance.
@@ -73,7 +74,7 @@ def super_ensemble(sub):
     return out.reset_index(drop=True)
 
 
-def model_data(sub, model):
+def model_data(sub, model, var):
     """Données d'UN modèle : (stats, members_df, det_series).
 
     members_df : index=valid_time, colonnes=membres perturbés (contrôle exclu).
@@ -83,7 +84,7 @@ def model_data(sub, model):
     s = sub[sub["model"] == model]
     if s.empty:
         return None
-    piv = s.pivot_table(index="valid_time", columns="member", values=VAR).sort_index()
+    piv = s.pivot_table(index="valid_time", columns="member", values=var).sort_index()
     det = piv[0] if 0 in piv.columns else None
     members = piv.drop(columns=[0], errors="ignore")
     stats = pd.DataFrame({"valid_time": piv.index})
@@ -93,41 +94,42 @@ def model_data(sub, model):
     return stats, members, det
 
 
-def model_medians(sub):
+def model_medians(sub, var, model_labels):
     """DataFrame index=valid_time, une colonne de médiane par modèle présent."""
     meds = {}
-    for model in C.MODEL_LABELS:
+    for model in model_labels:
         s = sub[sub["model"] == model]
         if s.empty:
             continue
-        piv = s.pivot_table(index="valid_time", columns="member", values=VAR).sort_index()
+        piv = s.pivot_table(index="valid_time", columns="member", values=var).sort_index()
         meds[model] = piv.median(axis=1)
     if not meds:
         return None
     return pd.concat(meds, axis=1).sort_index()
 
 
-def _model_median(sub, model):
+def _model_median(sub, model, var):
     """Médiane d'UN modèle (tous membres, contrôle inclus), indexée valid_time."""
     s = sub[sub["model"] == model]
     if s.empty:
         return None
-    return s.pivot_table(index="valid_time", columns="member", values=VAR).median(axis=1)
+    return s.pivot_table(index="valid_time", columns="member", values=var).median(axis=1)
 
 
-def divergence(sub):
+def divergence(sub, var, model_labels, main_labels):
     """Divergence inter-modèles = (médiane max − médiane min) entre modèles principaux.
 
     Sécurité logique : calculée uniquement aux échéances où TOUS les modèles
     principaux présents dans ce run ont une médiane valide. Sur les échéances à
     composition incomplète (un modèle s'est arrêté), la valeur est masquée → pas de
-    saut de référence artificiel. On se restreint aux modèles principaux (config
-    `main`) pour qu'un modèle d'appoint à horizon court ne tronque pas l'analyse.
+    saut de référence artificiel. On se restreint aux modèles principaux
+    (`main_labels`) pour qu'un modèle d'appoint à horizon court ne tronque pas
+    l'analyse.
     """
-    meds = model_medians(sub)
+    meds = model_medians(sub, var, model_labels)
     if meds is None:
         return None
-    expected = [m for m in C.MAIN_LABELS if m in meds.columns]
+    expected = [m for m in main_labels if m in meds.columns]
     if len(expected) < 2:
         return None
     full = meds[expected].dropna(how="any")  # composition complète (modèles principaux)
@@ -137,9 +139,9 @@ def divergence(sub):
     return pd.DataFrame({"valid_time": full.index, "Divergence": div.values})
 
 
-def multimodel_cutoff(sub):
+def multimodel_cutoff(sub, var, seuil):
     """Dernière échéance où ≥ 2 modèles sont présents (au-delà : modèle isolé)."""
-    se = super_ensemble(sub)
+    se = super_ensemble(sub, var, seuil)
     if se is None or se.empty:
         return None
     multi = se.loc[se["n_models"] >= 2, "valid_time"]
@@ -159,14 +161,14 @@ def daily_aggregate(se):
     return out
 
 
-def daily_risk(sub, seuil):
+def daily_risk(sub, seuil, var):
     """Risque de dépassement/jour : pool des membres de la journée, proba de dépasser seuil.
 
     `exces` = dépassement attendu E[max(T − seuil, 0)] sur les membres poolés du
     jour — c'est exactement probabilité × sévérité moyenne des dépassements : un
     jour à proba modeste mais à queue très chaude y pèse autant qu'un jour à
     proba forte et dépassement léger (cf. KPI « Jours à risque »)."""
-    piv = member_matrix(sub)
+    piv = member_matrix(sub, var)
     if piv is None or piv.empty:
         return None
     dates = pd.to_datetime(piv.index).normalize()

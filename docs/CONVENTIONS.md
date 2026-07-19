@@ -17,8 +17,14 @@ sont dans `CLAUDE.md`, la carte des modules dans `docs/CODEMAP.md`.
 - **Un réglage variable** (modèle, variable, seuil physique, climato, KPI) →
   `config.py`, jamais en dur dans la logique. Les seuils d'INTERPRÉTATION
   propres à l'affichage d'un domaine (paliers de labels) → `logic.py` du domaine.
+- **Code réutilisable par une autre app du monorepo** (stat pure, service,
+  thème, harnais) → `core/`, en CONFIG-AGNOSTIQUE : jamais d'`import config`
+  ni `app.*` dans `core/`, tout réglage arrive en paramètre. Côté app, un
+  ADAPTATEUR `app/…` lie la config et **conserve les signatures historiques**
+  (contrat des pages et des harnais).
 - **Accès/sélection de données** → `app/data/` (aucun calcul métier).
-- **Statistique générique** (marche pour tout domaine/variable) → `app/stats/`.
+- **Statistique générique** (marche pour tout domaine/variable) → calcul dans
+  `core/stats/`, liaison config dans l'adaptateur `app/stats/`.
 - **Graphique générique** → `app/ui/charts.py` ; **propre à un domaine** →
   `app/domains/<nom>/charts.py`.
 - **Nouvelle page** : transverse → `app/pages/` + routage `meteo_app.py` ;
@@ -26,10 +32,14 @@ sont dans `CLAUDE.md`, la carte des modules dans `docs/CODEMAP.md`.
 - Contrat page : `page_xxx(runs, sig)`.
 
 ## Imports & dépendances
-- Imports absolus (`from app.stats.ensemble import super_ensemble`).
-- Sens unique : `runtime` ← `data/db` ← `stats` ← `data/runsets` ←
+- Imports absolus (`from app.stats.ensemble import super_ensemble`). Le package
+  `app` vit dans `apps/canicule/app/` mais s'importe toujours `app.…` : le
+  chemin `apps/canicule/` est exposé sur `sys.path` par les points d'entrée
+  (`meteo_app.py`, harnais `core/testing/`, `tests/`).
+- Sens unique : `core` ← `runtime` ← `data/db` ← `stats` ← `data/runsets` ←
   {`ui`, `pages`, `domains`}. Jamais de `pages` → `pages`, `domains` → `domains`,
-  ni `stats` → `data`.
+  ni `stats` → `data`. `core/` n'importe JAMAIS `config` ni `app.*` ; le
+  pipeline racine n'importe jamais `core/`.
 - Aucune nouvelle dépendance externe sans justification forte.
 - Le dashboard n'importe du pipeline que `Forecast.persist`/`load_existing`,
   `validate_cross_pipeline` (helpers lecture xlsx) et `run_dual` (constantes

@@ -5,8 +5,9 @@
 
 ## Vue d'ensemble
 
-Deux sous-systèmes indépendants, reliés uniquement par `config.py` et le
-parquet :
+Monorepo : le dashboard canicule (ci-dessous) + `core/` (code mutualisé) +
+`apps/snow/` (squelette vide réservé au futur dashboard neige). Deux
+sous-systèmes indépendants, reliés uniquement par `config.py` et le parquet :
 
 ```
 ┌── PIPELINE (racine, SENSIBLE — collecte des données) ──────────────────┐
@@ -36,15 +37,29 @@ parquet :
         data/database_paris.parquet          legacy/*.xlsx
                     │ lit (lecture seule, sauf import ciblé encadré)
                     ▼
-┌── DASHBOARD (package app/, refactorable librement) ─────────────────────┐
-│ meteo_app.py           point d'entrée Streamlit : set_page_config,      │
-│                        sidebar, routage — RIEN d'autre                  │
+┌── DASHBOARD (package app/ dans apps/canicule/, refactorable librement) ─┐
+│ meteo_app.py           point d'entrée Streamlit À LA RACINE (Streamlit  │
+│                        Cloud, lanceurs et harnais UI y pointent) :      │
+│                        set_page_config, sidebar, routage — RIEN d'autre │
+│                        + expose apps/canicule/ sur sys.path (`import    │
+│                        app` inchangé partout)                           │
 │ app/runtime.py         IS_LOCAL, LOCAL_TZ, VAR, user_tz                 │
 │ app/data/              accès parquet + sélections de runs               │
-│ app/stats/             statistiques d'ensemble génériques               │
-│ app/ui/                thème + graphiques + composants génériques       │
+│ app/stats/             ADAPTATEURS (lient config/VAR à core/stats)      │
+│ app/ui/                thème (ré-export core/ui) + graphiques + composants │
 │ app/domains/<nom>/     UN PHÉNOMÈNE MÉTIER = un sous-package            │
 │ app/pages/             pages transverses                                │
+└─────────────────────────────────────────────────────────────────────────┘
+                                   │ importe (jamais l'inverse)
+                                   ▼
+┌── CORE (racine, mutualisé entre apps, CONFIG-AGNOSTIQUE) ───────────────┐
+│ core/stats/            ensemble.py (stats paramétrées var/seuil/labels) │
+│                        climato.py (formule cosinus)                     │
+│ core/ui/theme.py       thème clair/sombre, CSS, template Plotly         │
+│ core/services/         cooldown.py, github_dispatch.py (paramétrés)     │
+│ core/io/atomic.py      écriture parquet atomique (pour futurs pipelines │
+│                        d'apps — le pipeline canicule garde son inline)  │
+│ core/testing/          harnais de non-régression (wrappers dans tools/) │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,8 +70,12 @@ refactor du dashboard. Le dashboard, lui, peut être réorganisé : les données
 restent intactes.
 
 **Autres emplacements** :
+- `apps/canicule/app/` — emplacement physique du package `app` (voir schéma) ;
+  `apps/snow/` — squelette vide (app/, pipeline/, data/) du futur dashboard
+  neige : ses parquets vivront dans `apps/snow/data/`, jamais dans `data/`.
 - `tools/` — utilitaires hors exploitation : harnais de non-régression
-  (`check_non_regression.py`, `ui_snapshot.py`), `export_project.py` (snapshot
+  (`check_non_regression.py`, `ui_snapshot.py` — wrappers fins de
+  `core/testing/`, mêmes commandes qu'avant), `export_project.py` (snapshot
   texte du code pour analyse externe), `migrate.py` (one-off historique de
   rétro-remplissage xlsx → parquet, conservé comme référence — ne plus lancer,
   passer par l'import ciblé du dashboard).
@@ -66,6 +85,13 @@ restent intactes.
   (gitignoré : locales + OneDrive, jamais poussées sur GitHub).
 
 ## Carte des modules du dashboard
+
+Le package `app` vit dans `apps/canicule/app/` mais s'importe toujours
+`from app...` (chemin exposé par `meteo_app.py`, les harnais et `tests/`).
+`app/stats/ensemble.py`, `app/stats/climato.py`, `app/services/github_dispatch.py`
+sont des ADAPTATEURS : signatures historiques conservées, calculs délégués à
+`core/` (qui reçoit var/seuil/labels/chemins en paramètres). `app/ui/theme.py`
+et `app/services/cooldown.py` sont de purs ré-exports de `core/`.
 
 | Module | Responsabilité | Fonctions clés |
 |---|---|---|
@@ -94,8 +120,11 @@ restent intactes.
 | `app/pages/pipeline.py` | Lancer le pipeline (local), import legacy, log croisé | `page_run` |
 
 **Sens des dépendances** (jamais l'inverse) :
-`runtime` ← `data/db` ← `stats` ← `data/runsets` ← {`ui/charts`, `pages`, `domains`}.
-`config.py` est importable partout ; `pages`/`domains` n'importent jamais entre eux.
+`core` ← `runtime` ← `data/db` ← `stats` ← `data/runsets` ← {`ui/charts`, `pages`, `domains`}.
+`config.py` est importable partout dans `app/` — mais JAMAIS dans `core/`
+(config-agnostique : les réglages arrivent en paramètres via les adaptateurs) ;
+`pages`/`domains` n'importent jamais entre eux ; le pipeline racine n'importe
+jamais `core/`.
 
 ## Flux de données (dashboard)
 
@@ -154,7 +183,9 @@ temporelle). Correspondance code :
 
 ## Non-régression — comment vérifier
 
-Deux harnais en lecture seule, à exécuter depuis la racine (Anaconda Python) :
+Deux harnais en lecture seule, à exécuter depuis la racine (`.venv` du repo) —
+le code vit dans `core/testing/`, les commandes passent par les wrappers
+`tools/` inchangés :
 
 ```
 python tools/check_non_regression.py capture   # AVANT une modification : fige la référence

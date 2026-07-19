@@ -14,6 +14,14 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.2.0] - 2026-07-19
+- Page Observations — stations Météo-France des Alpes du Nord (DPPaquetObs
+  département 74) : Combloux / Mont d'Arbois / Aiguille du Midi en référence,
+  Chamonix / Annecy-Meythet en appoint. Pipeline `fetch_observations.py`
+  (mécanique générique `core/pipeline/observations.py`, identifiants vérifiés
+  contre le paquet API réel), cartes temps réel, iso 0 °C observée, comparaison
+  inter-stations, Tx/Tn des jours révolus, job CI horaire `fetch-snow-obs`.
+
 ## [0.1.0] - 2026-07-19
 - Squelette initial du dashboard neige : pipeline ensemble + maille fine,
   pages Vue d'ensemble / Explorer un run / Convergence, entrée `snow_app.py`,

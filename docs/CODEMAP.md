@@ -89,7 +89,12 @@ restent intactes.
   top-level `app`, afin que les deux cohabitent dans un même processus.
   Parquets dans `apps/snow/data/`, jamais dans `data/` (réservé canicule/Paris). Job CI
   unique `fetch-snow` (run_forecast.yml, cron 2 h à :35, flux relançables
-  isolément via workflow_dispatch snow-ensemble/snow-hd). Versioning séparé :
+  isolément via workflow_dispatch snow-ensemble/snow-hd). S'y ajoutent :
+  `pipeline/fetch_observations.py` (observations Météo-France Alpes du Nord,
+  DPPaquetObs dept 74 → `data/db_obs_alpes.parquet`, mécanique générique
+  `core/pipeline/observations.py`, domaine `domains/observations/`, job CI
+  horaire `fetch-snow-obs` à :30).
+  Versioning séparé :
   `SNOW_APP_VERSION` dans `snow_app.py`, changelog `apps/snow/docs/CHANGELOG.md`,
   tags `snow-vX.Y`.
 - `tools/` — utilitaires hors exploitation : harnais de non-régression

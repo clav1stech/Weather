@@ -14,6 +14,13 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.8] - 2026-07-20
+- `core/stats/ensemble.py` (`model_data`/`model_medians`, mutualisé avec le
+  canicule) : ne crashe plus quand un modèle n'a aucune valeur (ou pas la
+  colonne) pour la variable tracée — dégradation silencieuse au lieu d'une
+  exception, utile aux pivots croisant des sources aux schémas inégaux
+  (ex. flux PE-ARPEGE).
+
 ## [0.4.7] - 2026-07-20
 - PE-ARPEGE : le backend WCS alterne de façon erratique 200/400/502 sur des
   appels strictement identiques (jusqu'à 4 échecs 400 consécutifs constatés

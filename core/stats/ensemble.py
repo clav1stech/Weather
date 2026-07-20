@@ -82,9 +82,11 @@ def model_data(sub, model, var):
     stats : valid_time + median/p10/p90 (sur tous les membres, contrôle inclus).
     """
     s = sub[sub["model"] == model]
-    if s.empty:
+    if s.empty or var not in s.columns:
         return None
     piv = s.pivot_table(index="valid_time", columns="member", values=var).sort_index()
+    if piv.empty:
+        return None
     det = piv[0] if 0 in piv.columns else None
     members = piv.drop(columns=[0], errors="ignore")
     stats = pd.DataFrame({"valid_time": piv.index})
@@ -102,7 +104,9 @@ def model_medians(sub, var, model_labels):
         if s.empty:
             continue
         piv = s.pivot_table(index="valid_time", columns="member", values=var).sort_index()
-        meds[model] = piv.median(axis=1)
+        med = piv.median(axis=1)
+        if med.notna().any():
+            meds[model] = med
     if not meds:
         return None
     return pd.concat(meds, axis=1).sort_index()

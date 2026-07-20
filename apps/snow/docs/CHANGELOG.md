@@ -14,6 +14,14 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.4] - 2026-07-20
+- Collecteur AROME-IFS Météo-France direct : pluie et neige horaires plus
+  température aux sites village/sommet de H+1 à H+45, quota respecté,
+  archivage local commun et synthèse historique.
+- Hiérarchie courte échéance sans double comptage : AROME-PI prioritaire
+  sur six heures, puis AROME-IFS, puis AROME France/ICON-D2 via Open-Meteo en
+  comparaison ou repli. Workflow et page pipeline étendus au septième flux.
+
 ## [0.4.3] - 2026-07-20
 - Page locale « Lancer le pipeline neige » étendue aux six collectes
   actives, regroupées par rôle et accompagnées de leur modèle, source et

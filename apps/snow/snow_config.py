@@ -179,7 +179,7 @@ PE_AROME_MODEL = "PE-AROME"
 MF_LOCAL_MODELS = (AROME_PI_MODEL, AROME_IFS_MODEL, PE_AROME_MODEL)
 MF_LOCAL_API_KEY_ENVS = {
     AROME_PI_MODEL: "METEOFRANCE_AROME_PI_KEY",
-    AROME_IFS_MODEL: "METEOFRANCE_AROME_IFS_KEY",
+    AROME_IFS_MODEL: "METEOFRANCE_AROME_KEY",
     PE_AROME_MODEL: "METEOFRANCE_AROME_PE_KEY",
 }
 AROME_PI_HORIZON_H = 6
@@ -193,6 +193,20 @@ AROME_PI_PRODUCTS = {
     "precip": ("TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE", "PT1H"),
     "neige_eau": ("TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE", "PT1H"),
     "ptype": ("PRECIPITATION_TYPE_15_MIN__GROUND_OR_WATER_SURFACE", None),
+    "t2m": ("TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND", None),
+}
+AROME_IFS_HORIZON_H = 45
+AROME_IFS_STEPS_S = tuple(range(3_600, AROME_IFS_HORIZON_H * 3_600 + 1, 3_600))
+AROME_IFS_REQUEST_INTERVAL_S = 1.3       # quota API AROME : 50 requêtes/min
+AROME_IFS_WCS_URL = (
+    "https://public-api.meteofrance.fr/public/arome/wcs/"
+    "MF-NWP-HIGHRES-AROMEIFS-0025-FRANCE-WCS/{operation}"
+)
+# Total et neige directs suffisent à diagnostiquer la phase ; redemander le
+# code ptype sur 45 échéances consommerait 45 appels sans modifier le verdict.
+AROME_IFS_PRODUCTS = {
+    "precip": ("TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE", "PT1H"),
+    "neige_eau": ("TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE", "PT1H"),
     "t2m": ("TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND", None),
 }
 PE_AROME_MEMBER_COUNT = 25                 # contrôle 000 + 24 perturbations

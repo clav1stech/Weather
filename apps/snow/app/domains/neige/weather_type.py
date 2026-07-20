@@ -55,6 +55,11 @@ PRECIP_BRUIT_MM_HEURE = 0.1
 # trois heures laissent une marge de publication sans masquer une panne.
 # Valeur à affiner in situ au fil de la saison avec la disponibilité réelle.
 AROME_PI_AGE_MAX_H = 3.0
+# AROME-IFS est produit toutes les six heures et disponible plus tardivement.
+# Neuf heures couvrent publication + polling 2 h sans laisser un vieux cycle
+# masquer durablement AROME France/ICON-D2. À affiner in situ sur les heures de
+# mise à disposition observées pendant la saison.
+AROME_IFS_AGE_MAX_H = 9.0
 
 # La phase directe d'AROME-PI est qualifiée par la part de neige dans le cumul
 # total. Entre 40 et 60 %, la précipitation reste explicitement mixte : une
@@ -318,8 +323,9 @@ def hd_vertical_hourly_profile(hd_df, now=None):
     return VerticalProfileResult(hourly[columns], True)
 
 
-def arome_pi_vertical_hourly_profile(pi_df, now=None):
-    """Profil H+1–H+6 fondé sur la phase microphysique directe d'AROME-PI.
+def _direct_mf_vertical_hourly_profile(
+        source_df, *, model, horizon_h, age_max_h, label, now=None):
+    """Profil d'un AROME direct fondé sur ses cumuls total et neige.
 
     Les cumuls total et neige sont interpolés séparément entre village et
     sommet, puis maintenus constants au-dessus du sommet : une extrapolation
@@ -331,36 +337,36 @@ def arome_pi_vertical_hourly_profile(pi_df, now=None):
                "unite", "phase", "neige_cm", "pluie_mm", "t2m_c",
                "precip_mm", "lpn_m", "iso0_m", "n_modeles", "source"]
     empty = pd.DataFrame(columns=columns)
-    if pi_df is None or pi_df.empty:
-        return VerticalProfileResult(empty, False, "AROME-PI indisponible.")
+    if source_df is None or source_df.empty:
+        return VerticalProfileResult(empty, False, f"{label} indisponible.")
     required = {"run_date", "model", "kind", "site", "valid_time",
                 "precip", "neige_eau", "t2m"}
-    missing = sorted(required - set(pi_df.columns))
+    missing = sorted(required - set(source_df.columns))
     if missing:
         return VerticalProfileResult(
-            empty, False, f"Variables AROME-PI absentes : {', '.join(missing)}.")
+            empty, False, f"Variables {label} absentes : {', '.join(missing)}.")
 
     now = pd.Timestamp(now or pd.Timestamp.now())
-    pi = pi_df[(pi_df["model"] == SC.AROME_PI_MODEL)
-               & (pi_df["kind"] == "deterministic")].copy()
-    if pi.empty:
-        return VerticalProfileResult(empty, False, "Cycle AROME-PI absent.")
-    run_date = pd.to_datetime(pi["run_date"]).max()
+    direct = source_df[(source_df["model"] == model)
+                       & (source_df["kind"] == "deterministic")].copy()
+    if direct.empty:
+        return VerticalProfileResult(empty, False, f"Cycle {label} absent.")
+    run_date = pd.to_datetime(direct["run_date"]).max()
     age_h = (now - run_date) / pd.Timedelta(hours=1)
-    if age_h > AROME_PI_AGE_MAX_H:
+    if age_h > age_max_h:
         return VerticalProfileResult(
             empty, False,
-            f"AROME-PI trop ancien ({age_h:.1f} h) : priorité locale désactivée.")
-    pi = pi[(pd.to_datetime(pi["run_date"]) == run_date)
-            & (pd.to_datetime(pi["valid_time"]) >= now)
-            & (pd.to_datetime(pi["valid_time"])
-               <= now + pd.Timedelta(hours=SC.AROME_PI_HORIZON_H))]
-    if pi.empty:
+            f"{label} trop ancien ({age_h:.1f} h) : priorité locale désactivée.")
+    direct = direct[(pd.to_datetime(direct["run_date"]) == run_date)
+                    & (pd.to_datetime(direct["valid_time"]) >= now)
+                    & (pd.to_datetime(direct["valid_time"])
+                       <= now + pd.Timedelta(hours=horizon_h))]
+    if direct.empty:
         return VerticalProfileResult(
-            empty, False, "Aucune échéance AROME-PI future dans les six heures.")
+            empty, False, f"Aucune échéance {label} future disponible.")
 
     rows = []
-    for valid_time, group in pi.groupby("valid_time"):
+    for valid_time, group in direct.groupby("valid_time"):
         village_rows = group[group["site"] == "village"]
         sommet_rows = group[group["site"] == "sommet"]
         if village_rows.empty or sommet_rows.empty:
@@ -404,11 +410,11 @@ def arome_pi_vertical_hourly_profile(pi_df, now=None):
                 "unite": unit, "phase": phase, "neige_cm": snow_cm,
                 "pluie_mm": rain, "t2m_c": temp.get(float(altitude), np.nan),
                 "precip_mm": total, "lpn_m": np.nan, "iso0_m": np.nan,
-                "n_modeles": 1, "source": "AROME-PI",
+                "n_modeles": 1, "source": label,
             })
     if not rows:
         return VerticalProfileResult(
-            empty, False, "AROME-PI incomplet aux deux altitudes de référence.")
+            empty, False, f"{label} incomplet aux deux altitudes de référence.")
     hourly = pd.DataFrame(rows)
     hourly["date"] = pd.to_datetime(hourly["valid_time"]).dt.normalize()
     hourly["lead_h"] = ((hourly["valid_time"] - now)
@@ -416,12 +422,26 @@ def arome_pi_vertical_hourly_profile(pi_df, now=None):
     return VerticalProfileResult(hourly[columns], True)
 
 
-def combine_vertical_hourly_profiles(hd_profile, pi_profile):
-    """Remplace les seules heures HD couvertes par AROME-PI, sans doublon.
+def arome_pi_vertical_hourly_profile(pi_df, now=None):
+    """Profil AROME-PI H+1–H+6, prioritaire sur toute autre source."""
+    return _direct_mf_vertical_hourly_profile(
+        pi_df, model=SC.AROME_PI_MODEL, horizon_h=SC.AROME_PI_HORIZON_H,
+        age_max_h=AROME_PI_AGE_MAX_H, label=SC.AROME_PI_MODEL, now=now)
 
-    Une ligne PI prend priorité pour le même couple heure/altitude. Les
-    heures HD non couvertes restent intactes jusqu'à H+48 ; si le flux HD est
-    indisponible, les six heures PI restent affichables seules.
+
+def arome_ifs_vertical_hourly_profile(ifs_df, now=None):
+    """Profil AROME-IFS H+1–H+45, prioritaire sur la maille Open-Meteo."""
+    return _direct_mf_vertical_hourly_profile(
+        ifs_df, model=SC.AROME_IFS_MODEL, horizon_h=SC.AROME_IFS_HORIZON_H,
+        age_max_h=AROME_IFS_AGE_MAX_H, label=SC.AROME_IFS_MODEL, now=now)
+
+
+def combine_vertical_hourly_profiles(hd_profile, pi_profile):
+    """Superpose un profil prioritaire au profil de repli, sans doublon.
+
+    Une ligne du second argument prend priorité pour le même couple
+    heure/altitude. Cela permet d'appliquer successivement IFS sur la maille
+    Open-Meteo, puis PI sur IFS, sans moyenner deux scénarios déterministes.
     """
     hd = pd.DataFrame() if hd_profile is None else hd_profile.copy()
     pi = pd.DataFrame() if pi_profile is None else pi_profile.copy()

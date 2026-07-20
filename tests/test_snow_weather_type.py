@@ -11,6 +11,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 from apps.snow.app.domains.neige import weather_type as WT  # noqa: E402
+from apps.snow import snow_config as SC  # noqa: E402
 
 
 NOW = pd.Timestamp("2026-01-10 00:00")
@@ -292,6 +293,34 @@ def test_arome_pi_trop_ancien_ne_remplace_jamais_la_maille_fine():
     result = WT.arome_pi_vertical_hourly_profile(old, now=NOW)
     assert not result.available
     assert "trop ancien" in result.reason
+
+
+def test_arome_ifs_reutilise_la_phase_directe_sans_double_compter_arome():
+    source = _arome_pi_transition_profile()
+    source["model"] = SC.AROME_IFS_MODEL
+    result = WT.arome_ifs_vertical_hourly_profile(source, now=NOW)
+
+    assert result.available
+    assert set(result.daily["source"]) == {SC.AROME_IFS_MODEL}
+    profile = result.daily.set_index("altitude_m")
+    assert profile.loc[1100, "phase"] == "pluie"
+    assert profile.loc[1300, "phase"] == "mixte"
+    assert profile.loc[1600, "phase"] == "neige"
+
+
+def test_priorite_horaire_est_hd_puis_ifs_puis_pi():
+    hd = WT.hd_vertical_hourly_profile(_hd_transition_profile(), now=NOW)
+    ifs_source = _arome_pi_transition_profile()
+    ifs_source["model"] = SC.AROME_IFS_MODEL
+    ifs = WT.arome_ifs_vertical_hourly_profile(ifs_source, now=NOW)
+    pi = WT.arome_pi_vertical_hourly_profile(
+        _arome_pi_transition_profile(), now=NOW)
+
+    with_ifs = WT.combine_vertical_hourly_profiles(hd.daily, ifs.daily)
+    combined = WT.combine_vertical_hourly_profiles(with_ifs, pi.daily)
+
+    assert set(with_ifs["source"]) == {SC.AROME_IFS_MODEL}
+    assert set(combined["source"]) == {SC.AROME_PI_MODEL}
 
 
 def test_fusion_horaire_remplace_seulement_les_heures_couvertes_par_pi():

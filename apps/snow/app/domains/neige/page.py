@@ -152,9 +152,14 @@ def page_neige(runs, sig):
     hd_profile = weather_type.hd_vertical_hourly_profile(hd_df)
     mf_sig = mf_local_signature()
     pi_df = latest_mf_local_deterministic(mf_sig, SC.AROME_PI_MODEL)
+    ifs_df = latest_mf_local_deterministic(mf_sig, SC.AROME_IFS_MODEL)
     pi_profile = weather_type.arome_pi_vertical_hourly_profile(pi_df)
+    ifs_profile = weather_type.arome_ifs_vertical_hourly_profile(ifs_df)
     combined = weather_type.combine_vertical_hourly_profiles(
         hd_profile.daily if hd_profile.available else pd.DataFrame(),
+        ifs_profile.daily if ifs_profile.available else pd.DataFrame())
+    combined = weather_type.combine_vertical_hourly_profiles(
+        combined,
         pi_profile.daily if pi_profile.available else pd.DataFrame())
     profile = weather_type.VerticalProfileResult(
         combined, not combined.empty,
@@ -172,13 +177,22 @@ def page_neige(runs, sig):
             st.caption(
                 f"🏔️ AROME-PI {run_label_text(pi_run)} prioritaire sur ses "
                 "six heures : phase issue directement des cumuls total/neige. "
-                "La maille fine HD prend ensuite le relais jusqu'à 48 h.")
+                "AROME-IFS prend ensuite le relais lorsqu'il est disponible.")
         else:
-            st.caption(f"⚠️ {pi_profile.reason} Repli explicite sur la maille "
-                       "fine HD, sans substitution cachée.")
+            st.caption(f"⚠️ {pi_profile.reason} Aucune priorité PI cachée.")
+        if ifs_profile.available:
+            ifs_run = pd.to_datetime(ifs_df["run_date"]).max()
+            st.caption(
+                f"🇫🇷 AROME-IFS {run_label_text(ifs_run)} prioritaire jusqu'à "
+                "son H+45 hors heures PI : cumuls total/neige directs. "
+                "AROME France/ICON-D2 via Open-Meteo ne comblent que les "
+                "heures absentes, sans double comptage.")
+        else:
+            st.caption(f"⚠️ {ifs_profile.reason} Repli explicite sur AROME "
+                       "France/ICON-D2 via Open-Meteo.")
         st.caption(f"La phase utilise toujours la LPN (iso 0 °C − "
                    f"{weather_type.LPN_MARGE_HD_M:.0f} m), sans tracer LPN/iso 0 "
-                   "sur l'axe des altitudes, sauf sur AROME-PI qui fournit "
+                   "sur l'axe des altitudes, sauf sur AROME-PI/IFS qui fournissent "
                    "directement les cumuls pluie/neige. Le premier et le dernier jour "
                    "peuvent être partiels car la fenêtre est glissante sur 48 h.")
     else:

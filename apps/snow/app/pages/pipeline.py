@@ -30,12 +30,14 @@ MF_FORECAST_ENTRIES = [
     ("PE-AROME 25 membres", "apps/snow/pipeline/fetch_pe_arome.py", 360),
     ("PE-ARPEGE 35 membres", "apps/snow/pipeline/fetch_pe_arpege.py", 600),
     ("AROME-PI H+1 à H+6", "apps/snow/pipeline/fetch_arome_pi.py", 240),
+    ("AROME-IFS H+1 à H+45", "apps/snow/pipeline/fetch_arome_ifs.py", 360),
 ]
 ACTIVE_FETCH_ENTRIES = [
     FETCH_ENTRIES[0],
     MF_FORECAST_ENTRIES[0],
     MF_FORECAST_ENTRIES[1],
     MF_FORECAST_ENTRIES[2],
+    MF_FORECAST_ENTRIES[3],
     FETCH_ENTRIES[1],
     FETCH_ENTRIES[2],
 ]
@@ -66,7 +68,7 @@ def page_run(runs, sig):
     st.success("💻 Exécution locale détectée — les boutons lancent les scripts "
                "dans des sous-processus Python locaux.")
     st.caption("Chaque flux conserve son stockage dédié. Le lancement complet "
-               "enchaîne les six collectes actives sans fusion opaque entre modèles.")
+               "enchaîne les sept collectes actives sans fusion opaque entre modèles.")
     allowed, remaining = cooldown.can(COOLDOWN_PATH, COOLDOWN_S)
     if not allowed:
         st.caption(f"⏳ Nouveau lancement disponible dans {remaining:.0f} s.")
@@ -75,8 +77,10 @@ def page_run(runs, sig):
         ("🏔️ Très courte échéance et maille fine", [
             ("AROME-PI", "Météo-France PNT · horaire H+1 à H+6 · "
              "pluie/neige directe aux sites village et sommet.", 3),
+            ("AROME-IFS", "Météo-France PNT · horaire H+1 à H+45 · "
+             "AROME initialisé et couplé par IFS/ECMWF.", 4),
             ("AROME HD + ICON-D2", "Open-Meteo · maille fine horaire jusqu'à "
-             "48 h · coupe verticale village/sommet.", 4),
+             "48 h · comparaison/repli sans double comptage.", 5),
         ]),
         ("🎯 Ensembles régionaux", [
             ("PE-AROME", "Météo-France PNT · 25 membres · cumuls pluie/"
@@ -88,7 +92,7 @@ def page_run(runs, sig):
             ("ECMWF ENS · AIFS · GEFS", "Open-Meteo · membres bruts, "
              "moyenne et dispersion · masse d'air jusqu'à J+15.", 0),
             ("Stations Alpes du Nord", "API observations Météo-France · "
-             "département 74.", 5),
+             "département 74.", 6),
         ]),
     ]
     card_pos = 0
@@ -105,10 +109,7 @@ def page_run(runs, sig):
                     _launch([ACTIVE_FETCH_ENTRIES[entry_index]])
             card_pos += 1
 
-    st.info("ℹ️ AROME-IFS déterministe 45 h est préparé dans le schéma, "
-            "mais son collecteur reste désactivé tant que l'accès WCS "
-            "Météo-France renvoie 403. Il n'alimente donc pas encore les vues.")
-    if st.button("▶️ Lancer les 6 collectes actives", type="primary",
+    if st.button("▶️ Lancer les 7 collectes actives", type="primary",
                  disabled=not allowed, key="snow_pipeline_fetch_all"):
         _launch(ACTIVE_FETCH_ENTRIES)
 

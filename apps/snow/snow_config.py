@@ -237,6 +237,13 @@ PE_ARPEGE_ALLOWED_RUN_HOURS = (0, 12)
 PE_ARPEGE_DISCOVERY_MEMBERS = (0, 1)
 PE_ARPEGE_DAILY_STEPS_S = (86_400, 172_800, 259_200, 345_600)
 PE_ARPEGE_REQUEST_INTERVAL_S = 0.2         # < 400 req/min, transfert dominant
+# La requête ne porte que sur quelques mailles autour de Megève. La borne de
+# taille empêche une évolution du WCS de réintroduire silencieusement les
+# grilles Europe complètes (environ 0,8 Mo par champ, 280 champs par cycle).
+PE_ARPEGE_SPATIAL_MARGIN_DEG = 0.10
+PE_ARPEGE_MAX_GRIB_BYTES = 10_000
+PE_ARPEGE_COVERAGE_ATTEMPTS = 3
+PE_ARPEGE_COVERAGE_RETRY_DELAY_S = 1.0
 PE_ARPEGE_WCS_URL_TPL = (
     "https://public-api.meteofrance.fr/public/pearpege/wcs/"
     "MF-NWP-GLOBAL-PEARP{member:03d}-01-EUROPE-WCS/{operation}"

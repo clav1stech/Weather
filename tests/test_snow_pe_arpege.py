@@ -102,18 +102,18 @@ def test_discover_cycle_waits_for_perturbations_lagging_control(monkeypatch):
     assert all("T00.00.00Z" in coverage for coverage in selected.values())
 
 
-def test_fetch_uses_full_europe_grid_without_forbidden_spatial_subset(
+def test_fetch_requests_only_local_grid_with_required_lat_long_order(
         monkeypatch):
     calls = []
 
     def fake_get_coverage(*args, **kwargs):
         calls.append(kwargs)
-        return kwargs["time_value"]
+        return b"GRIB"
 
     monkeypatch.setattr(PE.WCS, "get_coverage", fake_get_coverage)
     monkeypatch.setattr(
         PE.WCS, "decode_nearest_point",
-        lambda step, *_args: _point(1.0, step))
+        lambda _payload, *_args: _point(1.0, calls[-1]["time_value"]))
     coverages = {column: f"coverage-{column}"
                  for column in SC.PE_ARPEGE_PRODUCTS}
 
@@ -124,4 +124,38 @@ def test_fetch_uses_full_europe_grid_without_forbidden_spatial_subset(
     assert len(calls) == (SC.PE_ARPEGE_MEMBER_COUNT
                           * len(SC.PE_ARPEGE_DAILY_STEPS_S)
                           * len(SC.PE_ARPEGE_PRODUCTS))
-    assert all(call["subsets"] == () for call in calls)
+    expected = PE._spatial_subsets()
+    assert expected == ("lat(45.8,46.0)", "long(6.5,6.7)")
+    assert all(call["subsets"] == expected for call in calls)
+
+
+def test_fetch_refuses_a_full_europe_grid(monkeypatch):
+    monkeypatch.setattr(
+        PE.WCS, "get_coverage",
+        lambda *_args, **_kwargs: b"GRIB" + b"x" * SC.PE_ARPEGE_MAX_GRIB_BYTES)
+    coverages = {column: f"coverage-{column}"
+                 for column in SC.PE_ARPEGE_PRODUCTS}
+
+    with pytest.raises(ValueError, match="anormalement volumineux"):
+        PE.fetch_candidate(
+            object(), "secret", RUN, coverages, sleep_fn=lambda _delay: None)
+
+
+def test_local_coverage_retries_a_transient_backend_400(monkeypatch):
+    calls = []
+
+    def flaky(*_args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("Erreur HTTP WCS 400 après 1 tentative(s).")
+        return b"GRIB"
+
+    monkeypatch.setattr(PE.WCS, "get_coverage", flaky)
+    payload = PE._get_local_coverage(
+        object(), "secret", 0, "coverage", 86_400,
+        sleep_fn=lambda _delay: None)
+
+    assert payload == b"GRIB"
+    assert len(calls) == 2
+    assert all(call["attempts"] == 1 for call in calls)
+    assert all(call["subsets"] == PE._spatial_subsets() for call in calls)

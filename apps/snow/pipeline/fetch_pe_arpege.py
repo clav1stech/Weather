@@ -8,10 +8,11 @@ membres, le collecteur extrait le total et la neige des fenêtres P1D finissant
 par les ensembles globaux déjà collectés ; les dupliquer ici multiplierait les
 requêtes WCS sans améliorer la classification locale.
 
-Le WCS PE-ARPEGE interdit officiellement tout sous-ensemble ``lat/long`` :
-chaque champ Europe 0,1° complet est donc décodé en mémoire, la cellule la
-plus proche de Megève est extraite, puis le GRIB est immédiatement libéré sans
-jamais être archivé. Un cycle incomplet ne modifie jamais la base.
+Le WCS PE-ARPEGE est sensible à l'ordre des axes : ``lat`` doit impérativement
+précéder ``long``. L'ordre inverse est refusé et l'absence de sous-ensemble
+renverrait une grille Europe complète. Chaque requête reste donc limitée à
+quelques mailles autour de Megève et sa taille est contrôlée avant décodage.
+Un cycle incomplet ne modifie jamais la base.
 """
 
 import datetime as dt
@@ -41,6 +42,55 @@ _MM_UNITS = {"kg m-2", "kg m**-2", "kg m^-2", "mm"}
 def _url(member, operation):
     return SC.PE_ARPEGE_WCS_URL_TPL.format(
         member=int(member), operation=operation)
+
+
+def _spatial_subsets():
+    """Petite emprise locale, dans l'ordre strict exigé par ce WCS.
+
+    Bien que le coverage annonce les axes ``long lat``, l'API retourne HTTP
+    400 si ``long`` est envoyé en premier. Ce comportement contre-intuitif est
+    verrouillé ici afin de ne jamais retomber sur une grille Europe complète.
+    """
+    margin = SC.PE_ARPEGE_SPATIAL_MARGIN_DEG
+    # Les bornes doivent aussi tomber exactement sur la grille 0,1°. Des
+    # coordonnées plus précises sont rejetées par certains produits alors que
+    # la même emprise arrondie est acceptée.
+    cell_lat = round(float(SITE["lat"]), 1)
+    cell_lon = round(float(SITE["lon"]), 1)
+    return (
+        f"lat({cell_lat - margin:.1f},{cell_lat + margin:.1f})",
+        f"long({cell_lon - margin:.1f},{cell_lon + margin:.1f})",
+    )
+
+
+def _reject_oversized_grib(payload):
+    """Refuse un champ incompatible avec l'extraction locale attendue."""
+    if len(payload) > SC.PE_ARPEGE_MAX_GRIB_BYTES:
+        raise ValueError(
+            "Champ PE-ARPEGE anormalement volumineux "
+            f"({len(payload):,} octets) : extraction locale non appliquée.")
+
+
+def _get_local_coverage(session, key, member, coverage_id, step_s,
+                        sleep_fn=time.sleep):
+    """Lit une petite coupe et absorbe les HTTP 400 transitoires du backend.
+
+    Le même appel spatial peut être refusé puis accepté sans changement de
+    paramètres pendant la rotation du service. Seul ce 400 identifié est
+    retenté ; toute autre erreur reste immédiate et un 400 persistant échoue.
+    """
+    for attempt in range(SC.PE_ARPEGE_COVERAGE_ATTEMPTS):
+        try:
+            return WCS.get_coverage(
+                session, _url(member, "GetCoverage"), key=key,
+                coverage_id=coverage_id, time_value=step_s,
+                subsets=_spatial_subsets(), timeout=SC.HTTP_TIMEOUT,
+                attempts=1)
+        except RuntimeError as exc:
+            retryable = "HTTP WCS 400" in str(exc)
+            if not retryable or attempt + 1 >= SC.PE_ARPEGE_COVERAGE_ATTEMPTS:
+                raise
+            sleep_fn(SC.PE_ARPEGE_COVERAGE_RETRY_DELAY_S)
 
 
 def _coverages_by_run(ids, product):
@@ -171,7 +221,7 @@ def is_complete_in_store(existing, run_date):
 
 
 def fetch_candidate(session, key, run_date, coverages, sleep_fn=time.sleep):
-    """Télécharge 280 grilles Europe, sans sous-ensemble spatial interdit."""
+    """Télécharge les seuls champs pluie/neige, sur l'emprise de Megève."""
     points = {}
     requests_left = (SC.PE_ARPEGE_MEMBER_COUNT
                      * len(SC.PE_ARPEGE_DAILY_STEPS_S)
@@ -180,14 +230,14 @@ def fetch_candidate(session, key, run_date, coverages, sleep_fn=time.sleep):
         for step_s in SC.PE_ARPEGE_DAILY_STEPS_S:
             for column, coverage_id in coverages.items():
                 try:
-                    payload = WCS.get_coverage(
-                        session, _url(member, "GetCoverage"), key=key,
-                        coverage_id=coverage_id, time_value=step_s,
-                        subsets=(), timeout=SC.HTTP_TIMEOUT)
+                    payload = _get_local_coverage(
+                        session, key, member, coverage_id, step_s,
+                        sleep_fn=sleep_fn)
                 except RuntimeError as exc:
                     raise RuntimeError(
                         f"PE-ARPEGE membre {member:02d}, {column}, "
                         f"H+{step_s // 3600} : {exc}") from exc
+                _reject_oversized_grib(payload)
                 points[(member, step_s, column)] = WCS.decode_nearest_point(
                     payload, SITE["lat"], SITE["lon"])
                 requests_left -= 1

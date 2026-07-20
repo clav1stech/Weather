@@ -14,6 +14,12 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.6] - 2026-07-20
+- PE-ARPEGE ne télécharge plus les grilles Europe complètes : seules les
+  petites coupes pluie/neige autour de Megève sont demandées, avec l'ordre
+  WCS `lat` puis `long`, des bornes alignées à 0,1°, des retries bornés sur les
+  refus transitoires du backend et un garde-fou de taille.
+
 ## [0.4.5] - 2026-07-20
 - PE-ARPEGE utilise désormais le WCS Europe 0,1°, compatible avec l'extraction
   locale après décodage en mémoire des grilles complètes (le service interdit

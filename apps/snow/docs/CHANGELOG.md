@@ -14,6 +14,12 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.1] - 2026-07-20
+- Collecteurs WCS Météo-France pour AROME-PI et PE-AROME : décodage GRIB
+  direct en mémoire, contrôle de complétude et no-op sur cycle inchangé.
+- Archive historique compacte des moyennes par cycle/modèle/site/échéance,
+  sans remplacer les membres bruts HOT/COLD nécessaires au recalibrage.
+
 ## [0.4.0] - 2026-07-20
 - Vue d'ensemble neige : coupe verticale horaire pluie/neige/sec/mixte aux
   quatre altitudes et bilan quotidien cm/mm ; la LPN pilote le flux HD tandis

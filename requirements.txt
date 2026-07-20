@@ -4,6 +4,7 @@ pandas
 numpy
 requests
 pyarrow
+eccodes
 matplotlib
 beautifulsoup4
 openpyxl

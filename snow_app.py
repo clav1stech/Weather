@@ -32,7 +32,7 @@ from apps.snow.app.pages.pipeline import page_run
 from apps.snow.app.runtime import IS_LOCAL
 from apps.snow.app.ui.theme import GLOBAL_CSS
 
-SNOW_APP_VERSION = "0.4.2"
+SNOW_APP_VERSION = "0.4.3"
 
 st.set_page_config(page_title="Dashboard Neige — Megève",
                    page_icon="🏔️", layout="wide")
@@ -68,9 +68,18 @@ def main():
         st.cache_data.clear()
         st.rerun()
     st.sidebar.markdown("---")
-    st.sidebar.markdown("<small>🕐 **Mise à jour automatique** toutes les 2 h "
-                        "via Open-Meteo — membres + moyenne/spread d'ensemble "
-                        "(ECMWF · AIFS · GEFS), maille fine AROME HD/ICON-D2<br>"
+    st.sidebar.markdown("<small><b>Modèles et sources</b><br>"
+                        "🇫🇷 <b>Météo-France PNT</b><br>"
+                        "AROME-PI (H+1–H+6)<br>"
+                        "PE-AROME · 25 membres (H+48)<br>"
+                        "PE-ARPEGE · 35 membres (H+96)<br><br>"
+                        "🌐 <b>Open-Meteo</b><br>"
+                        "AROME France HD · ICON-D2 (48 h)<br>"
+                        "ECMWF ENS · AIFS · GEFS (J+15)<br><br>"
+                        "🛰️ <b>Observations</b><br>"
+                        "API Météo-France · stations 74<br><br>"
+                        "🕐 Actualisation automatique toutes les 2 h<br>"
+                        "AROME-IFS 45 h : accès en attente<br>"
                         f"Version {SNOW_APP_VERSION}</small>",
                         unsafe_allow_html=True)
 

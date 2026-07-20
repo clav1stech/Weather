@@ -14,6 +14,13 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.3] - 2026-07-20
+- Page locale « Lancer le pipeline neige » étendue aux six collectes
+  actives, regroupées par rôle et accompagnées de leur modèle, source et
+  horizon ; AROME-IFS reste explicitement signalé comme non collecté.
+- Barre latérale enrichie avec les sources Météo-France PNT, Open-Meteo et
+  observations, ainsi que les modèles et horizons effectivement utilisés.
+
 ## [0.4.2] - 2026-07-20
 - PE-ARPEGE : 35 membres sur les cycles complets 00/12Z, cumuls journaliers
   H24/H48/H72/H96, priorité de relais après PE-AROME et tests de cycle.

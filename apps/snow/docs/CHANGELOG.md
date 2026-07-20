@@ -14,6 +14,14 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.0] - 2026-07-20
+- Vue d'ensemble neige : coupe verticale horaire pluie/neige/sec/mixte aux
+  quatre altitudes et bilan quotidien cm/mm ; la LPN pilote le flux HD tandis
+  qu'AROME-PI peut fournir une phase directe lorsqu'il est disponible.
+- Classification par membre pondérée sur J0–J+15, avec zone mixte explicite,
+  précipitation au village et seuils centralisés dans `weather_type.py`, à
+  affiner in situ au fil de la saison.
+
 ## [0.3.3] - 2026-07-19
 - Convergence enrichie : nombre de runs paramétrable, bande mean ± spread
   par modèle, heatmap des révisions sur les pivots météo et mode

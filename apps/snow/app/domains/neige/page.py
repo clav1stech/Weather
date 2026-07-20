@@ -5,16 +5,22 @@ pool = dernier run à horizon plein de chaque modèle (latest_complete_run_sub).
 
 Hiérarchie des signaux par échéance (snow_config.HORIZON_REGIMES) : quantités
 et iso 0° en tête de fenêtre, masse d'air (t850) et régime (pmsl) au-delà.
-Tout signal absent se dégrade en silence (rien d'affiché, jamais d'alerte)."""
+Tout signal météo absent se dégrade sans panne ; l'absence de précipitation,
+qui empêche la classification sec/pluie/neige, est expliquée dans l'interface
+afin qu'un historique ``NaN`` ne soit jamais interprété comme du temps sec."""
 
 import pandas as pd
 import streamlit as st
 
 from apps.snow import snow_config as SC
-from ...data.db import hd_signature, load_hd, run_label_text
+from ...data.db import (hd_signature, latest_mf_local_deterministic,
+                        latest_mf_local_members, latest_mf_regional_members,
+                        load_hd, mf_local_signature, mf_regional_signature,
+                        run_label_text)
 from ...data.runsets import latest_complete_run_sub
-from . import logic
-from .charts import daily_snow_chart, lpn_chart, medians_chart
+from . import logic, weather_type
+from .charts import (daily_snow_chart, lpn_chart, medians_chart,
+                     hourly_vertical_weather_chart, weather_type_chart)
 from core.stats.ensemble import member_matrix
 
 
@@ -24,6 +30,30 @@ def _kpi_prochaine_chute(daily):
     if jours is None or jours.empty:
         return None
     return jours.iloc[0]
+
+
+def _hd_daily_table(summary):
+    """Tableau compact pluie/neige par jour civil et altitude."""
+    if summary is None or summary.empty:
+        return pd.DataFrame()
+    display = summary.copy()
+
+    def _label(row):
+        parts = []
+        if row["pluie_mm"] >= weather_type.PRECIP_BRUIT_MM_HEURE:
+            parts.append(f"🌧️ {row['pluie_mm']:.1f} mm")
+        if row["neige_cm"] >= (weather_type.PRECIP_BRUIT_MM_HEURE
+                               * weather_type.RATIO_NEIGE_CM_PAR_MM):
+            parts.append(f"❄️ {row['neige_cm']:.1f} cm")
+        return " · ".join(parts) if parts else "☀️ sec"
+
+    display["bilan"] = display.apply(_label, axis=1)
+    table = display.pivot(index="altitude_m", columns="date", values="bilan")
+    table = table.sort_index(ascending=False)
+    table.index = [f"{alt:.0f} m" for alt in table.index]
+    table.columns = [f"{pd.Timestamp(date):%a %d %b}" for date in table.columns]
+    table.index.name = "Altitude"
+    return table
 
 
 def page_neige(runs, sig):
@@ -102,7 +132,8 @@ def page_neige(runs, sig):
                       "pression stable sur l'horizon", delta_color="off")
 
     # Appui maille fine (48 h) + contexte synoptique — affichage pur.
-    hd = logic.hd_prochaines_48h(load_hd(hd_signature()), "sommet")
+    hd_df = load_hd(hd_signature())
+    hd = logic.hd_prochaines_48h(hd_df, "sommet")
     if hd and "cumul_cm" in hd:
         iso_txt = (f" · iso 0° min {hd['iso0_min_m']:.0f} m"
                    if "iso0_min_m" in hd else "")
@@ -112,7 +143,141 @@ def page_neige(runs, sig):
     if ctx:
         st.caption(f"🗺️ Contexte synoptique : {ctx}")
 
-    # ------------------------------------------------------------- Graphes --
+    # --------------------------------------- Deux blocs par régime d'horizon --
+    st.subheader("Prochaines 48 h — Détail horaire par altitude")
+    st.caption("Un point par heure et par altitude : couleur/forme = phase, "
+               "taille = quantité. Survolez un point pour lire les cm/mm "
+               "exacts. Conversion de départ : 1 mm de précipitation = "
+               "1 cm de neige.")
+    hd_profile = weather_type.hd_vertical_hourly_profile(hd_df)
+    mf_sig = mf_local_signature()
+    pi_df = latest_mf_local_deterministic(mf_sig, SC.AROME_PI_MODEL)
+    pi_profile = weather_type.arome_pi_vertical_hourly_profile(pi_df)
+    combined = weather_type.combine_vertical_hourly_profiles(
+        hd_profile.daily if hd_profile.available else pd.DataFrame(),
+        pi_profile.daily if pi_profile.available else pd.DataFrame())
+    profile = weather_type.VerticalProfileResult(
+        combined, not combined.empty,
+        hd_profile.reason if combined.empty else None)
+    hd_reference = pd.DataFrame()
+    if profile.available:
+        st.plotly_chart(hourly_vertical_weather_chart(profile.daily),
+                        width="stretch")
+        summary = weather_type.hd_daily_amounts(profile.daily)
+        hd_reference = weather_type.hd_daily_reference(profile.daily)
+        st.markdown("**Bilan quotidien sur la fenêtre affichée**")
+        st.dataframe(_hd_daily_table(summary), width="stretch")
+        if pi_profile.available:
+            pi_run = pd.to_datetime(pi_df["run_date"]).max()
+            st.caption(
+                f"🏔️ AROME-PI {run_label_text(pi_run)} prioritaire sur ses "
+                "six heures : phase issue directement des cumuls total/neige. "
+                "La maille fine HD prend ensuite le relais jusqu'à 48 h.")
+        else:
+            st.caption(f"⚠️ {pi_profile.reason} Repli explicite sur la maille "
+                       "fine HD, sans substitution cachée.")
+        st.caption(f"La phase utilise toujours la LPN (iso 0 °C − "
+                   f"{weather_type.LPN_MARGE_HD_M:.0f} m), sans tracer LPN/iso 0 "
+                   "sur l'axe des altitudes, sauf sur AROME-PI qui fournit "
+                   "directement les cumuls pluie/neige. Le premier et le dernier jour "
+                   "peuvent être partiels car la fenêtre est glissante sur 48 h.")
+    else:
+        st.info(profile.reason)
+
+    st.subheader("J0 à J+15 — Risque neige/pluie/sec par membre")
+    st.caption(f"J0–J+{SC.HORIZON_REGIMES[0]['max_j']} complète la maille fine "
+               "par la dispersion de l'ensemble. "
+               f"J+4–J+{SC.HORIZON_REGIMES[1]['max_j']} : "
+               f"{SC.HORIZON_REGIMES[1]['desc']}. "
+               f"Puis jusqu'à J+{SC.HORIZON_REGIMES[-1]['max_j']} : "
+               f"{SC.HORIZON_REGIMES[-1]['desc']}. Chaque membre est classé "
+               "brut au village, puis les proportions sont pondérées par "
+               "pertinence du modèle et de l'horizon ; aucune classification "
+               "n'est tentée au sommet.")
+    pe_arome = latest_mf_local_members(mf_sig)
+    pe_arpege = latest_mf_regional_members(mf_regional_signature())
+    weather = weather_type.ensemble_daily_weather_types(
+        village, regional_sub=pe_arome, arpege_sub=pe_arpege)
+    if weather.available:
+        st.plotly_chart(weather_type_chart(weather.daily, hd_reference),
+                        width="stretch")
+        st.caption(f"Sec si precip < {weather_type.PRECIP_BRUIT_MM_JOUR:.1f} mm/j. "
+                   f"Entre {weather_type.PRECIP_BRUIT_MM_JOUR:.1f} et "
+                   f"{weather_type.PRECIP_PLUIE_SIGNIFICATIVE_MM_JOUR:.1f} mm/j, "
+                   "une trace ou faible averse chaude reste mixte/incertaine ; "
+                   "la catégorie pluvieuse commence au second seuil. "
+                   f"Le score froid combine t850 ({weather_type.POIDS_T850:.0%}) "
+                   f"et épaisseur ({weather_type.POIDS_EPAISSEUR:.0%}). "
+                   "L'épaisseur module le diagnostic mais ne rend jamais la "
+                   "neige impossible à elle seule ; pluie seulement lors d'un "
+                   "redoux t850 franc, sinon la zone douteuse reste mixte.")
+        if weather.regional_reason:
+            st.caption(f"⚠️ {weather.regional_reason}")
+        if weather.daily["pe_arome"].any():
+            pe_run = pe_arome["run_date"].max()
+            st.caption(
+                f"🏔️ PE-AROME {run_label_text(pe_run)} : 25 membres, "
+                "cumuls glissants 0–24 h et 24–48 h. La phase vient directement "
+                "des cumuls neige/total du modèle régional, sans veto "
+                "t850/épaisseur.")
+            global_only = weather.daily[
+                (weather.daily["jour"] <= SC.HORIZON_REGIMES[0]["max_j"])
+                & ~weather.daily["pe_arome"]]
+            if not global_only.empty:
+                labels = ", ".join(
+                    f"J+{int(day)}" for day in global_only["jour"].unique())
+                st.caption(f"⚠️ {labels} : PE-AROME hors couverture ; "
+                           "PE-ARPEGE prend le relais s'il couvre le jour, "
+                           "sinon pondération globale explicite.")
+        if weather.daily["pe_arpege"].any():
+            arpege_run = pe_arpege["run_date"].max()
+            st.caption(
+                f"🗺️ PE-ARPEGE {run_label_text(arpege_run)} : 35 membres, "
+                "cumuls glissants H24/H48/H72/H96. Il prend 50 % du type "
+                "de temps local uniquement quand PE-AROME ne couvre plus "
+                "la journée ; total/neige sont lus directement.")
+        short_weights = weather_type.POIDS_MODELES_TYPE_TEMPS[0]["weights"]
+        st.caption(
+            "Hiérarchie locale : PE-AROME 70 % lorsqu'il couvre le jour ; "
+            "sinon PE-ARPEGE 50 % sur sa couverture. Le solde, ou 100 % sans "
+            "régional, suit ECMWF/AIFS/GEFS au ratio "
+            + "/".join(f"{weight:.1%}" for weight in short_weights.values())
+            + ". GEFS reste pleinement consultable pour la masse d'air "
+                     "(t850/épaisseur) : cette minoration ne concerne que le "
+                     "type de temps local en vallée.")
+        regional_days = weather.daily[
+            weather.daily["pe_arome"] | weather.daily["pe_arpege"]]["jour"]
+        if not regional_days.empty:
+            last_regional_day = int(regional_days.max())
+            global_tail = weather.daily[
+                weather.daily["jour"] > last_regional_day]
+            if not global_tail.empty:
+                st.caption(
+                    f"🌍 Après J+{last_regional_day}, la couverture "
+                    "régionale est terminée : retour à 100 % aux ensembles "
+                    "ECMWF/AIFS/GEFS. Les graphes t850, épaisseur et pression "
+                    "ci-dessous décrivent alors surtout la masse d'air et le "
+                    "timing synoptique, pas une quantité locale précise.")
+        else:
+            st.caption(
+                "🌍 Aucun jour n'est actuellement couvert par un ensemble "
+                "régional : la classification est 100 % ECMWF/AIFS/GEFS ; "
+                "elle renseigne mieux la masse d'air que les quantités locales.")
+        if not hd_reference.empty:
+            st.caption("HD ☀️/🌧️/❄️ au-dessus des premières barres = "
+                       "scénario maille fine indépendant au village ; * = "
+                       "journée civile partiellement couverte par la fenêtre "
+                       "glissante de 48 h. Un désaccord HD/ensemble est conservé "
+                       "et rendu visible, jamais moyenné silencieusement.")
+        if weather.daily["n_non_classes"].gt(0).any():
+            maximum = int(weather.daily["n_non_classes"].max())
+            st.caption(f"⚠️ Jusqu'à {maximum} membre(s) non classé(s) selon "
+                       "le jour car leur précipitation est inconnue ; ils sont "
+                       "exclus du dénominateur, jamais assimilés à du sec.")
+    else:
+        st.info(weather.reason)
+
+    # ---------------------------------------------- Graphes détaillés --
     st.subheader("Signal neige — Mont d'Arbois (1830 m)")
     if signal_sommet is not None and not signal_sommet.empty:
         st.caption("Seuls les jours portant un signal exploitable sont tracés ; "

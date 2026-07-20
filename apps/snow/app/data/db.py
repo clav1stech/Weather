@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Couche données du dashboard neige : lecture des deux parquets produits par
-apps/snow/pipeline/ (flux ensemble db_megeve.parquet, flux maille fine
-db_megeve_hd.parquet), en LECTURE SEULE.
+"""Couche données du dashboard neige : lecture des parquets produits par
+apps/snow/pipeline/ (ensemble global, PNT Météo-France local et maille fine),
+en LECTURE SEULE.
 
 Invariants : stockage en UTC tz-naïf, conversion vers l'heure de Paris
 SEULEMENT à l'affichage (ici, dès load_db — tout le dashboard est de
@@ -36,11 +36,37 @@ def hd_signature():
     return _signature(SC.DB_HD_PATH)
 
 
+def mf_local_signature():
+    return _signature(SC.DB_MF_LOCAL_PATH)
+
+
+def mf_regional_signature():
+    return _signature(SC.DB_MF_REGIONAL_PATH)
+
+
+def mf_summary_signature():
+    return _signature(SC.DB_MF_SUMMARY_PATH)
+
+
 def _to_paris(df, cols):
     for col in cols:
         s = pd.to_datetime(df[col])
         df[col] = s.dt.tz_localize("UTC").dt.tz_convert(LOCAL_TZ).dt.tz_localize(None)
     return df
+
+
+def _align_schema(df, schema):
+    """Réaligne une base historique sur le schéma courant sans la réécrire.
+
+    Une variable ajoutée après le début de la collecte reste ``NaN`` sur
+    l'historique : absence explicite, jamais zéro inventé ni migration
+    rétroactive des parquets.
+    """
+    df = df.copy()
+    for col in schema:
+        if col not in df.columns:
+            df[col] = float("nan")
+    return df[schema]
 
 
 def _read_ens(path):
@@ -52,7 +78,44 @@ def _read_ens(path):
         df = pd.read_parquet(path)
     except Exception:  # noqa: BLE001 — parquet corrompu = dégradation silencieuse
         return pd.DataFrame(columns=SC.ENS_SCHEMA)
+    df = _align_schema(df, SC.ENS_SCHEMA)
     df = df[df["model"].isin(SC.ENS_LABELS + SC.MEAN_LABELS)].reset_index(drop=True)
+    return _to_paris(df, ("run_date", "valid_time"))
+
+
+def _read_mf_local(path):
+    """Parquet PNT Météo-France local, tolérant au schéma progressif."""
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=SC.MF_LOCAL_SCHEMA)
+    try:
+        df = pd.read_parquet(path)
+    except Exception:  # noqa: BLE001 — absence explicite dans l'UI en aval
+        return pd.DataFrame(columns=SC.MF_LOCAL_SCHEMA)
+    df = _align_schema(df, SC.MF_LOCAL_SCHEMA)
+    return _to_paris(df, ("run_date", "valid_time"))
+
+
+def _read_mf_regional(path):
+    """Parquet PE-ARPEGE dédié, absent tant que le flux n'a pas tourné."""
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=SC.MF_REGIONAL_SCHEMA)
+    try:
+        df = pd.read_parquet(path)
+    except Exception:  # noqa: BLE001
+        return pd.DataFrame(columns=SC.MF_REGIONAL_SCHEMA)
+    df = _align_schema(df, SC.MF_REGIONAL_SCHEMA)
+    return _to_paris(df, ("run_date", "valid_time"))
+
+
+def _read_mf_summary(path):
+    """Archive moyenne compacte, tolérante aux futures colonnes ajoutées."""
+    if not os.path.exists(path):
+        return pd.DataFrame(columns=SC.MF_SUMMARY_SCHEMA)
+    try:
+        df = pd.read_parquet(path)
+    except Exception:  # noqa: BLE001
+        return pd.DataFrame(columns=SC.MF_SUMMARY_SCHEMA)
+    df = _align_schema(df, SC.MF_SUMMARY_SCHEMA)
     return _to_paris(df, ("run_date", "valid_time"))
 
 
@@ -83,7 +146,65 @@ def load_hd(_sig):
         df = pd.read_parquet(SC.DB_HD_PATH)
     except Exception:  # noqa: BLE001
         return pd.DataFrame(columns=SC.HD_SCHEMA)
+    df = _align_schema(df, SC.HD_SCHEMA)
     return _to_paris(df, ("fetched_at", "target_datetime"))
+
+
+@st.cache_data(show_spinner=False)
+def load_mf_local(_sig):
+    """Runs locaux/régionaux HOT ; l'absence du nouveau parquet est normale."""
+    return _read_mf_local(SC.DB_MF_LOCAL_PATH)
+
+
+@st.cache_data(show_spinner=False)
+def load_mf_regional(_sig):
+    """Runs PE-ARPEGE HOT ; le parquet dédié peut ne pas encore exister."""
+    return _read_mf_regional(SC.DB_MF_REGIONAL_PATH)
+
+
+@st.cache_data(show_spinner=False)
+def load_mf_summary(_sig):
+    """Historique compact des moyennes PI/IFS/PE-AROME/PE-ARPEGE."""
+    return _read_mf_summary(SC.DB_MF_SUMMARY_PATH)
+
+
+def mf_local_members(_sig):
+    """Membres PE-AROME au village, sans les déterministes PI/IFS futurs."""
+    df = load_mf_local(_sig)
+    return df[(df["kind"] == "member") & (df["model"] == SC.PE_AROME_MODEL)]
+
+
+def latest_mf_local_members(_sig):
+    """Dernier cycle PE-AROME complet stocké, sans mélanger les runs."""
+    df = mf_local_members(_sig)
+    if df.empty:
+        return df
+    return df[df["run_date"] == df["run_date"].max()].reset_index(drop=True)
+
+
+def latest_mf_regional_members(_sig):
+    """Dernier cycle PE-ARPEGE complet stocké, sans mélanger les runs."""
+    df = load_mf_regional(_sig)
+    df = df[(df["kind"] == "member") & (df["model"] == SC.PE_ARPEGE_MODEL)]
+    if df.empty:
+        return df
+    return df[df["run_date"] == df["run_date"].max()].reset_index(drop=True)
+
+
+def latest_mf_local_deterministic(_sig, model):
+    """Dernier cycle d'un modèle local déterministe, sans mélanger les runs.
+
+    Le filtre de fraîcheur météorologique reste à la logique du domaine :
+    cette couche de lecture ne transforme jamais un vieux cycle en prévision
+    courante et ne substitue jamais silencieusement un autre modèle.
+    """
+    if model not in SC.MF_LOCAL_MODELS:
+        raise ValueError(f"Modèle Météo-France local inconnu : {model}")
+    df = load_mf_local(_sig)
+    df = df[(df["kind"] == "deterministic") & (df["model"] == model)]
+    if df.empty:
+        return df
+    return df[df["run_date"] == df["run_date"].max()].reset_index(drop=True)
 
 
 def members_db(_sig):

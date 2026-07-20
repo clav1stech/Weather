@@ -117,6 +117,10 @@ ENS_VARIABLES = [
     {"api": "geopotential_height_1000hPa", "col": "z1000",  "sites": ["village"], "spread": False, "transient": True},
     {"api": "temperature_500hPa",          "col": "t500",   "sites": ["village"], "spread": False},
     {"api": "freezing_level_height",       "col": "iso0",   "sites": ["village"], "spread": True},
+    # Quantité totale pluie + averses + neige : indispensable pour distinguer
+    # un membre sec d'un membre pluvieux. Le discriminant t850/épaisseur vit
+    # au village ; ne pas dupliquer cette variable au sommet dans l'ensemble.
+    {"api": "precipitation",                "col": "precip", "sites": ["village"], "spread": False},
     {"api": "snow_depth",                  "col": "hneige", "sites": ["sommet"], "spread": False},
     {"api": "snowfall",                    "col": "neige",  "sites": ["sommet"], "spread": True},
     {"api": "wind_gusts_10m",              "col": "raf",    "sites": ["sommet"], "spread": False},
@@ -153,11 +157,102 @@ HD_MODELS = [
 HD_FORECAST_DAYS = 4
 HD_VARIABLES = [
     {"api": "temperature_2m",        "col": "t2m",    "sites": ["village", "sommet"]},
+    # Les deux points sont nécessaires à la coupe verticale J0–J+3.
+    {"api": "precipitation",         "col": "precip", "sites": ["village", "sommet"]},
     {"api": "snowfall",              "col": "neige",  "sites": ["village", "sommet"]},
     {"api": "snow_depth",            "col": "hneige", "sites": ["sommet"]},
     {"api": "freezing_level_height", "col": "iso0",   "sites": ["village"]},
     {"api": "wind_gusts_10m",        "col": "raf",    "sites": ["sommet"]},
 ]
+
+# --------------------------------------------------------------------------- #
+#  Flux PNT Météo-France ciblés — AROME local / ensembles régionaux
+# --------------------------------------------------------------------------- #
+# Les GRIB ne sont jamais stockés : seules les cellules proches des deux sites
+# sont normalisées dans des parquets dédiés. PE-AROME est volontairement
+# journalier : le WCS impose une requête par membre, paramètre ET échéance ;
+# l'horaire 25 × 51 provoquerait une avalanche de requêtes sans valeur ajoutée,
+# puisque AROME-PI/IFS portent le timing fin.
+AROME_PI_MODEL = "AROME-PI"
+AROME_IFS_MODEL = "AROME-IFS"
+PE_AROME_MODEL = "PE-AROME"
+MF_LOCAL_MODELS = (AROME_PI_MODEL, AROME_IFS_MODEL, PE_AROME_MODEL)
+MF_LOCAL_API_KEY_ENVS = {
+    AROME_PI_MODEL: "METEOFRANCE_AROME_PI_KEY",
+    AROME_IFS_MODEL: "METEOFRANCE_AROME_IFS_KEY",
+    PE_AROME_MODEL: "METEOFRANCE_AROME_PE_KEY",
+}
+AROME_PI_HORIZON_H = 6
+AROME_PI_STEPS_S = tuple(range(3_600, 21_601, 3_600))
+AROME_PI_REQUEST_INTERVAL_S = 0.15
+AROME_PI_WCS_URL = (
+    "https://public-api.meteofrance.fr/public/aromepi/wcs/"
+    "MF-NWP-HIGHRES-AROMEPI-001-FRANCE-WCS/{operation}"
+)
+AROME_PI_PRODUCTS = {
+    "precip": ("TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE", "PT1H"),
+    "neige_eau": ("TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE", "PT1H"),
+    "ptype": ("PRECIPITATION_TYPE_15_MIN__GROUND_OR_WATER_SURFACE", None),
+    "t2m": ("TEMPERATURE__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND", None),
+}
+PE_AROME_MEMBER_COUNT = 25                 # contrôle 000 + 24 perturbations
+PE_AROME_HORIZON_H = 51
+PE_AROME_DAILY_STEPS_S = (86_400, 172_800) # fins des fenêtres 0–24 h / 24–48 h
+PE_AROME_REQUEST_INTERVAL_S = 1.3          # < 50 req/min, à affiner si quota évolue
+PE_AROME_WCS_URL_TPL = (
+    "https://public-api.meteofrance.fr/public/pearome/wcs/"
+    "MF-NWP-HIGHRES-PEARO{member:03d}-0025-FRANCE-WCS/{operation}"
+)
+PE_AROME_PRODUCTS = {
+    "precip": "TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE",
+    "neige_eau": "TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE",
+}
+
+# PE-ARPEGE prolonge la probabilité locale après PE-AROME. Le catalogue
+# publie aussi des cycles 06/18Z, mais seuls 00/12Z sont collectés ici : ce
+# sont les cycles complets validés pour l'archivage. Les cumuls P1D glissants
+# existent bien à H24/H48/H72/H96 dans DescribeCoverage (horizon H102).
+PE_ARPEGE_MODEL = "PE-ARPEGE"
+PE_ARPEGE_API_KEY_ENV = "METEOFRANCE_ARPEGE_PE_KEY"
+PE_ARPEGE_MEMBER_COUNT = 35               # contrôle 000 + 34 perturbations
+PE_ARPEGE_ALLOWED_RUN_HOURS = (0, 12)
+PE_ARPEGE_DAILY_STEPS_S = (86_400, 172_800, 259_200, 345_600)
+PE_ARPEGE_REQUEST_INTERVAL_S = 1.3         # < 50 req/min
+PE_ARPEGE_WCS_URL_TPL = (
+    "https://public-api.meteofrance.fr/public/pearpege/wcs/"
+    "MF-NWP-GLOBAL-PEARP{member:03d}-025-GLOBE-WCS/{operation}"
+)
+PE_ARPEGE_PRODUCTS = {
+    "precip": "TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE",
+    "neige_eau": "TOTAL_SNOW_PRECIPITATION__GROUND_OR_WATER_SURFACE",
+}
+
+# Schéma commun préparé pour PI/IFS/PE-AROME. Les colonnes non publiées par
+# une source restent NaN ; elles ne sont jamais comblées depuis un autre
+# modèle. ``neige_eau`` est l'équivalent en eau (mm), distinct des cm affichés.
+MF_LOCAL_VAR_COLS = [
+    "precip", "neige_eau", "pluie_eau", "ptype", "t2m", "iso0", "t850",
+    "epaisseur", "pmsl", "cape",
+]
+MF_LOCAL_SCHEMA = [
+    "run_date", "model", "kind", "member", "site", "valid_time",
+    "period_h", "cell_lat", "cell_lon",
+] + MF_LOCAL_VAR_COLS
+
+# Schéma identique mais parquet volontairement distinct : PE-ARPEGE est un
+# ensemble régional/global plus volumineux, avec sa propre cadence et sa
+# propre archive. Les colonnes futures restent NaN sur l'historique existant.
+MF_REGIONAL_VAR_COLS = list(MF_LOCAL_VAR_COLS)
+MF_REGIONAL_SCHEMA = list(MF_LOCAL_SCHEMA)
+
+# Archive compacte de long terme : une ligne moyenne par cycle/modèle/site/
+# échéance et le nombre de membres source. ``ptype`` y est un mode, jamais
+# une moyenne de codes. Le brut reste disponible en HOT/COLD pour recalibrer.
+MF_SUMMARY_SCHEMA = [
+    "run_date", "model", "site", "valid_time", "period_h", "n_members",
+    "cell_lat", "cell_lon",
+] + MF_LOCAL_VAR_COLS
+MF_SUMMARY_VAR_COLS = list(MF_LOCAL_VAR_COLS)
 
 # --------------------------------------------------------------------------- #
 #  Seuils du pipeline (fraîcheur / complétude / anti-régression)
@@ -177,12 +272,12 @@ PERSIST_MAX_GAP_H = 24          # trou max dans la chaîne contiguë de portée 
 # régimes déclarés ci-dessous. z500/t500 restent du contexte synoptique pur :
 # JAMAIS de seuil de risque dessus (même discipline que Z500 côté canicule).
 HORIZON_REGIMES = [
-    {"max_j": 3,  "pivots": ["neige", "iso0"],
-     "desc": "maille fine + membres : quantités et limite pluie-neige heure par heure"},
-    {"max_j": 7,  "pivots": ["iso0", "epaisseur", "t850"],
-     "desc": "discriminant pluie/neige et intensité du froid"},
-    {"max_j": 15, "pivots": ["t850", "pmsl"],
-     "desc": "masse d'air et changement de régime — plus de seuil sur les quantités"},
+    {"max_j": 3,  "pivots": ["neige", "precip", "iso0"],
+     "desc": "maille fine 48 h : phase et quantité horaires par altitude"},
+    {"max_j": 7,  "pivots": ["precip", "iso0", "epaisseur", "t850"],
+     "desc": "classification des membres et intensité du froid"},
+    {"max_j": 15, "pivots": ["precip", "epaisseur", "t850", "pmsl"],
+     "desc": "classification des membres, masse d'air et timing du régime"},
 ]
 
 # Limite pluie-neige ≈ iso 0° − marge (la neige tient ~300 m sous l'isotherme 0°).
@@ -297,7 +392,7 @@ OBS_JOUR_COMPLET_MIN_H = 20  # heures min pour juger un Tx/Tn journalier fiable
 # --------------------------------------------------------------------------- #
 #  Archivage hot/cold (core/pipeline/hot_cold.py — rollover périodique)
 # --------------------------------------------------------------------------- #
-# Fenêtre HOT commune aux trois parquets neige : 45 j couvre l'horizon 15 j,
+# Fenêtre HOT commune aux parquets neige : 45 j couvre l'horizon 15 j,
 # la fenêtre de convergence (runs _MEAN) et une marge confortable. Le rollover
 # (apps/snow/pipeline/rollover.py) bascule le plus ancien vers les parquets
 # *_archive (COLD, append-only, jamais réécrits hors append vérifié).
@@ -311,12 +406,18 @@ DATA_DIR = os.path.join(SNOW_DIR, "data")
 DB_ENS_PATH = os.path.join(DATA_DIR, "db_megeve.parquet")
 DB_HD_PATH = os.path.join(DATA_DIR, "db_megeve_hd.parquet")
 DB_OBS_PATH = os.path.join(DATA_DIR, "db_obs_alpes.parquet")
+DB_MF_LOCAL_PATH = os.path.join(DATA_DIR, "db_megeve_mf_local.parquet")
+DB_MF_REGIONAL_PATH = os.path.join(DATA_DIR, "db_megeve_arpege_pe.parquet")
+DB_MF_SUMMARY_PATH = os.path.join(DATA_DIR, "db_megeve_mf_summary.parquet")
 # Parquets COLD du rollover hot/cold — extension .parquet volontaire (les jobs
 # CI les committent), les SAUVEGARDES datées du rollover prennent elles
 # l'extension .bak pour ne jamais matcher les globs `*.parquet` des jobs.
 DB_ENS_COLD_PATH = os.path.join(DATA_DIR, "db_megeve_archive.parquet")
 DB_HD_COLD_PATH = os.path.join(DATA_DIR, "db_megeve_hd_archive.parquet")
 DB_OBS_COLD_PATH = os.path.join(DATA_DIR, "db_obs_alpes_archive.parquet")
+DB_MF_LOCAL_COLD_PATH = os.path.join(DATA_DIR, "db_megeve_mf_local_archive.parquet")
+DB_MF_REGIONAL_COLD_PATH = os.path.join(
+    DATA_DIR, "db_megeve_arpege_pe_archive.parquet")
 
 # --------------------------------------------------------------------------- #
 #  Dérivés (ne pas éditer)

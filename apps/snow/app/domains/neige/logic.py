@@ -2,23 +2,21 @@
 """Logique du domaine neige : seuils d'interprétation, labels, calculs.
 
 Architecture MULTI-SIGNAUX (snow_config.HORIZON_REGIMES) : les pivots se
-hiérarchisent par échéance — quantités/iso 0° à courte échéance, iso 0°/
-épaisseur/t850 à moyenne, t850/pmsl à longue. Aucun signal de contexte
-(z500, t500) ne porte de seuil : appui qualitatif, dégradation silencieuse."""
+hiérarchisent par échéance — coupe quantités/LPN à courte échéance,
+classification par membre sur precip/épaisseur/t850 ensuite, pmsl comme timing
+du régime à longue échéance. Aucun signal de contexte (z500, t500) ne porte
+de seuil : appui qualitatif, dégradation silencieuse."""
 
 import numpy as np
 import pandas as pd
 
 from apps.snow import snow_config as SC
 from core.stats.ensemble import member_matrix
+from . import weather_type
 
-# --- Point d'extension CALIBRAGE — épaisseur 1000-500 hPa (m géopotentiels) --- #
-# VALEURS DE DÉMARRAGE, PAS des seuils définitifs : transposition à l'altitude
-# du classique « 528 dam = neige en plaine » (~5340 m vers 1100 m, ~5400 m vers
-# 1830 m), À CALIBRER EN FIN DE SAISON une fois le bilan de fiabilité de la
-# page Convergence disponible (confrontation aux épisodes réellement observés).
-# Ajuster ces deux valeurs suffit — aucune autre ligne du domaine à toucher.
-EPAISSEUR_NEIGE_M = {"village": 5340.0, "sommet": 5400.0}
+# Alias de compatibilité pour les lectures existantes. Le point de calibration
+# unique vit dans weather_type.py avec les autres seuils pluie/neige/sec.
+EPAISSEUR_NEIGE_M = weather_type.EPAISSEUR_NEIGE_M
 
 # Libellés des paliers d'intensité (bornes dans SC.PALIERS_NEIGE_CM).
 _PALIER_LABELS = ["—", "petite chute", "vraie chute", "grosse chute"]

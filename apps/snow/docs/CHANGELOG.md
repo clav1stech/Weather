@@ -14,6 +14,14 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.5] - 2026-07-20
+- PE-ARPEGE utilise désormais le WCS Europe 0,1°, compatible avec l'extraction
+  locale après décodage en mémoire des grilles complètes (le service interdit
+  les sous-ensembles spatiaux), et attend le dernier cycle 00/12Z commun au
+  contrôle et aux perturbations ; aucun GRIB n'est archivé.
+- AROME-PI retente les catalogues HTTP 200 temporairement vides ou partiels
+  pendant leur rotation horaire, sans écriture ni substitution de données.
+
 ## [0.4.4] - 2026-07-20
 - Collecteur AROME-IFS Météo-France direct : pluie et neige horaires plus
   température aux sites village/sommet de H+1 à H+45, quota respecté,

@@ -76,3 +76,28 @@ def test_candidate_rejects_unknown_temperature_unit():
     points[(step, "t2m", "village")] = _point(42, step, "2t", "mystery")
     with pytest.raises(ValueError, match="Unité de température"):
         PI.candidate_from_points(RUN, points)
+
+
+def test_discover_cycle_retries_catalog_temporarily_empty(monkeypatch):
+    empty = b"<Capabilities/>"
+    ids = [
+        f"{product}___{RUN:%Y-%m-%dT%H.00.00Z}"
+        + (f"_{period}" if period else "")
+        for product, period in SC.AROME_PI_PRODUCTS.values()
+    ]
+    complete = ("<wcs:Capabilities "
+                "xmlns:wcs='http://www.opengis.net/wcs/2.0'>"
+                + "".join(
+                    f"<wcs:CoverageId>{item}</wcs:CoverageId>" for item in ids)
+                + "</wcs:Capabilities>").encode()
+    responses = iter((empty, complete))
+    sleeps = []
+    monkeypatch.setattr(
+        PI.WCS, "get_capabilities", lambda *args, **kwargs: next(responses))
+
+    run, selected = PI.discover_cycle(
+        object(), "secret", attempts=2, sleep_fn=sleeps.append)
+
+    assert run == RUN
+    assert set(selected) == set(SC.AROME_PI_PRODUCTS)
+    assert sleeps == [SC.AROME_PI_CATALOG_RETRY_S]

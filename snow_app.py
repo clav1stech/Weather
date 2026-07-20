@@ -32,7 +32,7 @@ from apps.snow.app.pages.pipeline import page_run
 from apps.snow.app.runtime import IS_LOCAL
 from apps.snow.app.ui.theme import GLOBAL_CSS
 
-SNOW_APP_VERSION = "0.4.4"
+SNOW_APP_VERSION = "0.4.5"
 
 st.set_page_config(page_title="Dashboard Neige — Megève",
                    page_icon="🏔️", layout="wide")

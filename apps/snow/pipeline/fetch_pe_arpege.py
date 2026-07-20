@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Collecte PE-ARPEGE au village — quatre cumuls 24 h par membre.
+"""Collecte PE-ARPEGE Europe 0,1° au village — cumuls 24 h par membre.
 
 Le catalogue publie des cycles 00/06/12/18Z, mais seuls 00/12Z sont retenus :
 ils portent les cycles complets validés pour cet archivage. Pour chacun des 35
@@ -8,9 +8,10 @@ membres, le collecteur extrait le total et la neige des fenêtres P1D finissant
 par les ensembles globaux déjà collectés ; les dupliquer ici multiplierait les
 requêtes WCS sans améliorer la classification locale.
 
-Les GRIB ne sont jamais archivés. ecCodes extrait directement la cellule la
-plus proche de Megève village, puis seules les valeurs normalisées rejoignent
-le parquet PE-ARPEGE dédié. Un cycle incomplet ne modifie jamais la base.
+Le WCS PE-ARPEGE interdit officiellement tout sous-ensemble ``lat/long`` :
+chaque champ Europe 0,1° complet est donc décodé en mémoire, la cellule la
+plus proche de Megève est extraite, puis le GRIB est immédiatement libéré sans
+jamais être archivé. Un cycle incomplet ne modifie jamais la base.
 """
 
 import datetime as dt
@@ -34,7 +35,6 @@ from core.services import meteofrance_wcs as WCS
 
 MODEL = SC.PE_ARPEGE_MODEL
 SITE = SC.SITE_BY_CODE["village"]
-_BBOX_DEG = 0.30
 _MM_UNITS = {"kg m-2", "kg m**-2", "kg m^-2", "mm"}
 
 
@@ -43,28 +43,54 @@ def _url(member, operation):
         member=int(member), operation=operation)
 
 
+def _coverages_by_run(ids, product):
+    """Indexe les couvertures P1D 00/12Z exactes par cycle."""
+    found = {}
+    prefix = f"{product}___"
+    for coverage_id in ids:
+        if not coverage_id.startswith(prefix) or not coverage_id.endswith("_P1D"):
+            continue
+        try:
+            run_date = WCS.coverage_run_date(coverage_id)
+        except ValueError:
+            continue
+        if run_date.hour in SC.PE_ARPEGE_ALLOWED_RUN_HOURS:
+            found[run_date] = coverage_id
+    return found
+
+
 def discover_cycle(session, key):
-    """Dernier cycle 00/12Z portant ensemble total et neige P1D."""
-    payload = WCS.get_capabilities(
-        session, _url(0, "GetCapabilities"), key=key,
-        timeout=SC.HTTP_TIMEOUT)
-    ids = WCS.coverage_ids(payload)
-    selected = {
-        column: WCS.latest_coverage(
-            ids, product, "P1D",
-            allowed_run_hours=SC.PE_ARPEGE_ALLOWED_RUN_HOURS)
-        for column, product in SC.PE_ARPEGE_PRODUCTS.items()
-    }
-    missing = [column for column, coverage in selected.items() if coverage is None]
-    if missing:
+    """Dernier cycle 00/12Z commun au contrôle et aux perturbations.
+
+    Le membre 0 est fréquemment publié avant le reste de l'ensemble. Le
+    membre 1 sert de sentinelle : partir sur le seul contrôle provoquerait un
+    GetCoverage 400 dès la première perturbation encore sur l'ancien cycle.
+    """
+    catalogs = {}
+    for member in SC.PE_ARPEGE_DISCOVERY_MEMBERS:
+        payload = WCS.get_capabilities(
+            session, _url(member, "GetCapabilities"), key=key,
+            timeout=SC.HTTP_TIMEOUT)
+        ids = WCS.coverage_ids(payload)
+        catalogs[member] = {
+            column: _coverages_by_run(ids, product)
+            for column, product in SC.PE_ARPEGE_PRODUCTS.items()
+        }
+    run_sets = [
+        set(by_run)
+        for products in catalogs.values() for by_run in products.values()
+    ]
+    common_runs = set.intersection(*run_sets) if run_sets else set()
+    if not common_runs:
         raise RuntimeError(
-            "Coverage PE-ARPEGE P1D 00/12Z absent pour : " + ", ".join(missing))
-    runs = {WCS.coverage_run_date(coverage) for coverage in selected.values()}
-    if len(runs) != 1:
-        raise RuntimeError("Les produits PE-ARPEGE ne portent pas le même cycle.")
-    run_date = runs.pop()
-    if run_date.hour not in SC.PE_ARPEGE_ALLOWED_RUN_HOURS:
-        raise RuntimeError("Le catalogue PE-ARPEGE sélectionné n'est pas 00/12Z.")
+            "Aucun cycle PE-ARPEGE P1D 00/12Z commun au contrôle et aux "
+            "perturbations.")
+    run_date = max(common_runs)
+    control = SC.PE_ARPEGE_DISCOVERY_MEMBERS[0]
+    selected = {
+        column: catalogs[control][column][run_date]
+        for column in SC.PE_ARPEGE_PRODUCTS
+    }
     return run_date, selected
 
 
@@ -145,22 +171,23 @@ def is_complete_in_store(existing, run_date):
 
 
 def fetch_candidate(session, key, run_date, coverages, sleep_fn=time.sleep):
-    """Télécharge les 280 champs espacés sous le quota du service."""
+    """Télécharge 280 grilles Europe, sans sous-ensemble spatial interdit."""
     points = {}
     requests_left = (SC.PE_ARPEGE_MEMBER_COUNT
                      * len(SC.PE_ARPEGE_DAILY_STEPS_S)
                      * len(coverages))
-    subsets = (
-        f"lat({SITE['lat'] - _BBOX_DEG},{SITE['lat'] + _BBOX_DEG})",
-        f"long({SITE['lon'] - _BBOX_DEG},{SITE['lon'] + _BBOX_DEG})",
-    )
     for member in range(SC.PE_ARPEGE_MEMBER_COUNT):
         for step_s in SC.PE_ARPEGE_DAILY_STEPS_S:
             for column, coverage_id in coverages.items():
-                payload = WCS.get_coverage(
-                    session, _url(member, "GetCoverage"), key=key,
-                    coverage_id=coverage_id, time_value=step_s,
-                    subsets=subsets, timeout=SC.HTTP_TIMEOUT)
+                try:
+                    payload = WCS.get_coverage(
+                        session, _url(member, "GetCoverage"), key=key,
+                        coverage_id=coverage_id, time_value=step_s,
+                        subsets=(), timeout=SC.HTTP_TIMEOUT)
+                except RuntimeError as exc:
+                    raise RuntimeError(
+                        f"PE-ARPEGE membre {member:02d}, {column}, "
+                        f"H+{step_s // 3600} : {exc}") from exc
                 points[(member, step_s, column)] = WCS.decode_nearest_point(
                     payload, SITE["lat"], SITE["lon"])
                 requests_left -= 1

@@ -185,6 +185,8 @@ MF_LOCAL_API_KEY_ENVS = {
 AROME_PI_HORIZON_H = 6
 AROME_PI_STEPS_S = tuple(range(3_600, 21_601, 3_600))
 AROME_PI_REQUEST_INTERVAL_S = 0.15
+AROME_PI_CATALOG_ATTEMPTS = 3
+AROME_PI_CATALOG_RETRY_S = 5.0
 AROME_PI_WCS_URL = (
     "https://public-api.meteofrance.fr/public/aromepi/wcs/"
     "MF-NWP-HIGHRES-AROMEPI-001-FRANCE-WCS/{operation}"
@@ -230,11 +232,14 @@ PE_ARPEGE_MODEL = "PE-ARPEGE"
 PE_ARPEGE_API_KEY_ENV = "METEOFRANCE_ARPEGE_PE_KEY"
 PE_ARPEGE_MEMBER_COUNT = 35               # contrôle 000 + 34 perturbations
 PE_ARPEGE_ALLOWED_RUN_HOURS = (0, 12)
+# Le contrôle peut publier un nouveau cycle avant les perturbations. Le membre
+# 1 sert de sentinelle de disponibilité de l'ensemble avant les 280 appels GRIB.
+PE_ARPEGE_DISCOVERY_MEMBERS = (0, 1)
 PE_ARPEGE_DAILY_STEPS_S = (86_400, 172_800, 259_200, 345_600)
-PE_ARPEGE_REQUEST_INTERVAL_S = 1.3         # < 50 req/min
+PE_ARPEGE_REQUEST_INTERVAL_S = 0.2         # < 400 req/min, transfert dominant
 PE_ARPEGE_WCS_URL_TPL = (
     "https://public-api.meteofrance.fr/public/pearpege/wcs/"
-    "MF-NWP-GLOBAL-PEARP{member:03d}-025-GLOBE-WCS/{operation}"
+    "MF-NWP-GLOBAL-PEARP{member:03d}-01-EUROPE-WCS/{operation}"
 )
 PE_ARPEGE_PRODUCTS = {
     "precip": "TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE",

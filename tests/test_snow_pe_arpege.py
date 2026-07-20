@@ -73,3 +73,55 @@ def test_discover_cycle_ignores_newer_06z_catalog(monkeypatch):
 
     assert run == RUN
     assert all("T00.00.00Z" in coverage for coverage in selected.values())
+
+
+def test_discover_cycle_waits_for_perturbations_lagging_control(monkeypatch):
+    def catalog(*runs):
+        ids = [
+            f"{product}___{run:%Y-%m-%dT%H.00.00Z}_P1D"
+            for product in SC.PE_ARPEGE_PRODUCTS.values() for run in runs
+        ]
+        return ("<wcs:Capabilities "
+                "xmlns:wcs='http://www.opengis.net/wcs/2.0'>"
+                + "".join(
+                    f"<wcs:CoverageId>{item}</wcs:CoverageId>" for item in ids)
+                + "</wcs:Capabilities>").encode()
+
+    control_new = RUN.replace(hour=12)
+    control_xml = catalog(RUN, control_new)
+    perturbation_xml = catalog(RUN)
+
+    def fake_capabilities(_session, url, **_kwargs):
+        return control_xml if "PEARP000" in url else perturbation_xml
+
+    monkeypatch.setattr(PE.WCS, "get_capabilities", fake_capabilities)
+
+    run, selected = PE.discover_cycle(object(), "secret")
+
+    assert run == RUN
+    assert all("T00.00.00Z" in coverage for coverage in selected.values())
+
+
+def test_fetch_uses_full_europe_grid_without_forbidden_spatial_subset(
+        monkeypatch):
+    calls = []
+
+    def fake_get_coverage(*args, **kwargs):
+        calls.append(kwargs)
+        return kwargs["time_value"]
+
+    monkeypatch.setattr(PE.WCS, "get_coverage", fake_get_coverage)
+    monkeypatch.setattr(
+        PE.WCS, "decode_nearest_point",
+        lambda step, *_args: _point(1.0, step))
+    coverages = {column: f"coverage-{column}"
+                 for column in SC.PE_ARPEGE_PRODUCTS}
+
+    candidate = PE.fetch_candidate(
+        object(), "secret", RUN, coverages, sleep_fn=lambda _delay: None)
+
+    assert len(candidate) == SC.PE_ARPEGE_MEMBER_COUNT * 4
+    assert len(calls) == (SC.PE_ARPEGE_MEMBER_COUNT
+                          * len(SC.PE_ARPEGE_DAILY_STEPS_S)
+                          * len(SC.PE_ARPEGE_PRODUCTS))
+    assert all(call["subsets"] == () for call in calls)

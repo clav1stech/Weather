@@ -42,23 +42,38 @@ def _url(operation):
     return SC.AROME_PI_WCS_URL.format(operation=operation)
 
 
-def discover_cycle(session, key):
-    """Dernier cycle PI dont les quatre produits requis sont co-publiés."""
-    payload = WCS.get_capabilities(
-        session, _url("GetCapabilities"), key=key, timeout=SC.HTTP_TIMEOUT)
-    ids = WCS.coverage_ids(payload)
-    selected = {
-        column: WCS.latest_coverage(ids, product, period)
-        for column, (product, period) in SC.AROME_PI_PRODUCTS.items()
-    }
-    missing = [column for column, coverage in selected.items() if coverage is None]
-    if missing:
-        raise RuntimeError(
-            "Coverage AROME-PI absent pour : " + ", ".join(missing))
-    runs = {WCS.coverage_run_date(coverage) for coverage in selected.values()}
-    if len(runs) != 1:
-        raise RuntimeError("Les produits AROME-PI ne portent pas le même cycle.")
-    return runs.pop(), selected
+def discover_cycle(session, key, *, attempts=None, sleep_fn=time.sleep):
+    """Dernier cycle PI co-publié, avec retry de la rotation du catalogue.
+
+    GetCapabilities peut répondre HTTP 200 pendant quelques secondes avec un
+    contenu vide ou partiel lors du remplacement horaire. Ce cas sémantique
+    doit être retenté comme une indisponibilité transitoire, sans persistance.
+    """
+    attempts = attempts or SC.AROME_PI_CATALOG_ATTEMPTS
+    last_error = None
+    for attempt in range(attempts):
+        payload = WCS.get_capabilities(
+            session, _url("GetCapabilities"), key=key, timeout=SC.HTTP_TIMEOUT)
+        ids = WCS.coverage_ids(payload)
+        selected = {
+            column: WCS.latest_coverage(ids, product, period)
+            for column, (product, period) in SC.AROME_PI_PRODUCTS.items()
+        }
+        missing = [
+            column for column, coverage in selected.items() if coverage is None]
+        if missing:
+            last_error = "Coverage absent pour : " + ", ".join(missing)
+        else:
+            runs = {
+                WCS.coverage_run_date(coverage) for coverage in selected.values()}
+            if len(runs) == 1:
+                return runs.pop(), selected
+            last_error = "produits publiés sur des cycles différents"
+        if attempt + 1 < attempts:
+            sleep_fn(SC.AROME_PI_CATALOG_RETRY_S)
+    raise RuntimeError(
+        f"Catalogue AROME-PI incomplet après {attempts} tentatives : "
+        f"{last_error}.")
 
 
 def _precip_mm(point):

@@ -14,6 +14,13 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.7] - 2026-07-20
+- PE-ARPEGE : le backend WCS alterne de façon erratique 200/400/502 sur des
+  appels strictement identiques (jusqu'à 4 échecs 400 consécutifs constatés
+  en conditions réelles). Retries bornés remontés de 3 à 6 tentatives et
+  délai porté à 2 s pour absorber ces séquences sur les ~280 requêtes d'un
+  cycle complet.
+
 ## [0.4.6] - 2026-07-20
 - PE-ARPEGE ne télécharge plus les grilles Europe complètes : seules les
   petites coupes pluie/neige autour de Megève sont demandées, avec l'ordre

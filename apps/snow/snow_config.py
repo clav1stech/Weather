@@ -242,8 +242,13 @@ PE_ARPEGE_REQUEST_INTERVAL_S = 0.2         # < 400 req/min, transfert dominant
 # grilles Europe complètes (environ 0,8 Mo par champ, 280 champs par cycle).
 PE_ARPEGE_SPATIAL_MARGIN_DEG = 0.10
 PE_ARPEGE_MAX_GRIB_BYTES = 10_000
-PE_ARPEGE_COVERAGE_ATTEMPTS = 3
-PE_ARPEGE_COVERAGE_RETRY_DELAY_S = 1.0
+# Le backend PE-ARPEGE alterne de façon erratique 200/400/502 sur des appels
+# strictement identiques (constaté empiriquement : jusqu'à 4 échecs 400
+# consécutifs sur une même requête rejouée). 3 tentatives à 1 s suffisent
+# rarement sur les ~280 requêtes d'un cycle complet ; ce palier absorbe les
+# séquences d'échecs observées sans changer la logique de retry elle-même.
+PE_ARPEGE_COVERAGE_ATTEMPTS = 6
+PE_ARPEGE_COVERAGE_RETRY_DELAY_S = 2.0
 PE_ARPEGE_WCS_URL_TPL = (
     "https://public-api.meteofrance.fr/public/pearpege/wcs/"
     "MF-NWP-GLOBAL-PEARP{member:03d}-01-EUROPE-WCS/{operation}"

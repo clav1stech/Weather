@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Rollover HOT/COLD des trois parquets neige (mécanique générique
+"""Rollover HOT/COLD des cinq parquets neige (mécanique générique
 core/pipeline/hot_cold.py, fenêtre snow_config.HOT_RETENTION_DAYS).
 
 Chaque base garde en HOT ses lignes récentes ; le plus ancien bascule vers le
@@ -24,6 +24,9 @@ from core.pipeline.hot_cold import format_report, rollover
 
 FLUX = [
     ("ensemble",     SC.DB_ENS_PATH, SC.DB_ENS_COLD_PATH, "run_date"),
+    ("PNT MF local", SC.DB_MF_LOCAL_PATH, SC.DB_MF_LOCAL_COLD_PATH, "run_date"),
+    ("PE-ARPEGE",    SC.DB_MF_REGIONAL_PATH, SC.DB_MF_REGIONAL_COLD_PATH,
+     "run_date"),
     ("maille fine",  SC.DB_HD_PATH,  SC.DB_HD_COLD_PATH,  "fetched_at"),
     ("observations", SC.DB_OBS_PATH, SC.DB_OBS_COLD_PATH, "valid_time"),
 ]

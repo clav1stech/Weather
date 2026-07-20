@@ -353,9 +353,13 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: pip install requests pandas pyarrow
+        run: pip install requests pandas pyarrow eccodes
 
       - name: Fetch and Push Snow Databases
+        env:
+          METEOFRANCE_AROME_PI_KEY: ${{ secrets.METEOFRANCE_AROME_PI_KEY }}
+          METEOFRANCE_AROME_PE_KEY: ${{ secrets.METEOFRANCE_AROME_PE_KEY }}
+          METEOFRANCE_ARPEGE_PE_KEY: ${{ secrets.METEOFRANCE_ARPEGE_PE_KEY }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"
@@ -374,6 +378,9 @@ jobs:
           n=0
           while true; do
             [ "$RUN_ENS" = "true" ] && python apps/snow/pipeline/fetch_ensemble.py
+            [ "$RUN_ENS" = "true" ] && python apps/snow/pipeline/fetch_pe_arome.py
+            [ "$RUN_ENS" = "true" ] && python apps/snow/pipeline/fetch_pe_arpege.py
+            [ "$RUN_HD" = "true" ] && python apps/snow/pipeline/fetch_arome_pi.py
             [ "$RUN_HD" = "true" ] && python apps/snow/pipeline/fetch_hd.py
             # Les fichiers peuvent ne pas exister au tout premier run si l'API
             # n'a rien renvoyé d'exploitable (les scripts sortent sans écrire).

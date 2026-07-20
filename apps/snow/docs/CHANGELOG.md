@@ -14,6 +14,12 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.2] - 2026-07-20
+- PE-ARPEGE : 35 membres sur les cycles complets 00/12Z, cumuls journaliers
+  H24/H48/H72/H96, priorité de relais après PE-AROME et tests de cycle.
+- Job neige 2 h et rollover HOT/COLD étendus aux parquets Météo-France
+  régionaux, sans workflow horaire supplémentaire.
+
 ## [0.4.1] - 2026-07-20
 - Collecteurs WCS Météo-France pour AROME-PI et PE-AROME : décodage GRIB
   direct en mémoire, contrôle de complétude et no-op sur cycle inchangé.

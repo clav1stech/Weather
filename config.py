@@ -332,7 +332,8 @@ DB_T2M_PATH = os.path.join(DATA_DIR, "database_paris_t2m.parquet")
 # (station, heure d'observation), append-only) — même principe d'isolement.
 DB_OBS_PATH = os.path.join(DATA_DIR, "database_paris_observations.parquet")
 # Parquet SÉPARÉ pour les observations infra-horaires 6 min (fraîcheur des
-# cartes temps réel, stations RADOME seules) — jamais mélangé au flux horaire.
+# cartes temps réel, les 4 stations d'OBS_STATIONS avec une instrumentation
+# inégale) — jamais mélangé au flux horaire.
 DB_OBS_6M_PATH = os.path.join(DATA_DIR, "database_paris_observations_6m.parquet")
 # Parquet SÉPARÉ pour la prévision Montsouris vintages 15 min (une ligne par
 # couple (échéance quart-horaire, instant de collecte), append-only) — flux

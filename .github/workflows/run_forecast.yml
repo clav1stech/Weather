@@ -25,7 +25,7 @@ on:
     - cron: '50 * * * *'
     # Observations infra-horaires 6 min (DPPaquetObs /paquet/infrahoraire-6m,
     # flux annexe) : toutes les 15 min — c'est la FRAÎCHEUR temps réel des
-    # cartes station RADOME (Montsouris/Longchamp). Créneaux :10/:25/:40/:55
+    # cartes des 4 stations parisiennes. Créneaux :10/:25/:40/:55
     # libres (évite :05/:15/:20/:35/:45). Le paquet étant une fenêtre glissante,
     # chaque poll rattrape tous les points 6 min depuis le précédent.
     - cron: '10,25,40,55 * * * *'
@@ -218,7 +218,7 @@ jobs:
     # Flux ANNEXE observations 6 min (fetch_observations_6m.py → parquet séparé
     # data/database_paris_observations_6m.parquet). Même clé/secret et même
     # concurrency.group que les autres jobs (contention sur le PUSH git, pas les
-    # fichiers). Cadence 15 min : c'est la fraîcheur temps réel des cartes RADOME.
+    # fichiers). Cadence 15 min : c'est la fraîcheur temps réel des cartes station.
     if: |
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'obs6m' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '10,25,40,55 * * * *'
@@ -258,7 +258,7 @@ jobs:
           while true; do
             python fetch_observations_6m.py
             # Le fichier peut ne pas exister au tout premier run si aucune
-            # station RADOME n'a répondu (le script sort alors sans écrire).
+            # station n'a répondu (le script sort alors sans écrire).
             if [ -f data/database_paris_observations_6m.parquet ]; then
               git add data/database_paris_observations_6m.parquet
             fi

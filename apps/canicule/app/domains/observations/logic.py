@@ -32,8 +32,8 @@ NUIT_FIN_H = 6
 OBS_PERIMEE_H = 3.0
 
 # Seuil, plus resserré, de l'horodatage en rouge sur les cartes « temps réel »
-# (page.py) : avec le flux 6 min (RADOME) qui rafraîchit toutes les ~15 min,
-# une obs vieille de plus d'1 h signale un problème de mise à jour bien avant
+# (page.py) : avec le flux 6 min (les 4 stations) qui rafraîchit toutes les
+# ~15 min, une obs vieille de plus d'1 h signale un problème de mise à jour avant
 # le seuil OBS_PERIMEE_H (3 h, pensé pour l'ère hourly-only) — sert seulement
 # à la couleur de cette pastille, pas à cacher l'observation.
 OBS_CARTE_ALERTE_H = 1.0

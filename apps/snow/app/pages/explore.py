@@ -19,6 +19,7 @@ import streamlit as st
 from apps.snow import snow_config as SC
 from ..data.db import members_db, run_label_text
 from ..data.runsets import latest_complete_run_sub, latest_run_sub, previous_runs_sub
+from ..domains.neige import logic
 from ..domains.neige.charts import fan_chart, medians_chart
 from core.stats.ensemble import model_data, super_ensemble
 
@@ -42,6 +43,20 @@ def _run_pool(sig, runs, choice):
     run_date = runs.loc[runs["label"] == choice, "run_date"].iloc[0]
     df = members_db(sig)
     return df[df["run_date"] == run_date]
+
+
+def _seuils_repere(col):
+    """Lignes-repères physiques d'une variable pour ``medians_chart`` — mêmes
+    seuils que la Vue d'ensemble grand public (aucun calcul, simple rappel
+    visuel du seuil neige/masse d'air en page technique). None hors t850/
+    épaisseur."""
+    if col == "t850":
+        return {"neige sommet": SC.SEUIL_T850_NEIGE["sommet"],
+                "neige village": SC.SEUIL_T850_NEIGE["village"]}
+    if col == "epaisseur":
+        return {"repère village": logic.EPAISSEUR_NEIGE_M["village"],
+                "repère sommet": logic.EPAISSEUR_NEIGE_M["sommet"]}
+    return None
 
 
 def _export_table(sub_site, prev_site, var):
@@ -106,7 +121,8 @@ def page_explore(runs, sig):
         fig = fan_chart(sub_site, col, f"{label} — super-ensemble", unit)
         if fig is not None:
             st.plotly_chart(fig, use_container_width=True)
-        fig = medians_chart(sub_site, col, f"{label} — médianes par modèle", unit)
+        fig = medians_chart(sub_site, col, f"{label} — médianes par modèle", unit,
+                            seuils_h=_seuils_repere(col))
         if fig is not None:
             st.plotly_chart(fig, use_container_width=True)
     with tab_tables:

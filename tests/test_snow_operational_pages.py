@@ -93,3 +93,15 @@ def test_snow_operational_pages_render_without_exception(monkeypatch):
     for page in ("Convergence des runs", "Contrôle des runs", "Lancer le pipeline"):
         at.sidebar.radio[0].set_value(page).run()
         assert not at.exception, (page, at.exception)
+
+
+def test_neige_overview_and_explore_pages_render_without_exception(monkeypatch):
+    # La refonte grand public (frise de tendance, tuile « Changement de temps »,
+    # expanders) et les repères de seuil ajoutés à Explorer doivent se rendre
+    # sans exception sur les données réelles en base, quelle que soit la saison.
+    monkeypatch.setenv("WEATHER_LOCAL", "1")
+    at = AppTest.from_file(os.path.join(_ROOT, "snow_app.py"), default_timeout=90)
+    at.run()
+    for page in ("Vue d'ensemble neige", "Explorer un run"):
+        at.sidebar.radio[0].set_value(page).run()
+        assert not at.exception, (page, at.exception)

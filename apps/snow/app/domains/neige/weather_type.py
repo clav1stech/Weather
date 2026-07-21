@@ -132,6 +132,21 @@ POIDS_MODELES_TYPE_TEMPS = (
 POIDS_REGIONAL_TYPE_TEMPS = {"PE-AROME": 0.70, "PE-ARPEGE": 0.50}
 PRIORITE_MODELES_REGIONAUX = ("PE-AROME", "PE-ARPEGE")
 
+# Tuile grand public « Changement de temps » : formulation d'un régime météo à
+# venir à partir des signaux DÉJÀ calculés (proportions de type de temps de
+# ensemble_daily_weather_types + bascule de pression logic.pmsl_bascule). Aucun
+# nouveau calcul météo — seulement des seuils de formulation/catégorisation,
+# du même esprit que les autres seuils ci-dessus, à affiner in situ au fil de
+# la saison. Les parts lues sont des MOYENNES sur les premiers jours (fenêtre
+# REGIME_FENETRE_J), où l'incertitude reste faible : le régime décrit une
+# tendance de fond, jamais une prévision jour par jour.
+REGIME_FENETRE_J = 4              # nb de jours moyennés pour lire le régime
+REGIME_SEC_MIN = 0.50            # part « sec » moyenne → tendance anticyclonique
+REGIME_PERTURBE_WET_MIN = 0.45   # part neige+pluie moyenne → temps perturbé
+REGIME_INCERTAIN_MIXTE_MIN = 0.40  # part « mixte » moyenne → scénario ambigu
+REGIME_CONSENSUS_MIN = 0.45      # sous ce plus fort accord, modèles jugés divergents
+REGIME_TENDANCE_MARGE = 0.12     # écart neige−pluie requis pour oser une tendance
+
 
 @dataclass(frozen=True)
 class WeatherTypeResult:
@@ -150,6 +165,22 @@ class VerticalProfileResult:
     daily: pd.DataFrame
     available: bool
     reason: str | None = None
+
+
+@dataclass(frozen=True)
+class RegimeMeteo:
+    """Régime météo à venir formulé pour la tuile grand public.
+
+    ``key`` classe le régime (sec / perturbé / incertain / variable) ;
+    ``label`` est le texte principal, ``detail`` la ligne d'appui, ``tendance``
+    la tendance de phase possible (« neige » / « pluie » / None) — jamais une
+    affirmation de précipitation certaine.
+    """
+
+    key: str
+    label: str
+    detail: str
+    tendance: str | None = None
 
 
 def lpn_from_iso0(iso0_m):
@@ -811,3 +842,64 @@ def ensemble_daily_weather_types(sub_site, now=None, regional_sub=None,
             "Aucun ensemble régional ne fournit de fenêtre classable : "
             "estimation globale seulement.")
     return WeatherTypeResult(daily, True, regional_reason=regional_reason)
+
+
+def regime_meteo(daily, bascule=False):
+    """Formule le régime météo à venir pour la tuile « Changement de temps ».
+
+    Lit les signaux DÉJÀ calculés — proportions de type de temps
+    (``ensemble_daily_weather_types``) moyennées sur les ``REGIME_FENETRE_J``
+    premiers jours et la présence d'une bascule de pression
+    (``logic.pmsl_bascule``) — sans aucun nouveau calcul météo. Ordre de
+    décision voulu : d'abord l'incertitude (ne jamais sur-affirmer), puis le
+    temps perturbé (prudence : signaler une précipitation possible), puis le
+    sec, enfin le variable par défaut. La tendance neige/pluie n'est proposée
+    qu'en régime perturbé et reste une possibilité, jamais une certitude.
+
+    Renvoie un ``RegimeMeteo`` ou ``None`` si aucun signal n'est exploitable
+    (dégradation silencieuse, comme le reste du domaine).
+    """
+    parts = None
+    if daily is not None and not daily.empty:
+        window = daily[daily["jour"] <= REGIME_FENETRE_J]
+        window = window if not window.empty else daily
+        parts = {cat: float(window[cat].mean()) / 100.0 for cat in CATEGORIES}
+
+    # Aucun type de temps exploitable : on peut encore parler timing si une
+    # bascule de pression est détectée, sinon rien à afficher.
+    if parts is None:
+        if bascule:
+            return RegimeMeteo("perturbe", "Temps perturbé en approche",
+                               "chute de pression attendue")
+        return None
+
+    wet = parts["neigeux"] + parts["pluvieux"]
+    consensus = max(parts["sec"], wet, parts["mixte"])
+
+    # 1. Modèles divergents : le plus fort accord reste faible, ou la part
+    #    « mixte/incertain » domine — on n'ose aucune tendance.
+    if parts["mixte"] >= REGIME_INCERTAIN_MIXTE_MIN \
+            or consensus < REGIME_CONSENSUS_MIN:
+        return RegimeMeteo("incertain", "Évolution incertaine",
+                           "les modèles divergent")
+
+    # 2. Temps perturbé : précipitations probables (part humide franche ou
+    #    bascule de régime détectée). Tendance de phase seulement si l'écart
+    #    neige/pluie est net.
+    if wet >= REGIME_PERTURBE_WET_MIN or bascule:
+        diff = parts["neigeux"] - parts["pluvieux"]
+        if diff >= REGIME_TENDANCE_MARGE:
+            return RegimeMeteo("perturbe", "Temps perturbé, plutôt neigeux",
+                               "précipitations probables", tendance="neige")
+        if -diff >= REGIME_TENDANCE_MARGE:
+            return RegimeMeteo("perturbe", "Temps perturbé, plutôt pluvieux",
+                               "précipitations probables", tendance="pluie")
+        return RegimeMeteo("perturbe", "Temps perturbé",
+                           "précipitations probables")
+
+    # 3. Temps sec et anticyclonique : part « sec » dominante, pas de bascule.
+    if parts["sec"] >= REGIME_SEC_MIN:
+        return RegimeMeteo("sec", "Temps sec et stable", "hautes pressions")
+
+    # 4. Défaut : signal réel mais sans régime marqué.
+    return RegimeMeteo("variable", "Temps variable", "sans régime marqué")

@@ -339,3 +339,69 @@ def test_fusion_horaire_remplace_seulement_les_heures_couvertes_par_pi():
     assert len(h2) == len(WT.ALTITUDES_PROFIL_M)
     assert set(h1["source"]) == {"AROME-PI"}
     assert set(h2["source"]) == {"Maille fine HD"}
+
+
+# --------------------------------------------------------------------------- #
+#  Tuile « Changement de temps » (regime_meteo) — formulation grand public
+#  à partir des proportions de type de temps déjà calculées + bascule pmsl.
+# --------------------------------------------------------------------------- #
+
+def _regime_daily(neigeux, pluvieux, sec, mixte, jours=range(5)):
+    """Proportions journalières (%) constantes sur la fenêtre de lecture."""
+    return pd.DataFrame([
+        {"jour": j, "neigeux": neigeux, "pluvieux": pluvieux,
+         "sec": sec, "mixte": mixte, "n_classes": 40} for j in jours])
+
+
+def test_regime_sec_anticyclonique_sans_bascule():
+    regime = WT.regime_meteo(_regime_daily(10, 5, 70, 15), bascule=False)
+    assert regime.key == "sec"
+    assert regime.tendance is None
+    assert "sec" in regime.label.lower()
+
+
+def test_regime_perturbe_tendance_neige_puis_pluie():
+    neige = WT.regime_meteo(_regime_daily(55, 20, 15, 10), bascule=False)
+    assert neige.key == "perturbe" and neige.tendance == "neige"
+    assert "neigeux" in neige.label
+    pluie = WT.regime_meteo(_regime_daily(15, 55, 20, 10), bascule=False)
+    assert pluie.key == "perturbe" and pluie.tendance == "pluie"
+    assert "pluvieux" in pluie.label
+
+
+def test_regime_perturbe_sans_tendance_quand_neige_et_pluie_a_egalite():
+    regime = WT.regime_meteo(_regime_daily(30, 30, 30, 10), bascule=False)
+    assert regime.key == "perturbe" and regime.tendance is None
+
+
+def test_regime_incertain_si_mixte_dominant_ou_accord_faible():
+    mixte = WT.regime_meteo(_regime_daily(20, 20, 15, 45), bascule=False)
+    assert mixte.key == "incertain"
+    # Aucun régime ne dépasse le consensus minimal → incertain aussi.
+    disperse = WT.regime_meteo(_regime_daily(25, 15, 35, 25), bascule=False)
+    assert disperse.key == "incertain"
+
+
+def test_regime_bascule_impose_le_temps_perturbe_meme_sur_signal_sec():
+    regime = WT.regime_meteo(_regime_daily(10, 10, 55, 25), bascule=True)
+    assert regime.key == "perturbe"
+
+
+def test_regime_variable_par_defaut_si_aucun_seuil_franchi():
+    regime = WT.regime_meteo(_regime_daily(22, 22, 46, 10), bascule=False)
+    assert regime.key == "variable"
+
+
+def test_regime_ne_lit_que_la_fenetre_courte():
+    # Jours lointains neigeux ignorés : seuls les 4 premiers (secs) comptent.
+    daily = pd.concat([
+        _regime_daily(10, 5, 70, 15, jours=range(5)),
+        _regime_daily(90, 5, 0, 5, jours=range(6, 12)),
+    ], ignore_index=True)
+    assert WT.regime_meteo(daily, bascule=False).key == "sec"
+
+
+def test_regime_sans_type_de_temps_repli_sur_la_seule_bascule():
+    assert WT.regime_meteo(None, bascule=True).key == "perturbe"
+    assert WT.regime_meteo(None, bascule=False) is None
+    assert WT.regime_meteo(pd.DataFrame(), bascule=False) is None

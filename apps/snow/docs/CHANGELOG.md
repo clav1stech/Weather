@@ -14,6 +14,28 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.9] - 2026-07-21
+- Vue d'ensemble neige repensée pour un public grand public (calculs
+  `logic.py`/`weather_type.py` inchangés — travail de présentation) :
+  - bandeau resserré à 3 tuiles (Prochaine neige · Limite pluie-neige 48 h
+    inchangée · **Changement de temps**) ; les anciennes tuiles techniques
+    t850 et bascule pmsl quittent la première lecture ;
+  - nouvelle tuile **Changement de temps** (`weather_type.regime_meteo`) :
+    formule un régime sec / perturbé / incertain / variable à partir des
+    signaux déjà calculés (proportions de type de temps + `pmsl_bascule`),
+    avec tendance neige/pluie possible et timing de bascule — seuils nommés
+    `REGIME_*` (à affiner in situ) ;
+  - section tendance J0→J+15 = **frise de tuiles** (`weather_type_strip_chart`) :
+    une tuile/jour, couleur+emoji = temps dominant, opacité = accord des
+    membres (incertitude croissante rendue visible), répartition en % au
+    survol ; le graphe empilé détaillé passe en expander « Détail par membre » ;
+  - maille fine 48 h en tête, explications AROME-PI/IFS et bilan quotidien
+    repliés dans l'expander « D'où vient cette prévision ? » ; contexte
+    synoptique Z500/T500 en expander.
+- Explorer un run : `medians_chart` affiche désormais les lignes-repères de
+  seuil (neige sommet/village pour t850, repères d'épaisseur) — le signal de
+  seuil retiré de la Vue d'ensemble reste visible en page technique.
+
 ## [0.4.8] - 2026-07-20
 - `core/stats/ensemble.py` (`model_data`/`model_medians`, mutualisé avec le
   canicule) : ne crashe plus quand un modèle n'a aucune valeur (ou pas la

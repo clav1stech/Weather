@@ -85,6 +85,65 @@ def hourly_vertical_weather_chart(profile):
     return fig
 
 
+# Style partagé des catégories de type de temps (couleur + emoji déjà en usage
+# dans le projet — aucun nouveau pictogramme). Ordre = ordre d'empilement.
+_WEATHER_STYLE = {
+    "neigeux": ("#5DADE2", "❄️", "neige"),
+    "pluvieux": ("#2874A6", "🌧️", "pluie"),
+    "sec": ("#F4D03F", "☀️", "sec"),
+    "mixte": ("#AAB7B8", "🌦️", "mixte"),
+}
+# Opacité minimale d'une tuile de la frise : quand les membres s'accordent peu
+# (part dominante faible, cas fréquent à longue échéance), la tuile pâlit vers
+# ce plancher — l'incertitude croissante avec l'échéance devient ainsi visible
+# sans texte. Constante d'AFFICHAGE (pas un seuil météo).
+_STRIP_OPACITY_FLOOR = 0.35
+
+
+def weather_type_strip_chart(daily):
+    """Frise J0→J+15 : une tuile/jour, catégorie DOMINANTE (couleur + emoji),
+    opacité = accord des membres. Le détail des proportions (%) se lit au survol
+    de chaque tuile. ``daily`` = weather_type.ensemble_daily_weather_types."""
+    cats = list(_WEATHER_STYLE)
+    shares = daily[cats].fillna(0.0)
+    totals = shares.sum(axis=1).replace(0, np.nan)
+    dominant_idx = shares.values.argmax(axis=1)
+    dominant = [cats[i] for i in dominant_idx]
+    dom_share = (shares.values[np.arange(len(shares)), dominant_idx]
+                 / totals.to_numpy())
+    dom_share = np.nan_to_num(dom_share, nan=0.0)
+
+    colors = [_WEATHER_STYLE[c][0] for c in dominant]
+    emojis = [_WEATHER_STYLE[c][1] for c in dominant]
+    opacity = _STRIP_OPACITY_FLOOR + (1.0 - _STRIP_OPACITY_FLOOR) * dom_share
+    customdata = np.column_stack([
+        daily["jour"], shares["neigeux"], shares["pluvieux"],
+        shares["sec"], shares["mixte"], daily["n_classes"]])
+
+    fig = go.Figure(go.Bar(
+        x=daily["date"], y=[1] * len(daily),
+        marker=dict(color=colors, opacity=opacity,
+                    line=dict(color=_ink(), width=0.4)),
+        text=emojis, textposition="inside", insidetextanchor="middle",
+        textfont=dict(size=20), customdata=customdata,
+        hovertemplate=("J+%{customdata[0]} · %{x|%a %d %b}<br>"
+                       "❄️ neige %{customdata[1]:.0f} %<br>"
+                       "🌧️ pluie %{customdata[2]:.0f} %<br>"
+                       "☀️ sec %{customdata[3]:.0f} %<br>"
+                       "🌦️ mixte %{customdata[4]:.0f} %<br>"
+                       "%{customdata[5]:.0f} membres classés<extra></extra>"),
+    ))
+    ticks = [f"J+{int(j)}<br>{d:%a %d}"
+             for d, j in zip(daily["date"], daily["jour"])]
+    fig.update_layout(
+        template=_plotly_template(), height=150, bargap=0.12,
+        margin=dict(l=10, r=10, t=10, b=45), showlegend=False,
+        xaxis=dict(tickmode="array", tickvals=daily["date"], ticktext=ticks),
+        yaxis=dict(visible=False, range=[0, 1], fixedrange=True),
+    )
+    return fig
+
+
 def weather_type_chart(daily, hd_reference=None):
     """Proportions pondérées, contextualisées par le scénario HD à 48 h."""
     styles = {

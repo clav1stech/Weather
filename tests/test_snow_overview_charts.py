@@ -11,8 +11,9 @@ sys.path.insert(0, _ROOT)
 
 from apps.snow.app.domains.neige.charts import (  # noqa: E402
     daily_snow_chart, hourly_vertical_weather_chart, medians_chart,
-    weather_type_chart)
+    weather_type_chart, weather_type_strip_chart)
 from apps.snow.app.domains.neige.page import _hd_daily_table  # noqa: E402
+from apps.snow.app.pages.explore import _seuils_repere  # noqa: E402
 
 
 def test_model_medians_chart_exposes_member_p10_p90_amplitude():
@@ -107,3 +108,45 @@ def test_weather_type_chart_est_empile_a_100_pourcent():
     hd_trace = [trace for trace in fig.data if trace.type == "scatter"][0]
     assert hd_trace.text[0] == "HD ☀️"
     assert "pluie 0.0 mm" in hd_trace.hovertext[0]
+
+
+def test_weather_type_strip_expose_dominant_couleur_emoji_et_pourcentages():
+    daily = pd.DataFrame({
+        "date": pd.to_datetime(["2026-01-10", "2026-01-11", "2026-01-12"]),
+        "jour": [0, 1, 2],
+        # J0 accord fort (neige), J1 4-way égal (mixte visuel), J2 sec net.
+        "neigeux": [80.0, 25.0, 10.0],
+        "pluvieux": [5.0, 25.0, 5.0],
+        "sec": [5.0, 25.0, 75.0],
+        "mixte": [10.0, 25.0, 10.0],
+        "n_classes": [40, 40, 40],
+    })
+    fig = weather_type_strip_chart(daily)
+    bars = [trace for trace in fig.data if trace.type == "bar"]
+    assert len(bars) == 1
+    bar = bars[0]
+    # Catégorie dominante par jour : neige, neige (1er argmax sur égalité), sec.
+    assert list(bar.marker.color) == ["#5DADE2", "#5DADE2", "#F4D03F"]
+    assert list(bar.text) == ["❄️", "❄️", "☀️"]
+    # Accord fort (J0) → tuile plus opaque que l'égalité 25 % (J1).
+    assert bar.marker.opacity[0] > bar.marker.opacity[1]
+    # Les proportions restent lisibles au survol de chaque tuile.
+    assert "%" in bar.hovertemplate
+    assert "customdata[1]" in bar.hovertemplate
+
+
+def test_medians_chart_dessine_les_reperes_de_seuil_transmis():
+    rows = [{"model": "AIFS", "member": m,
+             "valid_time": pd.Timestamp("2026-01-10"), "t850": v}
+            for m, v in enumerate((-4.0, 0.0, 4.0))]
+    seuils = _seuils_repere("t850")
+    fig = medians_chart(pd.DataFrame(rows), "t850", "T850", "°C",
+                        seuils_h=seuils)
+    labels = {ann.text for ann in fig.layout.annotations}
+    assert labels == set(seuils)
+
+
+def test_seuils_repere_couvre_t850_et_epaisseur_seulement():
+    assert set(_seuils_repere("t850")) == {"neige sommet", "neige village"}
+    assert set(_seuils_repere("epaisseur")) == {"repère village", "repère sommet"}
+    assert _seuils_repere("pmsl") is None

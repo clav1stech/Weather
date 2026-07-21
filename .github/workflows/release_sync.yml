@@ -1,1 +1,67 @@
-IyBTeW5jaHJvbmlzZSBsZSB0YWcgbW9iaWxlIHZYLlkgZXQgc2EgcmVsZWFzZSBHaXRIdWIgYXZlYyBsZSBkw6lww7R0LgojCiMgQ29udmVudGlvbiBkdSBwcm9qZXQgOiB1biBzZXVsIHRhZy9yZWxlYXNlIHBhciB2ZXJzaW9uIFksIGxlIHRhZyBlc3QgTU9CSUxFCiMgKHJlZMOpcGxhY8OpIHN1ciBsZSBkZXJuaWVyIGNvbW1pdCBkZSBsYSBsaWduZSDDoCBjaGFxdWUgYnVtcCBaKSBldCBsZSBjb3JwcyBkZQojIGxhIHJlbGVhc2UgcydlbnJpY2hpdCBhdSBmaWwgZGVzIFouIExlIGNvcnBzIHZpdCBkYW5zIGRvY3MvcmVsZWFzZXMvPHRhZz4ubWQsCiMgdmVyc2lvbm7DqSBhdmVjIGxlIGNvZGUgLSBjZSB3b3JrZmxvdyBuZSBmYWl0IHF1ZSBwb3Vzc2VyIGxlIHRhZyBldCByZWNvcGllcgojIGNlIGZpY2hpZXIgZGFucyBsYSByZWxlYXNlIChjcsOpw6llIHNpIGFic2VudGUsIG1pc2Ugw6Agam91ciBzaW5vbikuIETDqWNsZW5jaGVtZW50CiMgbWFudWVsIHVuaXF1ZW1lbnQgOiBsZSBwYXNzYWdlIGVuIMKrIExhdGVzdCDCuyByZXN0ZSB1bmUgZMOpY2lzaW9uIGV4cGxpY2l0ZSwgamFtYWlzIGF1dG9tYXRpcXVlLgpuYW1lOiByZWxlYXNlLXN5bmMKCm9uOgogIHdvcmtmbG93X2Rpc3BhdGNoOgogICAgaW5wdXRzOgogICAgICB0YWc6CiAgICAgICAgZGVzY3JpcHRpb246ICJUYWcgbW9iaWxlIMOgIHN5bmNocm9uaXNlciAoZXguIHYyLjUpIgogICAgICAgIHJlcXVpcmVkOiB0cnVlCiAgICAgIHRhcmdldF9zaGE6CiAgICAgICAgZGVzY3JpcHRpb246ICJDb21taXQgY2libGUgZHUgdGFnICh2aWRlID0gSEVBRCBkZSBsYSBicmFuY2hlIGRlIGTDqWNsZW5jaGVtZW50KSIKICAgICAgICByZXF1aXJlZDogZmFsc2UKICAgICAgICBkZWZhdWx0OiAiIgogICAgICBtYWtlX2xhdGVzdDoKICAgICAgICBkZXNjcmlwdGlvbjogIlByb21vdXZvaXIgbGEgcmVsZWFzZSBlbiBMYXRlc3QgKHJldGlyZSBsZSBzdGF0dXQgUHJlLXJlbGVhc2UpIgogICAgICAgIHR5cGU6IGJvb2xlYW4KICAgICAgICBkZWZhdWx0OiBmYWxzZQoKcGVybWlzc2lvbnM6CiAgY29udGVudHM6IHdyaXRlCgpqb2JzOgogIHN5bmM6CiAgICBydW5zLW9uOiB1YnVudHUtbGF0ZXN0CiAgICBzdGVwczoKICAgICAgLSB1c2VzOiBhY3Rpb25zL2NoZWNrb3V0QHY0CiAgICAgICAgd2l0aDoKICAgICAgICAgIGZldGNoLWRlcHRoOiAwCgogICAgICAtIG5hbWU6IETDqXBsYWNlciBsZSB0YWcgbW9iaWxlCiAgICAgICAgcnVuOiB8CiAgICAgICAgICBzZXQgLWV1byBwaXBlZmFpbAogICAgICAgICAgU0hBPSIke3sgaW5wdXRzLnRhcmdldF9zaGEgfX0iCiAgICAgICAgICBpZiBbIC16ICIkU0hBIiBdOyB0aGVuIFNIQT0iJChnaXQgcmV2LXBhcnNlIEhFQUQpIjsgZmkKICAgICAgICAgIGdpdCB0YWcgLWYgIiR7eyBpbnB1dHMudGFnIH19IiAiJFNIQSIKICAgICAgICAgIGdpdCBwdXNoIC1mIG9yaWdpbiAicmVmcy90YWdzLyR7eyBpbnB1dHMudGFnIH19IgoKICAgICAgLSBuYW1lOiBDcsOpZXIgb3UgbWV0dHJlIMOgIGpvdXIgbGEgcmVsZWFzZQogICAgICAgIGVudjoKICAgICAgICAgIEdIX1RPS0VOOiAke3sgZ2l0aHViLnRva2VuIH19CiAgICAgICAgcnVuOiB8CiAgICAgICAgICBzZXQgLWV1byBwaXBlZmFpbAogICAgICAgICAgTk9URVM9ImRvY3MvcmVsZWFzZXMvJHt7IGlucHV0cy50YWcgfX0ubWQiCiAgICAgICAgICBpZiBbICEgLWYgIiROT1RFUyIgXTsgdGhlbgogICAgICAgICAgICBlY2hvICJGaWNoaWVyIGRlIG5vdGVzIGFic2VudCA6ICROT1RFUyIgPiYyCiAgICAgICAgICAgIGV4aXQgMQogICAgICAgICAgZmkKICAgICAgICAgIExBVEVTVF9BUkdTPSgpCiAgICAgICAgICBpZiBbICIke3sgaW5wdXRzLm1ha2VfbGF0ZXN0IH19IiA9ICJ0cnVlIiBdOyB0aGVuCiAgICAgICAgICAgIExBVEVTVF9BUkdTKz0oLS1wcmVyZWxlYXNlPWZhbHNlIC0tbGF0ZXN0KQogICAgICAgICAgZWxzZQogICAgICAgICAgICBMQVRFU1RfQVJHUys9KC0tcHJlcmVsZWFzZSkKICAgICAgICAgIGZpCiAgICAgICAgICBpZiBnaCByZWxlYXNlIHZpZXcgIiR7eyBpbnB1dHMudGFnIH19IiA+L2Rldi9udWxsIDI+JjE7IHRoZW4KICAgICAgICAgICAgQVJHUz0oLS1ub3Rlcy1maWxlICIkTk9URVMiKQogICAgICAgICAgICBpZiBbICIke3sgaW5wdXRzLm1ha2VfbGF0ZXN0IH19IiA9ICJ0cnVlIiBdOyB0aGVuCiAgICAgICAgICAgICAgQVJHUys9KC0tcHJlcmVsZWFzZT1mYWxzZSAtLWxhdGVzdCkKICAgICAgICAgICAgZmkKICAgICAgICAgICAgZ2ggcmVsZWFzZSBlZGl0ICR7eyBpbnB1dHMudGFnIH19ICIke0FSR1NbQF19IgogICAgICAgICAgZWxzZQogICAgICAgICAgICBnaCByZWxlYXNlIGNyZWF0ZSAiJHt7IGlucHV0cy50YWcgfX0iIC0tdGl0bGUgIiR7eyBpbnB1dHMudGFnIH19IiAtLW5vdGVzLWZpbGUgIiROT1RFUyIgIiR7TEFURVNUX0FSR1NbQF19IgogICAgICAgICAgZmkK
+# Synchronise le tag mobile vX.Y et sa release GitHub avec le dépôt.
+#
+# Convention du projet : un seul tag/release par version Y, le tag est MOBILE
+# (redéplacé sur le dernier commit de la ligne à chaque bump Z) et le corps de
+# la release s'enrichit au fil des Z. Le corps vit dans docs/releases/<tag>.md,
+# versionné avec le code - ce workflow ne fait que pousser le tag et recopier
+# ce fichier dans la release (créée si absente, mise à jour sinon). Déclenchement
+# manuel uniquement : le passage en « Latest » reste une décision explicite, jamais automatique.
+name: release-sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag mobile à synchroniser (ex. v2.5)"
+        required: true
+      target_sha:
+        description: "Commit cible du tag (vide = HEAD de la branche de déclenchement)"
+        required: false
+        default: ""
+      make_latest:
+        description: "Promouvoir la release en Latest (retire le statut Pre-release)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Déplacer le tag mobile
+        run: |
+          set -euo pipefail
+          SHA="${{ inputs.target_sha }}"
+          if [ -z "$SHA" ]; then SHA="$(git rev-parse HEAD)"; fi
+          git tag -f "${{ inputs.tag }}" "$SHA"
+          git push -f origin "refs/tags/${{ inputs.tag }}"
+
+      - name: Créer ou mettre à jour la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NOTES="docs/releases/${{ inputs.tag }}.md"
+          if [ ! -f "$NOTES" ]; then
+            echo "Fichier de notes absent : $NOTES" >&2
+            exit 1
+          fi
+          if gh release view "${{ inputs.tag }}" >/dev/null 2>&1; then
+            ARGS=(--notes-file "$NOTES")
+            if [ "${{ inputs.make_latest }}" = "true" ]; then
+              ARGS+=(--prerelease=false --latest)
+            fi
+            gh release edit "${{ inputs.tag }}" "${ARGS[@]}"
+          else
+            LATEST_ARGS=(--prerelease)
+            if [ "${{ inputs.make_latest }}" = "true" ]; then
+              LATEST_ARGS=(--latest)
+            fi
+            gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --notes-file "$NOTES" "${LATEST_ARGS[@]}"
+          fi

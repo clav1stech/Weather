@@ -335,3 +335,84 @@ def fan_chart(sub, var, title, unit, seuil=0.0):
                       legend=dict(orientation="h", yanchor="top", y=-0.20,
                                   xanchor="left", x=0))
     return fig
+
+
+# Couleurs de phase pour les vues Météo-France PNT (mêmes teintes que le reste
+# du domaine). Les catégories ptype ajoutent « autre » (code hors table).
+_MF_PHASE_COLOR = {"sec": "#F4D03F", "pluie": "#2874A6", "neige": "#5DADE2",
+                   "mixte": "#8E44AD", "autre": "#AAB7B8"}
+
+
+def mf_meteogram(series, title):
+    """Météogramme déterministe (AROME-PI/IFS) : pluie et neige (mm éq. eau)
+    empilées + température 2 m. ``series`` : valid_time, pluie_mm, neige_mm,
+    t2m_c. None si rien d'exploitable."""
+    if series is None or series.empty \
+            or not series[["pluie_mm", "neige_mm", "t2m_c"]].notna().any(axis=None):
+        return None
+    fig = go.Figure()
+    fig.add_bar(x=series["valid_time"], y=series["neige_mm"], name="❄️ Neige",
+                marker_color="#5DADE2",
+                hovertemplate="%{x|%a %d %b · %Hh}<br>neige %{y:.1f} mm éq."
+                              "<extra></extra>")
+    fig.add_bar(x=series["valid_time"], y=series["pluie_mm"], name="🌧️ Pluie",
+                marker_color="#2874A6",
+                hovertemplate="%{x|%a %d %b · %Hh}<br>pluie %{y:.1f} mm"
+                              "<extra></extra>")
+    fig.add_scatter(x=series["valid_time"], y=series["t2m_c"], name="🌡️ T2m",
+                    yaxis="y2", mode="lines",
+                    line=dict(color=_ink(), width=1.6, dash="dot"),
+                    hovertemplate="%{x|%a %d %b · %Hh}<br>T2m %{y:+.1f} °C"
+                                  "<extra></extra>")
+    fig.update_layout(
+        template=_plotly_template(), height=390, barmode="stack",
+        title=dict(text=title, x=0.01, xanchor="left", y=0.98),
+        margin=dict(l=10, r=10, t=55, b=85),
+        yaxis=dict(title="mm éq. eau", rangemode="tozero"),
+        yaxis2=dict(title="°C", overlaying="y", side="right", showgrid=False),
+        legend=dict(orientation="h", yanchor="top", y=-0.18, x=0))
+    return fig
+
+
+def mf_member_box(dist, value_col, unit, title, seuils_h=None):
+    """Dispersion des membres régionaux par fenêtre de cumul (boîte + points).
+
+    ``dist`` : window (libellé), member, ``value_col``. Une boîte par fenêtre
+    expose l'incertitude locale de l'ensemble ; ``seuils_h`` trace les paliers
+    physiques (1/5/20 cm). None si aucune valeur exploitable."""
+    if dist is None or dist.empty or not dist[value_col].notna().any():
+        return None
+    fig = go.Figure(go.Box(
+        x=dist["window"], y=dist[value_col], boxpoints="all", jitter=0.4,
+        pointpos=0, marker=dict(color="#2E86C1", size=5),
+        line=dict(color="#2E86C1"), fillcolor=_rgba("#5DADE2", 0.25),
+        hovertemplate="%{x}<br>membre : %{y:.1f} " + unit + "<extra></extra>"))
+    for label, y in (seuils_h or {}).items():
+        fig.add_hline(y=y, line_dash="dot", line_color=_ink(),
+                      annotation_text=label, annotation_position="top left")
+    fig.update_layout(template=_plotly_template(), height=390, showlegend=False,
+                      title=dict(text=title, x=0.01, xanchor="left", y=0.98),
+                      margin=dict(l=10, r=10, t=55, b=45),
+                      yaxis=dict(title=unit, rangemode="tozero"))
+    return fig
+
+
+def ptype_strip(frise):
+    """Frise catégorielle du type de précipitation AROME-PI (une tuile par
+    échéance). ``frise`` : valid_time, categorie, label, code. Le code brut est
+    lisible au survol (mapping ptype provisoire). None si vide."""
+    if frise is None or frise.empty:
+        return None
+    colors = [_MF_PHASE_COLOR.get(c, "#AAB7B8") for c in frise["categorie"]]
+    fig = go.Figure(go.Bar(
+        x=frise["valid_time"], y=[1] * len(frise),
+        marker=dict(color=colors, line=dict(color=_ink(), width=0.4)),
+        customdata=np.stack([frise["label"], frise["code"]], axis=-1),
+        hovertemplate="%{x|%a %d %b · %Hh}<br>%{customdata[0]}"
+                      "<br>code ptype %{customdata[1]:.0f}<extra></extra>"))
+    fig.update_layout(
+        template=_plotly_template(), height=120, bargap=0.1, showlegend=False,
+        margin=dict(l=10, r=10, t=10, b=35),
+        xaxis=dict(title=None),
+        yaxis=dict(visible=False, range=[0, 1], fixedrange=True))
+    return fig

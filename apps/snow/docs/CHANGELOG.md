@@ -14,6 +14,23 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.5.0] - 2026-07-21
+- Nouvelle page « Maille fine Météo-France » (lecture seule) : exploration
+  DIRECTE des sources PNT jusqu'ici seulement consommées indirectement, chacune
+  selon sa nature —
+  - **météogramme déterministe** AROME-PI / AROME-IFS (pluie/neige en mm éq.
+    eau empilées + T2m), sélecteur modèle et point ;
+  - **dispersion des ensembles régionaux** PE-AROME / PE-ARPEGE : une boîte de
+    membres par fenêtre de cumul + tableau de probabilité de dépassement des
+    paliers 1/5/20 cm ; source absente = message explicite, jamais comblée ;
+  - **frise du type de précipitation** AROME-PI (ptype). Mapping des codes
+    PROVISOIRE (hypothèse WMO GRIB2 4.201, `PTYPE_LABELS`/`classify_ptype`
+    dans weather_type.py, à valider in situ) ; code brut lisible au survol,
+    code hors table rendu « autre », jamais assimilé au sec.
+- Aucune fusion ni substitution entre sources ; lecture seule via les lecteurs
+  existants (`load_mf_local/regional`, `latest_mf_*`) ; aucune touche au
+  pipeline. Helpers de mise en forme et graphiques couverts par des tests.
+
 ## [0.4.10] - 2026-07-21
 - Vue d'ensemble neige — finitions grand public :
   - coupe maille fine 48 h : le temps sec n'est plus tracé heure par heure

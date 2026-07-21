@@ -405,3 +405,16 @@ def test_regime_sans_type_de_temps_repli_sur_la_seule_bascule():
     assert WT.regime_meteo(None, bascule=True).key == "perturbe"
     assert WT.regime_meteo(None, bascule=False) is None
     assert WT.regime_meteo(pd.DataFrame(), bascule=False) is None
+
+
+def test_classify_ptype_decode_table_et_marque_les_codes_inconnus():
+    assert WT.classify_ptype(0)[0] == "sec"
+    assert WT.classify_ptype(1)[0] == "pluie"
+    assert WT.classify_ptype(5)[0] == "neige"
+    assert WT.classify_ptype(6)[0] == "mixte"
+    # Code hors table : rendu « autre », jamais assimilé au sec.
+    assert WT.classify_ptype(99)[0] == "autre"
+    assert "99" in WT.classify_ptype(99)[1]
+    # Absence / NaN → None (dégradation silencieuse).
+    assert WT.classify_ptype(None) is None
+    assert WT.classify_ptype(np.nan) is None

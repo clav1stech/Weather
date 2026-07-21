@@ -93,6 +93,7 @@ def test_snow_operational_pages_render_without_exception(monkeypatch):
     for page in ("Convergence des runs", "Contrôle des runs", "Lancer le pipeline"):
         at.sidebar.radio[0].set_value(page).run()
         assert not at.exception, (page, at.exception)
+    assert "Maille fine Météo-France" in options
 
 
 def test_neige_overview_and_explore_pages_render_without_exception(monkeypatch):
@@ -102,6 +103,7 @@ def test_neige_overview_and_explore_pages_render_without_exception(monkeypatch):
     monkeypatch.setenv("WEATHER_LOCAL", "1")
     at = AppTest.from_file(os.path.join(_ROOT, "snow_app.py"), default_timeout=90)
     at.run()
-    for page in ("Vue d'ensemble neige", "Explorer un run"):
+    for page in ("Vue d'ensemble neige", "Explorer un run",
+                 "Maille fine Météo-France"):
         at.sidebar.radio[0].set_value(page).run()
         assert not at.exception, (page, at.exception)

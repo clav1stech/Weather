@@ -28,11 +28,12 @@ from apps.snow.app.domains import DOMAIN_PAGES
 from apps.snow.app.pages.convergence import page_convergence
 from apps.snow.app.pages.diagnostic import page_diagnostic
 from apps.snow.app.pages.explore import page_explore
+from apps.snow.app.pages.meteofrance import page_meteofrance
 from apps.snow.app.pages.pipeline import page_run
 from apps.snow.app.runtime import IS_LOCAL
 from apps.snow.app.ui.theme import GLOBAL_CSS
 
-SNOW_APP_VERSION = "0.4.10"
+SNOW_APP_VERSION = "0.5.0"
 
 st.set_page_config(page_title="Dashboard Neige — Megève",
                    page_icon="🏔️", layout="wide")
@@ -40,6 +41,7 @@ st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 CORE_PAGES = [
     ("Explorer un run", page_explore),
+    ("Maille fine Météo-France", page_meteofrance),
     ("Convergence des runs", page_convergence),
     ("Contrôle des runs", page_diagnostic),
 ]

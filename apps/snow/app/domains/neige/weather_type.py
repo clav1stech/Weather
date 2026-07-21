@@ -106,6 +106,22 @@ LPN_MARGE_HD_M = SC.LPN_MARGE_M
 CLASSIFICATION_SITE = "village"
 CATEGORIES = ("neigeux", "pluvieux", "sec", "mixte")
 
+# Décodage du type de précipitation AROME-PI (produit PRECIPITATION_TYPE_15_MIN).
+# HYPOTHÈSE : les codes suivent la table WMO GRIB2 4.201. À VALIDER IN SITU sur
+# un premier épisode précipitant — seule la valeur 0 (pas de précipitation) a pu
+# être observée en conditions réelles jusqu'ici. Le code brut reste affiché au
+# survol pour lever tout doute ; un code hors table est rendu « autre »,
+# JAMAIS assimilé silencieusement à du sec. (catégorie, libellé)
+PTYPE_LABELS = {
+    0: ("sec", "☀️ Pas de précipitation"),
+    1: ("pluie", "🌧️ Pluie"),
+    3: ("pluie", "🌧️ Pluie verglaçante"),
+    5: ("neige", "❄️ Neige"),
+    6: ("mixte", "🌦️ Neige mouillée"),
+    7: ("mixte", "🌦️ Pluie et neige mêlées"),
+    8: ("mixte", "🌦️ Granules de glace"),
+}
+
 # Pondération réservée au TYPE DE TEMPS LOCAL (précipitation + phase).
 # Les trois ensembles n'ont ni la même taille ni la même pertinence pour
 # représenter l'orographie de la vallée de l'Arve. On classe toujours chaque
@@ -620,6 +636,22 @@ def classify_pe_arome_day(precip_mm, snow_water_mm):
     if rain_fraction >= PE_AROME_FRACTION_PLUIE_MIN:
         return "pluvieux"
     return "mixte"
+
+
+def classify_ptype(code):
+    """(catégorie, libellé) d'un code de type de précipitation AROME-PI.
+
+    Décodage via ``PTYPE_LABELS`` (hypothèse WMO GRIB2 4.201, à valider in
+    situ). ``None`` si le code est absent/NaN ; un code hors table donne une
+    catégorie ``"autre"`` explicite plutôt qu'un rattachement silencieux au sec.
+    """
+    if code is None or (isinstance(code, float) and np.isnan(code)):
+        return None
+    try:
+        key = int(round(float(code)))
+    except (TypeError, ValueError):
+        return None
+    return PTYPE_LABELS.get(key, ("autre", f"❔ Code {key}"))
 
 
 def _precip_weighted(group, column):

@@ -144,7 +144,7 @@ def page_neige(runs, sig):
         st.caption(f"⚠️ {label} : {motif} (aucun run à horizon plein disponible)")
 
     # ---------------------------- B. Les 2 prochains jours (maille fine) --
-    st.subheader("Les 2 prochains jours — détail par altitude")
+    st.subheader("Prochaines 48 heures")
     hd_profile = weather_type.hd_vertical_hourly_profile(hd_df)
     pi_df = latest_mf_local_deterministic(mf_sig, SC.AROME_PI_MODEL)
     ifs_df = latest_mf_local_deterministic(mf_sig, SC.AROME_IFS_MODEL)
@@ -161,8 +161,8 @@ def page_neige(runs, sig):
         hd_profile.reason if combined.empty else None)
     hd_reference = pd.DataFrame()
     if profile.available:
-        st.caption("Un point par heure et par altitude : couleur/forme = phase, "
-                   "taille = quantité. Survolez un point pour lire les cm/mm.")
+        st.caption("Précipitations posées sur la ligne de chaque altitude "
+                   "(taille = quantité) ; ligne nue = temps sec.")
         st.plotly_chart(hourly_vertical_weather_chart(profile.daily),
                         width="stretch")
         summary = weather_type.hd_daily_amounts(profile.daily)
@@ -173,7 +173,7 @@ def page_neige(runs, sig):
                        if "iso0_min_m" in hd else "")
             st.caption(f"🔬 Maille fine ({hd['source']}, 48 h) : "
                        f"{hd['cumul_cm']:.1f} cm au sommet{iso_txt}")
-        with st.expander("D'où vient cette prévision ?"):
+        with st.expander("Sources de la prévision"):
             st.markdown("**Bilan quotidien sur la fenêtre affichée**")
             st.dataframe(_hd_daily_table(summary), width="stretch")
             if pi_profile.available:
@@ -203,14 +203,13 @@ def page_neige(runs, sig):
         st.info(profile.reason)
 
     # ------------------------------------ C. Les jours suivants (tendance) --
-    st.subheader("Jusqu'à J+15 — tendance jour par jour")
+    st.subheader("Tendance à 15 jours")
     if weather.available:
-        st.caption("Une tuile par jour : couleur/emoji = temps dominant, "
-                   "tuile d'autant plus pâle que les membres divergent (au "
-                   "survol : la répartition neige/pluie/sec/mixte en %).")
+        st.caption("Une tuile par jour, d'autant plus pâle que les scénarios "
+                   "divergent ; répartition détaillée au survol.")
         st.plotly_chart(weather_type_strip_chart(weather.daily),
                         width="stretch")
-        with st.expander("Détail par membre (probabilités)"):
+        with st.expander("Détail par membre"):
             st.plotly_chart(weather_type_chart(weather.daily, hd_reference),
                             width="stretch")
             st.caption(f"Sec si precip < {weather_type.PRECIP_BRUIT_MM_JOUR:.1f} mm/j. "
@@ -290,8 +289,8 @@ def page_neige(runs, sig):
     else:
         st.info(weather.reason)
 
-    # Combien de neige, quel jour — quantités au sommet (reste visible).
-    st.markdown("**Combien de neige, quel jour — Mont d'Arbois (1830 m)**")
+    # Quantités attendues au sommet (reste visible).
+    st.markdown("**Cumuls de neige — Mont d'Arbois**")
     if signal_sommet is not None and not signal_sommet.empty:
         st.plotly_chart(daily_snow_chart(signal_sommet, "sommet"),
                         width="stretch")
@@ -322,8 +321,7 @@ def page_neige(runs, sig):
         st.caption("Variable neige absente du pool courant.")
 
     # ------------------------------------------------------- D. Repères --
-    st.subheader("Limite pluie-neige (iso 0° − "
-                 f"{SC.LPN_MARGE_M} m) vs altitude des points")
+    st.subheader("Limite pluie-neige")
     if lpn is not None and not lpn.empty:
         st.plotly_chart(lpn_chart(lpn), width="stretch")
     else:

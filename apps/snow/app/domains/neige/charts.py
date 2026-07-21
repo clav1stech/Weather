@@ -11,20 +11,34 @@ from core.stats.ensemble import model_data, model_medians, super_ensemble
 
 
 def hourly_vertical_weather_chart(profile):
-    """Phase et intensité horaires aux quatre altitudes sur les prochaines 48 h."""
+    """Phase et intensité horaires aux quatre altitudes sur les prochaines 48 h.
+
+    Le temps sec n'est PAS tracé heure par heure : il forme le « rail » calme
+    de chaque altitude (une ligne de fond continue), sur lequel les
+    précipitations se posent en relief. Une période entièrement sèche devient
+    quatre lignes nettes au lieu d'une grille de cercles identiques."""
     fig = go.Figure()
+    altitudes = sorted(profile["altitude_m"].unique())
+    xmin, xmax = profile["valid_time"].min(), profile["valid_time"].max()
+    # Rails d'altitude = état sec/calme de fond, dessinés d'abord (sous les
+    # marqueurs). Un seul figure en légende, avec l'emoji ☀️ déjà en usage.
+    rail_color = _rgba(_ink(), 0.20)
+    for i, alt in enumerate(altitudes):
+        fig.add_scatter(x=[xmin, xmax], y=[alt, alt], mode="lines",
+                        line=dict(color=rail_color, width=1.4),
+                        name="☀️ Temps sec", legendgroup="sec",
+                        showlegend=(i == 0), hoverinfo="skip")
+
     styles = {
         "neige": ("❄️ Neige", "diamond", "#5DADE2"),
         "pluie": ("🌧️ Pluie", "circle", "#2471A3"),
         "mixte": ("🌦️ Pluie/neige", "square", "#8E44AD"),
-        "sec": ("☀️ Sec", "circle-open", "#D4AC0D"),
     }
     for phase_name, (label, symbol, color) in styles.items():
         points = profile[profile["phase"] == phase_name]
         if not points.empty:
-            sizes = (np.full(len(points), 7.0) if phase_name == "sec" else
-                     np.clip(10.0 + 7.0 * np.sqrt(points["quantite"].clip(lower=0)),
-                             10.0, 32.0))
+            sizes = np.clip(10.0 + 7.0 * np.sqrt(points["quantite"].clip(lower=0)),
+                            10.0, 32.0)
             sources = (points["source"] if "source" in points.columns
                        else pd.Series(["Maille fine HD"] * len(points),
                                       index=points.index))
@@ -37,9 +51,7 @@ def hourly_vertical_weather_chart(profile):
                     points["valid_time"], points["altitude_m"],
                     points["quantite"], points["unite"], points["t2m_c"],
                     sources, snow_values, rain_values):
-                if phase_name == "sec":
-                    amount = "sec"
-                elif phase_name == "mixte":
+                if phase_name == "mixte":
                     amount = f"❄️ {snow:.1f} cm · 🌧️ {rain:.1f} mm"
                 else:
                     amount = f"{q:.1f} {unit}"

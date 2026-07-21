@@ -61,6 +61,23 @@ def test_hourly_hd_chart_reste_borne_aux_altitudes_et_masque_lpn_iso0():
     assert fig.layout.legend.y < 0
 
 
+def test_hourly_chart_periode_seche_rendue_en_rails_sans_marqueurs():
+    # Cas d'été : tout sec aux quatre altitudes → une ligne de fond par
+    # altitude (rail « Temps sec »), aucun marqueur de précipitation.
+    rows = [{
+        "valid_time": pd.Timestamp("2026-07-21 06:00") + pd.Timedelta(hours=h),
+        "altitude_m": alt, "phase": "sec", "quantite": 0.0, "unite": "mm",
+        "t2m_c": 20.0, "neige_cm": float("nan"), "pluie_mm": float("nan"),
+    } for h in range(6) for alt in (1100, 1300, 1600, 2000)]
+    fig = hourly_vertical_weather_chart(pd.DataFrame(rows))
+    line_traces = [t for t in fig.data if t.mode == "lines"]
+    marker_traces = [t for t in fig.data if t.mode == "markers"]
+    assert len(line_traces) == 4                 # un rail par altitude
+    assert not marker_traces                     # aucun cercle « sec » par heure
+    named = [t for t in line_traces if t.showlegend]
+    assert len(named) == 1 and named[0].name == "☀️ Temps sec"
+
+
 def test_hourly_chart_affiche_explicitement_la_phase_mixte_arome_pi():
     row = {
         "valid_time": pd.Timestamp("2026-01-10 06:00"),
@@ -69,10 +86,12 @@ def test_hourly_chart_affiche_explicitement_la_phase_mixte_arome_pi():
         "quantite": 2.0, "unite": "mm éq. eau", "source": "AROME-PI",
     }
     fig = hourly_vertical_weather_chart(pd.DataFrame([row]))
-    assert "🌦️ Pluie/neige" in {trace.name for trace in fig.data}
-    assert "Source : AROME-PI" in fig.data[0].hovertext[0]
-    assert "❄️ 0.9 cm" in fig.data[0].hovertext[0]
-    assert "🌧️ 1.1 mm" in fig.data[0].hovertext[0]
+    traces = {trace.name: trace for trace in fig.data}
+    assert "🌦️ Pluie/neige" in traces
+    mixte = traces["🌦️ Pluie/neige"]
+    assert "Source : AROME-PI" in mixte.hovertext[0]
+    assert "❄️ 0.9 cm" in mixte.hovertext[0]
+    assert "🌧️ 1.1 mm" in mixte.hovertext[0]
 
 
 def test_bilan_hd_quotidien_affiche_mm_et_cm_par_altitude():

@@ -14,6 +14,17 @@ Sémantique de version propre à la phase de développement :
   qu'au **merge réel en main**, jamais avant, et uniquement sur instruction
   explicite de l'utilisateur. Aucun tag/release publié avant ce merge.
 
+## [0.4.10] - 2026-07-21
+- Vue d'ensemble neige — finitions grand public :
+  - coupe maille fine 48 h : le temps sec n'est plus tracé heure par heure
+    (grille de cercles identiques) mais forme le « rail » calme de chaque
+    altitude, sur lequel les précipitations ressortent en relief — une période
+    entièrement sèche devient quatre lignes nettes ;
+  - titres remis au propre, sobres et sans jargon : « Prochaines 48 heures »,
+    « Tendance à 15 jours », « Cumuls de neige — Mont d'Arbois », « Limite
+    pluie-neige » (plus de formule ni de « vs » dans les titres) ; expanders
+    « Sources de la prévision » / « Détail par membre ».
+
 ## [0.4.9] - 2026-07-21
 - Vue d'ensemble neige repensée pour un public grand public (calculs
   `logic.py`/`weather_type.py` inchangés — travail de présentation) :

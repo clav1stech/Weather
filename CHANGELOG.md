@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.0.3] - 2026-07-26
+Neige : vue d'ensemble repensée grand public et page « Maille fine Météo-France ».
+
+Le bandeau de tuiles se resserre à l'essentiel (Prochaine neige · Limite
+pluie-neige 48 h · Changement de temps, nouvelle tuile formulant un régime
+sec/perturbé/incertain/variable à partir des signaux déjà calculés) ; la
+tendance J0→J+15 devient une frise de tuiles (couleur+emoji = temps dominant,
+opacité = accord des membres) et la coupe maille fine 48 h ne trace plus le
+temps sec heure par heure mais en « rail » calme par altitude, pour faire
+ressortir les précipitations en relief. Nouvelle page « Maille fine
+Météo-France » (lecture seule) : météogramme déterministe AROME-PI/IFS,
+dispersion des ensembles régionaux PE-AROME/PE-ARPEGE avec probabilité de
+dépassement des paliers 1/5/20 cm, frise du type de précipitation (mapping
+ptype provisoire, à valider in situ). Aucune fusion entre sources ; lecture
+seule via les lecteurs existants.
+
 ## [3.0.2] - 2026-07-26
 Neige : diagnostic pluie-neige pondéré et flux Météo-France directs.
 

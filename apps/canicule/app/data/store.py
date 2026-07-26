@@ -20,6 +20,7 @@ from core.store import (
     concat_partitions,
     parse_partition_name,
 )
+from core.store.github_http import GitHubReleaseHttpStore
 
 
 def store_active() -> bool:
@@ -29,13 +30,20 @@ def store_active() -> bool:
 
 
 def get_store():
-    """Construit le magasin selon WEATHER_STORE_BACKEND. « local » (tests/dev)
-    lit un dossier (WEATHER_STORE_DIR) ; « github » (prod) lit le release dédié.
-    Le reste du code ne voit qu'une interface DataStore, jamais le backend."""
-    backend = os.environ.get("WEATHER_STORE_BACKEND", "github").strip().lower()
+    """Construit le magasin de LECTURE selon WEATHER_STORE_BACKEND :
+      • « github_http » (défaut) : API REST + HTTPS, sans `gh` ni token — le
+        seul backend utilisable sur Streamlit Cloud (pas de CLI gh) ;
+      • « github » : via la CLI `gh` (dev local disposant de gh) ;
+      • « local » : un dossier (WEATHER_STORE_DIR), pour les tests.
+    Le reste du code ne voit qu'une interface DataStore, jamais le backend.
+    L'ÉCRITURE (double écriture pipeline) ne passe pas par ici : elle est inline
+    dans Forecast.py via gh."""
+    backend = os.environ.get("WEATHER_STORE_BACKEND", "github_http").strip().lower()
     if backend == "local":
         return LocalDirStore(os.environ["WEATHER_STORE_DIR"])
-    return GitHubReleaseStore(repo=C.STORE_REPO, tag=C.STORE_TAG)
+    if backend == "github":
+        return GitHubReleaseStore(repo=C.STORE_REPO, tag=C.STORE_TAG)
+    return GitHubReleaseHttpStore(repo=C.STORE_REPO, tag=C.STORE_TAG)
 
 
 def _partition_assets(store):

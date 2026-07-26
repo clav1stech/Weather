@@ -6,6 +6,7 @@ Fonctions pures de partition + magasin local (fichiers) + magasin GitHub (CLI
 `gh` mockée, aucun réseau). Chemins temporaires uniquement — ne touche JAMAIS
 aux vraies bases. Exécutable sans pytest : `python tests/test_store.py`."""
 
+import io
 import os
 import subprocess
 import sys
@@ -16,6 +17,7 @@ import pandas as pd
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
+import core.store.github_http as GH_HTTP  # noqa: E402
 from core.store import partition as P  # noqa: E402
 from core.store.github import GitHubReleaseStore  # noqa: E402
 from core.store.local import LocalDirStore  # noqa: E402
@@ -211,6 +213,97 @@ def test_github_ensure_release_noop_when_present():
     store = _FakeGh(release_exists=True)
     store.ensure_release()
     assert not any(c[:2] == ["release", "create"] for c in store.calls)
+
+
+# ------------------------------------------------------------ github http store
+class _FakeResp:
+    def __init__(self, status=200, json_data=None, content=b""):
+        self.status_code = status
+        self._json, self._content = json_data, content
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+    def json(self):
+        return self._json
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def iter_content(self, chunk_size=1):
+        yield self._content
+
+
+class _FakeRequests:
+    """Simule requests.get : sert le JSON du release sur l'URL /releases/tags/,
+    et les octets d'asset sur les browser_download_url."""
+
+    def __init__(self, release_json, contents):
+        self.release_json = release_json      # None → simule un 404
+        self.contents = contents              # {url: bytes}
+        self.api_calls = 0
+
+    def get(self, url, headers=None, timeout=None, stream=False):
+        if "/releases/tags/" in url:
+            self.api_calls += 1
+            if self.release_json is None:
+                return _FakeResp(status=404)
+            return _FakeResp(status=200, json_data=self.release_json)
+        return _FakeResp(status=200, content=self.contents.get(url, b""))
+
+
+def _with_fake_http(release_json, contents):
+    orig = GH_HTTP.requests
+    fake = _FakeRequests(release_json, contents)
+    GH_HTTP.requests = fake
+    return orig, fake
+
+
+def test_http_list_and_download_anonymous():
+    df = _df(["2026-07-01"])
+    buf = io.BytesIO(); df.to_parquet(buf, index=False)
+    content = buf.getvalue()
+    rel = {"assets": [
+        {"name": "database_paris_2026-07.parquet", "size": len(content),
+         "updated_at": "2026-07-26T14:58:29Z", "browser_download_url": "https://dl/x"},
+        {"name": "autre_2026-07.parquet", "size": 1,
+         "updated_at": "Z", "browser_download_url": "https://dl/y"}]}
+    orig, fake = _with_fake_http(rel, {"https://dl/x": content})
+    try:
+        store = GH_HTTP.GitHubReleaseHttpStore("owner/repo")
+        assert store.token is None  # aucun token requis
+        assets = store.list("database_paris")
+        assert [a.name for a in assets] == ["database_paris_2026-07.parquet"]
+        assert assets[0].etag == "2026-07-26T14:58:29Z"  # updated_at = etag
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = os.path.join(tmp, "out.parquet")
+            store.download("database_paris_2026-07.parquet", dest)
+            assert P.same_rows(pd.read_parquet(dest), df)
+        assert fake.api_calls == 1  # _release mémoïsé : list + download = 1 appel API
+    finally:
+        GH_HTTP.requests = orig
+
+
+def test_http_absent_release_is_empty():
+    orig, _ = _with_fake_http(None, {})
+    try:
+        assert GH_HTTP.GitHubReleaseHttpStore("owner/repo").list() == []
+    finally:
+        GH_HTTP.requests = orig
+
+
+def test_http_is_read_only():
+    store = GH_HTTP.GitHubReleaseHttpStore("owner/repo")
+    for op in (lambda: store.upload("x", "y"), lambda: store.delete("x")):
+        try:
+            op()
+        except NotImplementedError:
+            continue
+        raise AssertionError("l'écriture doit lever NotImplementedError")
 
 
 if __name__ == "__main__":

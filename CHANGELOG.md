@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.6.3] - 2026-07-26
+Explorer un run : correction d'un warning pandas sur le round des tables.
+
+`raw.round(2)` s'appliquait à l'ensemble du DataFrame des tableaux d'export
+(onglet 🧾), y compris une colonne datetime résiduelle, ce que pandas
+n'accepte plus silencieusement (`UserWarning: obj.round has no effect with
+datetime, timedelta, or period dtypes`). Le round ne porte désormais que sur
+les colonnes numériques (`select_dtypes(include="number")`), comme c'est déjà
+le cas partout ailleurs dans le code (`app/stats/tables.py`,
+`app/stats/ensemble.py`). Aucun changement de valeur affichée.
+
 ## [2.6.2] - 2026-07-19
 Canicule : calendrier du risque lisible sur mobile (case compacte).
 

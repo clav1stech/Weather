@@ -137,7 +137,9 @@ def page_explore(runs, sig):
         choice = st.selectbox("Table", list(tables), key="tbl_sheet")
         raw = tables[choice]()
         if raw is not None:
-            raw = raw.drop(columns=["date"], errors="ignore").round(2)
+            raw = raw.drop(columns=["date"], errors="ignore")
+            num_cols = raw.select_dtypes(include="number").columns
+            raw[num_cols] = raw[num_cols].round(2)
         if raw is None or raw.empty:
             st.info("Table indisponible.")
         else:

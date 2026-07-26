@@ -42,7 +42,8 @@ export_dir = project_dir / "Export"
 BACKUP_KEEP = 15
 
 
-# Extraire les versions depuis les deux points d'entrée (sources de vérité, lues par regex)
+# Extraire la version depuis core/version.py (source de vérité unique, lue par regex,
+# partagée par les deux apps depuis v3.0)
 def _get_version(relative_path, variable, fallback):
     entrypoint = project_dir / relative_path
     with open(entrypoint, "r", encoding="utf-8") as f:
@@ -52,8 +53,9 @@ def _get_version(relative_path, variable, fallback):
         return fallback
 
 
-APP_VERSION = _get_version("meteo_app.py", "APP_VERSION", (2, 0, 0))
-SNOW_APP_VERSION = _get_version("snow_app.py", "SNOW_APP_VERSION", (0, 1, 0))
+_SHARED_VERSION = _get_version("core/version.py", "SHARED_VERSION", (3, 0, 0))
+APP_VERSION = _SHARED_VERSION
+SNOW_APP_VERSION = _SHARED_VERSION
 
 # Dossiers ignorés dans TOUS les profils (données intouchables, artefacts, config locale)
 EXCLUDED_DIRS_ALWAYS = {

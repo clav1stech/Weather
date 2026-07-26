@@ -39,8 +39,9 @@ from app.pages.explore import page_explore
 from app.pages.overview import page_overview
 from app.pages.pipeline import page_run
 from app.ui.theme import GLOBAL_CSS
+from core.version import SHARED_VERSION
 
-APP_VERSION = "2.6.2"
+APP_VERSION = SHARED_VERSION
 
 st.set_page_config(page_title="Dashboard Météo — Ensembles Paris",
                    page_icon="🌡️", layout="wide")

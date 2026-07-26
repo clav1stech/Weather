@@ -1,5 +1,12 @@
-# Changelog — Dashboard Neige (Megève)
+# Changelog — Dashboard Neige (Megève) — ARCHIVÉ
 
+**Gelé depuis le 2026-07-26 à l'entrée [0.5.0].** Le versioning neige a été
+RÉUNIFIÉ avec le canicule (v3.0, cf. `CLAUDE.md` § Versioning) : les deux
+apps partagent désormais `SHARED_VERSION` (`core/version.py`) et un seul
+`CHANGELOG.md` racine. Ne plus ajouter d'entrée ici — ce fichier reste pour
+mémoire de l'historique 0.1.0 → 0.5.0 du chantier neige indépendant.
+
+Ancien schéma (avant réunification), conservé pour contexte :
 Versioning INDÉPENDANT du canicule : la constante `SNOW_APP_VERSION` vit dans
 `snow_app.py` (racine) et ne se synchronise JAMAIS avec `APP_VERSION`
 (canicule). Numérotation et historique totalement séparés — jamais mélangés

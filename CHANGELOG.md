@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.0.0] - 2026-07-26
+Réunification du versioning canicule/neige ; fondations du dashboard neige.
+
+Les deux dashboards du monorepo partagent une part croissante de code
+(`core/`) et sont désormais versionnés comme un seul produit : `APP_VERSION`
+et `SNOW_APP_VERSION` importent la même `SHARED_VERSION`
+(`core/version.py`, source de vérité unique lue par `export_project.py`) —
+le versioning séparé neige (`SNOW_APP_VERSION` 0.1.0–0.5.0,
+`apps/snow/docs/CHANGELOG.md`) est archivé et gelé, cf. `CLAUDE.md` §
+Versioning. Ce jalon couvre aussi les fondations du chantier neige :
+squelette du dashboard (pipeline ensemble + maille fine, pages Vue
+d'ensemble/Explorer un run/Convergence, entrée `snow_app.py`) et page
+Observations dédiée aux stations Météo-France des Alpes du Nord
+(DPPaquetObs département 74, Combloux/Mont d'Arbois/Aiguille du Midi en
+référence), pipeline `fetch_observations.py` mutualisé via
+`core/pipeline/observations.py`.
+
 ## [2.6.2] - 2026-07-19
 Canicule : calendrier du risque lisible sur mobile (case compacte).
 

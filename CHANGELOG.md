@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.0.1] - 2026-07-26
+Neige : archivage hot/cold, contrôle des runs, convergence multi-modèles.
+
+Mécanique générique d'archivage `core/pipeline/hot_cold.py` (sauvegardes
+datées, vérification stricte de non-perte, dry-run) avec rollover
+hebdomadaire des parquets neige (job CI `rollover-snow`) ; activation
+équivalente préparée côté canicule mais non déclenchée. Contrôle
+opérationnel des runs (fraîcheur, portée contiguë, complétude, cycles
+attendus) avec les mêmes fonctions que le pipeline, page locale de
+lancement des flux en dry-run. Page Convergence enrichie (bande
+mean ± spread par modèle, heatmap des révisions, mode « Tous modèles » à
+poids égal, amplitude Min–Max) et Vue d'ensemble filtrant les traces isolées
+sous les seuils de pertinence.
+
 ## [3.0.0] - 2026-07-26
 Réunification du versioning canicule/neige ; fondations du dashboard neige.
 

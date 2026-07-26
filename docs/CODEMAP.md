@@ -5,8 +5,9 @@
 
 ## Vue d'ensemble
 
-Deux sous-systèmes indépendants, reliés uniquement par `config.py` et le
-parquet :
+Monorepo : le dashboard canicule (ci-dessous) + `core/` (code mutualisé) +
+`apps/snow/` (app neige Megève complète, cf. « Autres emplacements »). Deux
+sous-systèmes indépendants, reliés uniquement par `config.py` et le parquet :
 
 ```
 ┌── PIPELINE (racine, SENSIBLE — collecte des données) ──────────────────┐
@@ -18,7 +19,7 @@ parquet :
 │                        clé via env METEOFRANCE_API_KEY uniquement)     │
 │                        → data/database_paris_observations.parquet      │
 │ fetch_observations_6m.py  idem /paquet/infrahoraire-6m (fraîcheur 6 min, │
-│                        RADOME seules, variables instantanées)          │
+│                        4 stations, variables instantanées)             │
 │                        → data/database_paris_observations_6m.parquet   │
 │ fetch_montsouris_vintages.py  API Forecast minutely_15 @Montsouris     │
 │                        (prévision 15 min ~48 h, meteofrance_seamless,   │
@@ -36,15 +37,35 @@ parquet :
         data/database_paris.parquet          legacy/*.xlsx
                     │ lit (lecture seule, sauf import ciblé encadré)
                     ▼
-┌── DASHBOARD (package app/, refactorable librement) ─────────────────────┐
-│ meteo_app.py           point d'entrée Streamlit : set_page_config,      │
-│                        sidebar, routage — RIEN d'autre                  │
+┌── DASHBOARD (package app/ dans apps/canicule/, refactorable librement) ─┐
+│ meteo_app.py           point d'entrée Streamlit À LA RACINE (Streamlit  │
+│                        Cloud, lanceurs et harnais UI y pointent) :      │
+│                        set_page_config, sidebar, routage — RIEN d'autre │
+│                        + expose apps/canicule/ sur sys.path (`import    │
+│                        app` inchangé partout)                           │
 │ app/runtime.py         IS_LOCAL, LOCAL_TZ, VAR, user_tz                 │
 │ app/data/              accès parquet + sélections de runs               │
-│ app/stats/             statistiques d'ensemble génériques               │
-│ app/ui/                thème + graphiques + composants génériques       │
+│ app/stats/             ADAPTATEURS (lient config/VAR à core/stats)      │
+│ app/ui/                thème (ré-export core/ui) + graphiques + composants │
 │ app/domains/<nom>/     UN PHÉNOMÈNE MÉTIER = un sous-package            │
 │ app/pages/             pages transverses                                │
+└─────────────────────────────────────────────────────────────────────────┘
+                                   │ importe (jamais l'inverse)
+                                   ▼
+┌── CORE (racine, mutualisé entre apps, CONFIG-AGNOSTIQUE) ───────────────┐
+│ core/stats/            ensemble.py (stats paramétrées var/seuil/labels) │
+│                        climato.py (formule cosinus)                     │
+│ core/ui/               thème partagé + exécution locale/rendu des logs  │
+│ core/services/         cooldown.py, github_dispatch.py, openmeteo.py    │
+│                        (client API générique : fetch_json, multi-points,│
+│                        Metadata API, repli horloge)                     │
+│ core/io/atomic.py      écriture parquet atomique (pipelines d'apps —    │
+│                        le pipeline canicule garde son inline)           │
+│ core/pipeline/         ensemble_runs.py : persistance générique des     │
+│                        runs d'ensemble (fraîcheur empirique, portée     │
+│                        contiguë, anti-régression, fusion (run, modèle)) │
+│                        — consommée par apps/snow/pipeline/              │
+│ core/testing/          harnais de non-régression (wrappers dans tools/) │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,8 +76,36 @@ refactor du dashboard. Le dashboard, lui, peut être réorganisé : les données
 restent intactes.
 
 **Autres emplacements** :
+- `apps/canicule/app/` — emplacement physique du package `app` (voir schéma) ;
+  `apps/snow/` — app neige Megève COMPLÈTE : pipeline de collecte
+  (`pipeline/fetch_ensemble.py` flux Ensemble + Ensemble Mean →
+  `data/db_megeve.parquet` ; `pipeline/fetch_hd.py` flux maille fine AROME
+  HD/ICON-D2 → `data/db_megeve_hd.parquet` ; config dans `snow_config.py` —
+  nom distinct du config.py racine, jamais de collision sys.path) + dashboard
+  (`apps/snow/app/` : data/db.py + runsets.py + quality.py, domaine
+  `domains/neige/` — logic/charts/page —, pages explore, convergence,
+  contrôle des runs et lancement local, thème ré-exporté de core/). Point
+  d'entrée `snow_app.py` à la racine ; le dashboard s'importe
+  sous le namespace explicite `apps.snow.app`, distinct du package canicule
+  top-level `app`, afin que les deux cohabitent dans un même processus.
+  Parquets dans `apps/snow/data/`, jamais dans `data/` (réservé canicule/Paris). Job CI
+  unique `fetch-snow` (run_forecast.yml, cron 2 h à :35, flux relançables
+  isolément via workflow_dispatch snow-ensemble/snow-hd). S'y ajoutent :
+  `pipeline/fetch_observations.py` (observations Météo-France Alpes du Nord,
+  DPPaquetObs dept 74 → `data/db_obs_alpes.parquet`, mécanique générique
+  `core/pipeline/observations.py`, domaine `domains/observations/`, job CI
+  horaire `fetch-snow-obs` à :30) et `pipeline/rollover.py` (archivage
+  hot/cold des trois parquets neige vers `*_archive.parquet`, mécanique
+  `core/pipeline/hot_cold.py`, job CI hebdo `rollover-snow` — côté canicule
+  ce mécanisme est PRÉPARÉ mais non déclenché : `tools/rollover_canicule.py`
+  + job CI `rollover-canicule` en workflow_dispatch seul, procédure
+  d'activation post-merge dans `docs/DESIGN_archivage_pipeline.md` §7,
+  analyse sur copie via `tools/archive_hot_cold_dry_run.py`). Versioning séparé :
+  `SNOW_APP_VERSION` dans `snow_app.py`, changelog `apps/snow/docs/CHANGELOG.md`,
+  tags `snow-vX.Y`.
 - `tools/` — utilitaires hors exploitation : harnais de non-régression
-  (`check_non_regression.py`, `ui_snapshot.py`), `export_project.py` (snapshot
+  (`check_non_regression.py`, `ui_snapshot.py` — wrappers fins de
+  `core/testing/`, mêmes commandes qu'avant), `export_project.py` (snapshot
   texte du code pour analyse externe), `migrate.py` (one-off historique de
   rétro-remplissage xlsx → parquet, conservé comme référence — ne plus lancer,
   passer par l'import ciblé du dashboard).
@@ -66,6 +115,13 @@ restent intactes.
   (gitignoré : locales + OneDrive, jamais poussées sur GitHub).
 
 ## Carte des modules du dashboard
+
+Le package `app` vit dans `apps/canicule/app/` mais s'importe toujours
+`from app...` (chemin exposé par `meteo_app.py`, les harnais et `tests/`).
+`app/stats/ensemble.py`, `app/stats/climato.py`, `app/services/github_dispatch.py`
+sont des ADAPTATEURS : signatures historiques conservées, calculs délégués à
+`core/` (qui reçoit var/seuil/labels/chemins en paramètres). `app/ui/theme.py`
+et `app/services/cooldown.py` sont de purs ré-exports de `core/`.
 
 | Module | Responsabilité | Fonctions clés |
 |---|---|---|
@@ -77,7 +133,7 @@ restent intactes.
 | `app/data/legacy_import.py` | import ciblé xlsx → parquet (seule ÉCRITURE, ultra-encadrée) | `legacy_import_candidates`, `import_legacy_run` |
 | `app/data/t2m.py` | lecture du parquet Tx/Tn HD (flux annexe, dégradation silencieuse) | `t2m_signature`, `load_t2m`, `txtn_by_day` |
 | `app/data/observations.py` | lecture du parquet observations MF (flux annexe, dégradation silencieuse) | `obs_signature`, `load_obs`, `latest_obs`, `obs_window`, `daily_txtn_obs` |
-| `app/data/observations_6m.py` | lecture du parquet observations 6 min (fraîcheur cartes temps réel, RADOME) | `obs_6m_signature`, `load_obs_6m`, `latest_obs_6m` |
+| `app/data/observations_6m.py` | lecture du parquet observations 6 min (fraîcheur cartes temps réel, les 4 stations) | `obs_6m_signature`, `load_obs_6m`, `latest_obs_6m` |
 | `app/stats/ensemble.py` | stats génériques tolérantes NaN sur un pool de membres | `super_ensemble`, `model_data`, `model_medians`, `divergence`, `daily_aggregate`, `daily_risk`, `var_median` |
 | `app/stats/tables.py` | tables d'export larges (onglet 🧾) | `enriched_super_table`, `model_table` |
 | `app/stats/climato.py` | normale saisonnière cosinus (ajustable en session) | `clim_normal`, `clim_params`, `clim_z500_normal` |
@@ -94,8 +150,11 @@ restent intactes.
 | `app/pages/pipeline.py` | Lancer le pipeline (local), import legacy, log croisé | `page_run` |
 
 **Sens des dépendances** (jamais l'inverse) :
-`runtime` ← `data/db` ← `stats` ← `data/runsets` ← {`ui/charts`, `pages`, `domains`}.
-`config.py` est importable partout ; `pages`/`domains` n'importent jamais entre eux.
+`core` ← `runtime` ← `data/db` ← `stats` ← `data/runsets` ← {`ui/charts`, `pages`, `domains`}.
+`config.py` est importable partout dans `app/` — mais JAMAIS dans `core/`
+(config-agnostique : les réglages arrivent en paramètres via les adaptateurs) ;
+`pages`/`domains` n'importent jamais entre eux ; le pipeline racine n'importe
+jamais `core/`.
 
 ## Flux de données (dashboard)
 
@@ -148,13 +207,15 @@ temporelle). Correspondance code :
 | Import legacy = absence avérée uniquement | `app/data/legacy_import.py` |
 | Tables d'export volontairement larges | `app/stats/tables.py` |
 | Clé API MF via env only, paquet départemental (backfill/rattrapage), dédup (station, validity_time), K→°C au parsing | `fetch_observations.py` |
-| Fraîcheur 6 min (RADOME seules), flux/parquet séparé, réutilise clé + `_convert` du flux horaire, freshest-par-champ à l'affichage | `fetch_observations_6m.py`, `app/data/observations_6m.py` |
+| Fraîcheur 6 min (les 4 stations, instrumentation inégale), flux/parquet séparé, réutilise clé + `_convert` du flux horaire, freshest-par-champ à l'affichage | `fetch_observations_6m.py`, `app/data/observations_6m.py` |
 | Prévision Montsouris 15 min : vintages append-only clé (valid_time, fetched_at), compaction 48 h à deux régimes, `source` bootstrap/live, backfill past_days adaptatif | `fetch_montsouris_vintages.py`, `app/data/vintages.py` |
 | Obs : dégradation silencieuse, groupes ICU explicites, prévu-vs-observé jours complets | `app/data/observations.py`, `app/domains/observations/` |
 
 ## Non-régression — comment vérifier
 
-Deux harnais en lecture seule, à exécuter depuis la racine (Anaconda Python) :
+Deux harnais en lecture seule, à exécuter depuis la racine (`.venv` du repo) —
+le code vit dans `core/testing/`, les commandes passent par les wrappers
+`tools/` inchangés :
 
 ```
 python tools/check_non_regression.py capture   # AVANT une modification : fige la référence

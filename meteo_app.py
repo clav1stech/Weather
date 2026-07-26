@@ -16,6 +16,17 @@ La navigation = pages des domaines (app/domains/__init__.py, registre) puis
 pages transverses — ajouter un domaine ne modifie pas ce fichier.
 """
 
+import os
+import sys
+
+# Monorepo : le code du dashboard canicule (package app/) vit dans
+# apps/canicule/, le code mutualisé dans core/ (racine). Ce point d'entrée
+# reste à la racine — Streamlit Cloud, les lanceurs locaux et le harnais UI
+# pointent dessus — et expose apps/canicule/ sur sys.path pour que `import app`
+# se résolve ; la racine (dossier de ce script) est déjà sur sys.path, ce qui
+# résout `import config` et `import core`.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "apps", "canicule"))
+
 import streamlit as st
 
 from app.runtime import IS_LOCAL
@@ -28,8 +39,9 @@ from app.pages.explore import page_explore
 from app.pages.overview import page_overview
 from app.pages.pipeline import page_run
 from app.ui.theme import GLOBAL_CSS
+from core.version import SHARED_VERSION
 
-APP_VERSION = "2.6.3"
+APP_VERSION = SHARED_VERSION
 
 st.set_page_config(page_title="Dashboard Météo — Ensembles Paris",
                    page_icon="🌡️", layout="wide")

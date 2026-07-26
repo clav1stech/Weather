@@ -1,9 +1,13 @@
 # Design — Archivage hot/cold de la base (croissance illimitée)
 
-> **Statut : proposition, NON implémentée.** Document de décision. Aucune ligne de
-> pipeline n'est modifiée tant que ce design n'est pas validé. Rédigé lors du
-> chantier perf v2.5 (index+cache dashboard) qui a traité le point CPU mais **pas**
-> la croissance mémoire — c'est l'objet de ce document.
+> **Statut : mécanique implémentée dans `core/pipeline/hot_cold.py` (2026-07),
+> ACTIVE côté neige uniquement** (`apps/snow/pipeline/rollover.py`, job CI hebdo
+> `rollover-snow`). **Côté canicule : toujours NON activée** — analyse sur copie
+> via `tools/archive_hot_cold_dry_run.py` ; la bascule réelle (chemins config,
+> `load_db_full`, job CI, migration one-off) reste conditionnée à la validation
+> explicite de l'utilisateur, conformément au §6. Rédigé lors du chantier perf
+> v2.5 (index+cache dashboard) qui a traité le point CPU mais **pas** la
+> croissance mémoire — c'est l'objet de ce document.
 
 ## 1. Problème
 
@@ -103,3 +107,38 @@ ingérable même en hot/cold.
 1. Valider l'option hot/cold (§3) et la valeur de **N** (35 j proposé).
 2. Chantier dédié (branche, bump Y) : migration one-off + `load_db_full` + job rollover,
    chacun sous double non-régression (calculs + rendu) et sauvegardes datées.
+
+## 7. Activation canicule — procédure post-merge (préparée, NON déclenchée)
+
+Code prêt (branche dev/snow, 2026-07) : `config.DB_ARCHIVE_PATH` +
+`config.HOT_RETENTION_DAYS = 35` ; `load_db` concatène archive + hot dès que
+l'archive existe (transparent tant qu'elle n'existe pas : l'historique ENTIER
+reste visible d'*Explorer*/*Contrôle*, et les harnais donnent le même résultat
+avant/après rollover) ; `tools/rollover_canicule.py` (dry-run par défaut,
+`--execute` refusé hors de `main`) ; job CI `rollover-canicule`
+(`workflow_dispatch` seul, exclu de `target=all`, écriture réelle soumise à
+l'input `canicule_rollover_execute=execute` — AUCUN cron).
+
+**Interdiction jusqu'au merge** : jamais d'exécution réelle depuis une branche
+non synchronisée avec `main` — les crons y poussent la base toutes les 2 h, un
+rollover divergent créerait un conflit binaire insoluble sur le parquet.
+
+Étapes UNE FOIS le merge en `main` fait, sur un clone `main` synchronisé :
+1. `python tools/check_non_regression.py capture` (+ `tools/ui_snapshot.py
+   capture`) sur la base réelle à jour — même heure pleine que le check.
+2. `python tools/rollover_canicule.py` — dry-run sur la vraie base : contrôler
+   le rapport (lignes basculées, cutoff 35 j, comptes hot/cold).
+3. `python tools/rollover_canicule.py --execute` (sauvegardes `.bak` datées
+   créées à côté des parquets avant écriture) — ou via Actions :
+   `target=rollover-canicule` + `canicule_rollover_execute=execute`.
+4. `python tools/check_non_regression.py check` + `ui_snapshot.py check` :
+   **100 % identique attendu** (le dashboard relit hot + archive).
+5. Committer les deux parquets (le job CI le fait lui-même si passé par
+   Actions) ; ajouter `database_paris_archive.parquet` à la liste de
+   `tools/refresh_data_from_main.sh` pour les futures branches.
+6. **Seulement sur demande explicite de l'utilisateur** : ajouter le cron
+   hebdomadaire au job `rollover-canicule` (aujourd'hui sans cron, voulu).
+
+Note : cette activation borne la CROISSANCE du hot ; le gain mémoire runtime
+(pages interactives en hot-seul + `load_db_full` réservé à *Explorer* /
+*Contrôle*, §3 « Changements dashboard ») reste un chantier distinct ultérieur.

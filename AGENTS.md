@@ -1,0 +1,1 @@
+Lire `CLAUDE.md` pour l’architecture du projet, les commandes de développement, les invariants de sécurité des données et les conventions de versioning ; ne pas dupliquer son contenu afin de conserver une seule source de vérité.

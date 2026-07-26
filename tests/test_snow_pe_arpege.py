@@ -1,0 +1,161 @@
+# -*- coding: utf-8 -*-
+"""Tests du collecteur PE-ARPEGE, sans réseau ni parquet réel."""
+
+from datetime import datetime, timedelta
+
+import pytest
+
+from apps.snow import snow_config as SC
+from apps.snow.pipeline import fetch_pe_arpege as PE
+from core.services.meteofrance_wcs import GribPoint
+
+
+RUN = datetime(2026, 1, 10, 0)
+
+
+def _point(value, step_s, short_name="tp", units="kg m-2"):
+    return GribPoint(
+        value=value, latitude=45.75, longitude=6.50,
+        short_name=short_name, units=units, run_date=RUN,
+        valid_time=RUN + timedelta(seconds=step_s),
+        step_range=str(step_s // 3600),
+    )
+
+
+def _complete_points(total=4.0, snow=1.5):
+    points = {}
+    for member in range(SC.PE_ARPEGE_MEMBER_COUNT):
+        for step in SC.PE_ARPEGE_DAILY_STEPS_S:
+            points[(member, step, "precip")] = _point(total + member / 10, step)
+            points[(member, step, "neige_eau")] = _point(
+                snow, step, short_name="unknown")
+    return points
+
+
+def test_candidate_preserves_35_members_and_four_daily_windows():
+    candidate = PE.candidate_from_points(RUN, _complete_points())
+    assert len(candidate) == SC.PE_ARPEGE_MEMBER_COUNT * 4
+    assert set(candidate["member"]) == set(range(35))
+    assert set(candidate["period_h"]) == {24}
+    assert set((candidate["valid_time"] - candidate["run_date"])
+               .dt.total_seconds()) == set(SC.PE_ARPEGE_DAILY_STEPS_S)
+    first = candidate.iloc[0]
+    assert first["precip"] == pytest.approx(4.0)
+    assert first["neige_eau"] == pytest.approx(1.5)
+    assert first["pluie_eau"] == pytest.approx(2.5)
+
+
+def test_candidate_refuses_non_complete_06z_cycle():
+    with pytest.raises(ValueError, match="06/18Z"):
+        PE.candidate_from_points(
+            RUN.replace(hour=6), _complete_points())
+
+
+def test_complete_cycle_is_an_explicit_noop():
+    complete = PE.candidate_from_points(RUN, _complete_points())
+    assert PE.is_complete_in_store(complete, RUN)
+    assert not PE.is_complete_in_store(complete.iloc[:-1], RUN)
+
+
+def test_discover_cycle_ignores_newer_06z_catalog(monkeypatch):
+    ids = []
+    for product in SC.PE_ARPEGE_PRODUCTS.values():
+        ids.extend([
+            f"{product}___2026-01-10T00.00.00Z_P1D",
+            f"{product}___2026-01-10T06.00.00Z_P1D",
+        ])
+    xml = ("<wcs:Capabilities xmlns:wcs='http://www.opengis.net/wcs/2.0'>"
+           + "".join(f"<wcs:CoverageId>{item}</wcs:CoverageId>" for item in ids)
+           + "</wcs:Capabilities>").encode()
+    monkeypatch.setattr(PE.WCS, "get_capabilities", lambda *args, **kwargs: xml)
+
+    run, selected = PE.discover_cycle(object(), "secret")
+
+    assert run == RUN
+    assert all("T00.00.00Z" in coverage for coverage in selected.values())
+
+
+def test_discover_cycle_waits_for_perturbations_lagging_control(monkeypatch):
+    def catalog(*runs):
+        ids = [
+            f"{product}___{run:%Y-%m-%dT%H.00.00Z}_P1D"
+            for product in SC.PE_ARPEGE_PRODUCTS.values() for run in runs
+        ]
+        return ("<wcs:Capabilities "
+                "xmlns:wcs='http://www.opengis.net/wcs/2.0'>"
+                + "".join(
+                    f"<wcs:CoverageId>{item}</wcs:CoverageId>" for item in ids)
+                + "</wcs:Capabilities>").encode()
+
+    control_new = RUN.replace(hour=12)
+    control_xml = catalog(RUN, control_new)
+    perturbation_xml = catalog(RUN)
+
+    def fake_capabilities(_session, url, **_kwargs):
+        return control_xml if "PEARP000" in url else perturbation_xml
+
+    monkeypatch.setattr(PE.WCS, "get_capabilities", fake_capabilities)
+
+    run, selected = PE.discover_cycle(object(), "secret")
+
+    assert run == RUN
+    assert all("T00.00.00Z" in coverage for coverage in selected.values())
+
+
+def test_fetch_requests_only_local_grid_with_required_lat_long_order(
+        monkeypatch):
+    calls = []
+
+    def fake_get_coverage(*args, **kwargs):
+        calls.append(kwargs)
+        return b"GRIB"
+
+    monkeypatch.setattr(PE.WCS, "get_coverage", fake_get_coverage)
+    monkeypatch.setattr(
+        PE.WCS, "decode_nearest_point",
+        lambda _payload, *_args: _point(1.0, calls[-1]["time_value"]))
+    coverages = {column: f"coverage-{column}"
+                 for column in SC.PE_ARPEGE_PRODUCTS}
+
+    candidate = PE.fetch_candidate(
+        object(), "secret", RUN, coverages, sleep_fn=lambda _delay: None)
+
+    assert len(candidate) == SC.PE_ARPEGE_MEMBER_COUNT * 4
+    assert len(calls) == (SC.PE_ARPEGE_MEMBER_COUNT
+                          * len(SC.PE_ARPEGE_DAILY_STEPS_S)
+                          * len(SC.PE_ARPEGE_PRODUCTS))
+    expected = PE._spatial_subsets()
+    assert expected == ("lat(45.8,46.0)", "long(6.5,6.7)")
+    assert all(call["subsets"] == expected for call in calls)
+
+
+def test_fetch_refuses_a_full_europe_grid(monkeypatch):
+    monkeypatch.setattr(
+        PE.WCS, "get_coverage",
+        lambda *_args, **_kwargs: b"GRIB" + b"x" * SC.PE_ARPEGE_MAX_GRIB_BYTES)
+    coverages = {column: f"coverage-{column}"
+                 for column in SC.PE_ARPEGE_PRODUCTS}
+
+    with pytest.raises(ValueError, match="anormalement volumineux"):
+        PE.fetch_candidate(
+            object(), "secret", RUN, coverages, sleep_fn=lambda _delay: None)
+
+
+def test_local_coverage_retries_a_transient_backend_400(monkeypatch):
+    calls = []
+
+    def flaky(*_args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("Erreur HTTP WCS 400 après 1 tentative(s).")
+        return b"GRIB"
+
+    monkeypatch.setattr(PE.WCS, "get_coverage", flaky)
+    payload = PE._get_local_coverage(
+        object(), "secret", 0, "coverage", 86_400,
+        sleep_fn=lambda _delay: None)
+
+    assert payload == b"GRIB"
+    assert len(calls) == 2
+    assert all(call["attempts"] == 1 for call in calls)
+    assert all(call["subsets"] == PE._spatial_subsets() for call in calls)

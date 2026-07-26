@@ -30,6 +30,11 @@ Thumbs.db
 # capture — se régénèrent via tools/*.py capture, cf. docs/CODEMAP.md)
 tools/golden/
 
+# Sauvegardes datées du rollover hot/cold (core/pipeline/hot_cold.py) —
+# extension .bak volontaire pour ne jamais matcher les globs *.parquet des
+# jobs CI ; copies de sécurité locales, jamais versionnées.
+*.bak
+
 # Sauvegardes locales du parquet (copies datées avant import legacy) — restent
 # sur le poste (+ OneDrive), jamais poussées : le workflow ne committe que
 # data/*.parquet de premier niveau, ce dossier n'y entre pas.

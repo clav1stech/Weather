@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.0.2] - 2026-07-26
+Neige : diagnostic pluie-neige pondéré et flux Météo-France directs.
+
+Coupe verticale horaire pluie/neige/sec/mixte aux quatre altitudes et bilan
+quotidien cm/mm, classification par membre pondérée sur J0–J+15 (seuils
+centralisés dans `weather_type.py`, à affiner in situ). Collecteurs WCS
+Météo-France en décodage GRIB direct (AROME-PI, PE-AROME puis PE-ARPEGE
+restreint à l'emprise Megève, retries fiabilisés face à un backend WCS
+erratique) et collecteur AROME-IFS direct (pluie/neige/T2m horaires,
+H+1 à H+45) en complément d'Open-Meteo, avec hiérarchie explicite sans
+double comptage. `core/stats/ensemble.py` (mutualisé avec le canicule) se
+dégrade désormais silencieusement quand un modèle n'a aucune valeur pour la
+variable tracée, utile aux flux régionaux aux schémas inégaux.
+
 ## [3.0.1] - 2026-07-26
 Neige : archivage hot/cold, contrôle des runs, convergence multi-modèles.
 

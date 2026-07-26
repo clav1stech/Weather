@@ -14,13 +14,20 @@ import streamlit as st
 
 import config as C
 from app.runtime import LOCAL_TZ
+from app.data.store import load_store_df, store_active, store_signature
 
 
 def db_signature():
     """Signature (mtimes hot + archive) → invalide le cache au moindre nouveau
     run comme après un rollover hot/cold. Tant que l'archive n'existe pas
     (archivage canicule non activé), seule la composante hot varie — clé de
-    cache opaque, aucun appelant n'en inspecte le contenu."""
+    cache opaque, aucun appelant n'en inspecte le contenu.
+
+    En mode magasin externe (WEATHER_STORE, docs/DESIGN_sortie_git.md) : la
+    signature devient l'ensemble des (nom, etag) des partitions — même rôle de
+    clé opaque, invalidée dès qu'une partition change (mois courant re-uploadé)."""
+    if store_active():
+        return store_signature()
     sigs = []
     for path in (C.DB_PATH, C.DB_ARCHIVE_PATH):
         try:
@@ -45,16 +52,34 @@ def load_db(_sig):
     Filtre aussi les modèles legacy qui auraient pu rester dans un parquet plus
     ancien (ex. AIGEFS/ICON retirés de config.MODELS) — évite tout crash sur des
     lignes orphelines sans couleur/config déclarée."""
-    if _sig is None or not os.path.exists(C.DB_PATH):
+    if _sig is None:
         return pd.DataFrame(columns=C.SCHEMA)
-    df = pd.read_parquet(C.DB_PATH)
-    if os.path.exists(C.DB_ARCHIVE_PATH):
-        archive = pd.read_parquet(C.DB_ARCHIVE_PATH)
-        df = pd.concat([archive, df], ignore_index=True)
-        # Recouvrement hot/archive impossible après un rollover sain, mais la
-        # lecture ne doit pas en dépendre : dédup défensive, hot prioritaire.
-        df = df.drop_duplicates(subset=["run_date", "model", "member", "valid_time"],
-                                keep="last")
+    if store_active():
+        # Magasin externe : la base = concat des partitions mensuelles (elles
+        # représentent l'historique ENTIER, pas de hot/archive séparés).
+        df = load_store_df()
+        if df.empty:
+            return pd.DataFrame(columns=C.SCHEMA)
+    else:
+        if not os.path.exists(C.DB_PATH):
+            return pd.DataFrame(columns=C.SCHEMA)
+        df = pd.read_parquet(C.DB_PATH)
+        if os.path.exists(C.DB_ARCHIVE_PATH):
+            archive = pd.read_parquet(C.DB_ARCHIVE_PATH)
+            df = pd.concat([archive, df], ignore_index=True)
+            # Recouvrement hot/archive impossible après un rollover sain, mais la
+            # lecture ne doit pas en dépendre : dédup défensive, hot prioritaire.
+            df = df.drop_duplicates(subset=["run_date", "model", "member", "valid_time"],
+                                    keep="last")
+    return _finalize(df)
+
+
+def _finalize(df):
+    """Traitement aval commun aux deux sources (parquet git OU partitions du
+    magasin) : filtre les modèles legacy orphelins (sans config/couleur
+    déclarée) puis convertit run_date/valid_time UTC → heure de Paris (naïf).
+    Isolé pour garantir un DataFrame IDENTIQUE quelle que soit la provenance —
+    c'est ce qui rend la bascule non régressive."""
     df = df[df["model"].isin(C.MODEL_LABELS)].reset_index(drop=True)
     for col in ("run_date", "valid_time"):
         s = pd.to_datetime(df[col])

@@ -8,6 +8,7 @@ VARIABLES. La logique de parsing / stockage / affichage n'a pas à être touché
 """
 
 import os
+import tempfile
 
 # --------------------------------------------------------------------------- #
 #  Localisation & API
@@ -339,6 +340,19 @@ DB_OBS_6M_PATH = os.path.join(DATA_DIR, "database_paris_observations_6m.parquet"
 # couple (échéance quart-horaire, instant de collecte), append-only) — flux
 # distinct, jamais mélangé.
 DB_VINTAGE_PATH = os.path.join(DATA_DIR, "database_paris_montsouris_vintages.parquet")
+
+# --- Magasin de données externe (« sortie de git ») — docs/DESIGN_sortie_git.md.
+# Constantes déclarées mais INACTIVES par défaut : le dashboard lit le parquet git
+# tant que la variable d'environnement WEATHER_STORE n'est pas positionnée
+# (comportement strictement inchangé). Backend swappable via l'adaptateur
+# app/data/store.py (LocalDirStore pour tests/dev, GitHubReleaseStore en prod).
+STORE_REPO = "clav1stech/Weather"    # owner/nom du dépôt portant le release
+STORE_TAG = "data-store"             # release dédié aux assets de données (hors versions)
+STORE_PREFIX = "database_paris"      # préfixe des partitions du flux d'ensemble principal
+# Cache local des partitions téléchargées, clé par etag : un mois clos (immuable)
+# n'est téléchargé qu'une fois ; seul le mois courant se re-télécharge à chaque
+# changement. Dossier temporaire (écrivable partout, y compris Streamlit Cloud).
+STORE_CACHE_DIR = os.path.join(tempfile.gettempdir(), "weather_store_cache")
 
 # --------------------------------------------------------------------------- #
 #  Déclenchement à distance du workflow — NON UTILISÉ actuellement (dormant)

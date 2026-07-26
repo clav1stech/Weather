@@ -86,6 +86,13 @@ jobs:
         run: pip install requests pandas pyarrow
 
       - name: Fetch and Push Database
+        env:
+          # Double écriture « sortie de git » (docs/DESIGN_sortie_git.md, Phase 1) :
+          # Forecast.py mirrore les partitions du mois vers le release data-store
+          # APRÈS avoir écrit git (source de vérité) — best-effort, jamais bloquant.
+          # gh utilise GH_TOKEN (mêmes droits contents:write que le push git).
+          WEATHER_STORE_WRITE: "1"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Pipeline"

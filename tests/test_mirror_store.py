@@ -50,15 +50,19 @@ def _install_fake_store(monkeypatch_dir):
     return restore
 
 
-def test_mirror_uploads_only_touched_months_and_verifies():
+_DBP = "/x/database_paris.parquet"  # → préfixe database_paris (dérivé du basename)
+
+
+def test_mirror_uploads_only_changed_months_and_verifies():
     with tempfile.TemporaryDirectory() as store:
         restore = _install_fake_store(store)
         try:
-            # Base à cheval juin/juillet ; seul juillet est « frais » ce cycle.
+            # Juin déjà en base ; ce cycle n'ajoute que du juillet.
+            existing = _combined(["2026-06-30"], [1])
             combined = _combined(["2026-06-30", "2026-07-01", "2026-07-02"], [1, 2, 3])
-            F.mirror_to_store(combined, months=["2026-07"])
+            F.mirror_to_store(existing, combined, _DBP, "run_date")
             files = sorted(os.listdir(store))
-            # Seul le mois touché est uploadé (juin, mois clos, reste intact).
+            # Seul le mois CHANGÉ est uploadé (juin, inchangé, reste intact).
             assert files == ["database_paris_2026-07.parquet"], files
             got = pd.read_parquet(os.path.join(store, files[0]))
             assert sorted(got["t850"]) == [2.0, 3.0]  # tranche juillet exacte
@@ -66,16 +70,28 @@ def test_mirror_uploads_only_touched_months_and_verifies():
             restore()
 
 
-def test_mirror_uploads_both_months_at_boundary():
+def test_mirror_uploads_both_months_when_both_change():
     with tempfile.TemporaryDirectory() as store:
         restore = _install_fake_store(store)
         try:
+            existing = _combined([], [])  # base vide → tout est neuf
             combined = _combined(["2026-06-30", "2026-07-01"], [1, 2])
-            F.mirror_to_store(combined, months=["2026-06", "2026-07"])
+            F.mirror_to_store(existing, combined, _DBP, "run_date")
             assert sorted(os.listdir(store)) == [
                 "database_paris_2026-06.parquet",
                 "database_paris_2026-07.parquet",
             ]
+        finally:
+            restore()
+
+
+def test_mirror_noop_when_nothing_changed():
+    with tempfile.TemporaryDirectory() as store:
+        restore = _install_fake_store(store)
+        try:
+            df = _combined(["2026-07-01"], [1])
+            F.mirror_to_store(df, df, _DBP, "run_date")  # existing == combined
+            assert os.listdir(store) == []  # rien de changé → aucun upload
         finally:
             restore()
 
@@ -90,7 +106,8 @@ def test_mirror_never_raises_on_failure():
         raise RuntimeError("gh indisponible")
     F._gh = boom
     try:
-        F.mirror_to_store(_combined(["2026-07-01"], [1]), months=["2026-07"])
+        F.mirror_to_store(_combined([], []), _combined(["2026-07-01"], [1]),
+                          _DBP, "run_date")
     finally:
         F._gh, F._ensure_store_release = orig_gh, orig_ensure  # aucune exception attendue
 

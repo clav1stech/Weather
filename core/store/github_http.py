@@ -11,12 +11,23 @@ Un token (GITHUB_TOKEN/GH_TOKEN) est utilisé s'il est présent (relève la limi
 de débit de l'API à 5000/h au lieu de 60/h), mais n'est jamais requis."""
 
 import os
+import time
 
 import requests
 
 from core.store.base import Asset
 
 _API = "https://api.github.com"
+
+# Cache PROCESSUS de la métadonnée du release, clé (repo, tag), avec TTL court.
+# Tous les flux d'un même rerun (flux principal + annexes, chacun instancie son
+# propre store) partagent ainsi UN SEUL appel API `releases/tags` — sans quoi la
+# limite anonyme de 60 req/h serait vite atteinte (≈5 flux × pages). Les
+# téléchargements d'assets, eux, ne comptent pas dans ce quota. TTL court : un
+# changement de release est détecté au pas du rerun + TTL (données au rythme ≥
+# horaire, aucune urgence à la seconde).
+_REL_CACHE = {}          # (repo, tag) -> (t_monotonic, json_or_None)
+_REL_TTL = 30.0
 
 
 class GitHubReleaseHttpStore:
@@ -27,7 +38,6 @@ class GitHubReleaseHttpStore:
         self.tag = tag
         self.token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
         self.timeout = timeout
-        self._rel_cache = False  # False = pas encore chargé ; None = release absent
 
     def _headers(self):
         h = {"Accept": "application/vnd.github+json"}
@@ -37,20 +47,18 @@ class GitHubReleaseHttpStore:
 
     def _release(self):
         """JSON du release (métadonnées + assets), ou None si absent (404 →
-        magasin pas encore amorcé). Mémoïsé sur l'instance : un cycle
-        list()+download() ne fait qu'UN appel API (les instances sont
-        éphémères — recréées à chaque rerun —, la détection de changement reste
-        donc au pas du rerun)."""
-        if self._rel_cache is not False:
-            return self._rel_cache
+        magasin pas encore amorcé). Mémoïsé au niveau PROCESSUS avec TTL : tous
+        les flux d'un rerun ne déclenchent qu'un appel API, préservant le quota
+        anonyme."""
+        key = (self.repo, self.tag)
+        hit = _REL_CACHE.get(key)
+        if hit is not None and time.monotonic() - hit[0] < _REL_TTL:
+            return hit[1]
         url = f"{_API}/repos/{self.repo}/releases/tags/{self.tag}"
         r = requests.get(url, headers=self._headers(), timeout=self.timeout)
-        if r.status_code == 404:
-            self._rel_cache = None
-            return None
-        r.raise_for_status()
-        self._rel_cache = r.json()
-        return self._rel_cache
+        data = None if r.status_code == 404 else (r.raise_for_status() or r.json())
+        _REL_CACHE[key] = (time.monotonic(), data)
+        return data
 
     def list(self, prefix: str = "") -> list[Asset]:
         rel = self._release()

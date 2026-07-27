@@ -257,6 +257,7 @@ class _FakeRequests:
 
 
 def _with_fake_http(release_json, contents):
+    GH_HTTP._REL_CACHE.clear()  # cache processus (TTL) partagé entre stores → à vider
     orig = GH_HTTP.requests
     fake = _FakeRequests(release_json, contents)
     GH_HTTP.requests = fake

@@ -12,33 +12,29 @@ stockage) : à l'affichage il est mis tel quel en face des jours du calendrier
 (heure de Paris) — pour une valeur JOURNALIÈRE, le jour civil UTC et le jour
 civil parisien coïncident, il n'y a pas d'heure à convertir."""
 
-import os
-
 import pandas as pd
 import streamlit as st
 
 import config as C
+from app.data.store import flux_signature, load_flux
 
 
 def t2m_signature():
-    """Signature (mtime) du parquet T2m → invalide le cache à chaque collecte.
-    None si le fichier n'existe pas (état normal, pas une anomalie)."""
-    try:
-        return os.path.getmtime(C.DB_T2M_PATH)
-    except OSError:
-        return None
+    """Signature du flux T2m → invalide le cache à chaque collecte. None si le
+    flux n'existe pas encore (état normal). Bascule mtime git ↔ etags du magasin
+    selon WEATHER_STORE, de façon transparente."""
+    return flux_signature(C.DB_T2M_PATH)
 
 
 @st.cache_data(show_spinner=False)
 def load_t2m(_sig):
     """Base Tx/Tn complète (historique append-only). DataFrame vide au schéma
-    T2M_SCHEMA si le fichier est absent, illisible ou sans colonne attendue."""
-    if _sig is None or not os.path.exists(C.DB_T2M_PATH):
+    T2M_SCHEMA si le flux est absent, illisible ou sans colonne attendue."""
+    if _sig is None:
         return pd.DataFrame(columns=C.T2M_SCHEMA)
-    try:
-        df = pd.read_parquet(C.DB_T2M_PATH)
-    except Exception:  # noqa: BLE001 — fichier corrompu/partiel : on dégrade, jamais de crash
-        return pd.DataFrame(columns=C.T2M_SCHEMA)
+    df = load_flux(C.DB_T2M_PATH, C.T2M_SCHEMA)
+    if df.empty:
+        return df
     for col in C.T2M_SCHEMA:
         if col not in df.columns:
             df[col] = pd.NA

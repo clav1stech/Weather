@@ -19,6 +19,7 @@ import streamlit as st
 import config as C
 from app.runtime import VAR, user_tz
 from app.data.db import load_db, list_runs, run_slice, utc_cycle
+from app.data.store import store_active
 from app.stats.ensemble import super_ensemble, daily_aggregate
 
 # Tolérance (heures) entre la portée RÉELLE d'un run stocké (max valid_time −
@@ -155,17 +156,39 @@ def main_labels_expected_at(run_date):
     return [m for m in C.MAIN_LABELS if h in C.EXPECTED_CYCLES_BY_LABEL.get(m, [])]
 
 
+def _refresh_time_from_sig(sig):
+    """En mode magasin, la signature est un tuple ((nom, etag)…) où l'etag des
+    backends GitHub EST un updated_at ISO : on en tire l'instant du dernier
+    upload (max), sans appel réseau supplémentaire. Backend local (etag = hash
+    de contenu) ou mode git → None (l'appelant retombe sur le mtime du parquet)."""
+    if not store_active() or not isinstance(sig, tuple):
+        return None
+    times = []
+    for item in sig:
+        if isinstance(item, tuple) and len(item) == 2:
+            try:
+                times.append(datetime.fromisoformat(str(item[1]).replace("Z", "+00:00")))
+            except ValueError:
+                pass
+    return max(times).astimezone(user_tz()) if times else None
+
+
 def latest_refresh_status(runs, sig):
-    """Heure du dernier rafraîchissement (mtime du parquet, dans le fuseau de
-    l'utilisateur — jamais l'heure du serveur, qui est UTC sur le cloud) et
-    complétude (tous les modèles principaux ATTENDUS À CE CYCLE présents ou
-    non) du dernier run."""
+    """Heure du dernier rafraîchissement (dans le fuseau de l'utilisateur —
+    jamais l'heure du serveur, UTC sur le cloud) et complétude (tous les modèles
+    principaux ATTENDUS À CE CYCLE présents ou non) du dernier run.
+
+    Source de l'heure : l'updated_at du dernier asset en mode magasin GitHub
+    (le mtime du parquet git n'existe plus après la coupure), sinon le mtime du
+    parquet — dégradé à None si aucune des deux n'est disponible."""
     if runs.empty:
         return None, True, []
-    try:
-        refreshed_at = datetime.fromtimestamp(os.path.getmtime(C.DB_PATH), tz=user_tz())
-    except OSError:
-        refreshed_at = None
+    refreshed_at = _refresh_time_from_sig(sig)
+    if refreshed_at is None:
+        try:
+            refreshed_at = datetime.fromtimestamp(os.path.getmtime(C.DB_PATH), tz=user_tz())
+        except OSError:
+            refreshed_at = None
     last_rd = runs.iloc[0]["run_date"]
     present = set(run_slice(sig, last_rd)["model"].unique())
     expected = main_labels_expected_at(last_rd)

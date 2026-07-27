@@ -353,6 +353,18 @@ STORE_PREFIX = "database_paris"      # préfixe des partitions du flux d'ensembl
 # n'est téléchargé qu'une fois ; seul le mois courant se re-télécharge à chaque
 # changement. Dossier temporaire (écrivable partout, y compris Streamlit Cloud).
 STORE_CACHE_DIR = os.path.join(tempfile.gettempdir(), "weather_store_cache")
+# Registre des flux canicule sortis de git : (chemin parquet, colonne temporelle
+# de partition). Le préfixe d'asset se déduit du basename (database_paris_t2m…).
+# Le principal partitionne par run_date (un run = une partition), les annexes
+# append-only par leur instant de référence. Source unique pour l'amorçage
+# (tools/seed_store.py) et la double écriture des pipelines.
+STORE_FLUX = [
+    (DB_PATH, "run_date"),
+    (DB_T2M_PATH, "fetched_at"),
+    (DB_OBS_PATH, "valid_time"),
+    (DB_OBS_6M_PATH, "valid_time"),
+    (DB_VINTAGE_PATH, "valid_time"),
+]
 
 # --------------------------------------------------------------------------- #
 #  Déclenchement à distance du workflow — NON UTILISÉ actuellement (dormant)

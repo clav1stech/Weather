@@ -675,18 +675,27 @@ def _same_rows(a, b):
     return ca.equals(cb)
 
 
-def mirror_to_store(combined, months):
-    """Uploade vers le release `data-store` les partitions mensuelles touchées
-    (mois présents dans le run frais), chacune re-téléchargée et comparée à sa
-    tranche de `combined`. Encapsulé pour ne JAMAIS faire échouer le pipeline
-    (git est déjà écrit et reste source de vérité en double écriture)."""
+def mirror_to_store(existing, combined, db_path, time_col):
+    """Uploade vers le release `data-store` les partitions mensuelles dont
+    l'ensemble de lignes a CHANGÉ entre `existing` et `combined` (le préfixe
+    d'asset se déduit du basename de `db_path`, la partition du mois de
+    `time_col`), chacune re-téléchargée et comparée à sa tranche. Encapsulé pour
+    ne JAMAIS faire échouer le pipeline (git déjà écrit, source de vérité).
+    Signature générique identique dans tous les pipelines racine."""
     try:
+        changed = pd.concat([existing, combined]).drop_duplicates(keep=False)
+        if changed.empty:
+            return
+        months = sorted(pd.to_datetime(changed[time_col]).dt.strftime("%Y-%m").unique())
+        prefix = os.path.splitext(os.path.basename(db_path))[0]
+        c_month = pd.to_datetime(combined[time_col]).dt.strftime("%Y-%m").to_numpy()
         _ensure_store_release()
-        rd_month = pd.to_datetime(combined["run_date"]).dt.strftime("%Y-%m")
         with tempfile.TemporaryDirectory() as tmp:
             for m in months:
-                sub = combined[rd_month.to_numpy() == m]
-                name = f"{C.STORE_PREFIX}_{m}.parquet"
+                sub = combined[c_month == m]
+                if sub.empty:
+                    continue
+                name = f"{prefix}_{m}.parquet"
                 path = os.path.join(tmp, name)
                 sub.to_parquet(path, index=False)
                 _gh(["release", "upload", C.STORE_TAG, path, "--clobber"])
@@ -755,12 +764,10 @@ def main():
     print(f"   → {C.DB_PATH}")
 
     # Double écriture vers le magasin externe (git déjà écrit, source de vérité) —
-    # actif uniquement si WEATHER_STORE_WRITE positionné. Seuls les mois présents
-    # dans le run frais sont ré-uploadés (mois courant, + précédent à cheval en
-    # début de mois) ; les mois clos restent intacts.
+    # actif uniquement si WEATHER_STORE_WRITE positionné. Seules les partitions
+    # dont le contenu a changé sont ré-uploadées ; les mois clos restent intacts.
     if os.environ.get("WEATHER_STORE_WRITE", "").strip().lower() not in ("", "0", "false"):
-        months = sorted(pd.to_datetime(fresh["run_date"]).dt.strftime("%Y-%m").unique())
-        mirror_to_store(combined, months)
+        mirror_to_store(existing, combined, C.DB_PATH, "run_date")
 
 
 if __name__ == "__main__":

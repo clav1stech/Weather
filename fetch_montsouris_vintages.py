@@ -44,6 +44,8 @@ Dégradation silencieuse : réponse sans bloc minutely_15 exploitable → aucune
 
 import os
 import sys
+import subprocess
+import tempfile
 import datetime as dt
 
 import requests
@@ -212,6 +214,73 @@ def persist(fresh, existing=None, now=None):
 
 
 # --------------------------------------------------------------------------- #
+#  Miroir vers le magasin externe — double écriture (« sortie de git »)
+# --------------------------------------------------------------------------- #
+# Bloc INLINE identique dans chaque pipeline racine (n'importe jamais core/ ni
+# app/, cf. CLAUDE.md — duplication du motif assumée). git reste SOURCE DE
+# VÉRITÉ : best-effort, JAMAIS bloquant. Activé par WEATHER_STORE_WRITE (CI
+# post-merge) ; absent → pipeline strictement inchangé.
+
+def _gh(args):
+    """`gh <args> --repo STORE_REPO`, stdout capturé, lève sur échec."""
+    return subprocess.run(["gh", *args, "--repo", C.STORE_REPO],
+                          check=True, text=True, capture_output=True).stdout
+
+
+def _ensure_store_release():
+    """Crée le release porteur des partitions s'il manque (idempotent)."""
+    try:
+        _gh(["release", "view", C.STORE_TAG, "--json", "tagName"])
+    except subprocess.CalledProcessError:
+        _gh(["release", "create", C.STORE_TAG,
+             "--title", "Données — partitions parquet (hors git)",
+             "--notes", "Magasin de données du pipeline météo (cf. "
+                        "docs/DESIGN_sortie_git.md). Ne pas supprimer.",
+             "--latest=false"])
+
+
+def _same_rows(a, b):
+    """True si a et b portent exactement les mêmes lignes (ordre indifférent)."""
+    if sorted(a.columns) != sorted(b.columns):
+        return False
+    cols = sorted(a.columns)
+    return (a[cols].sort_values(cols, na_position="last").reset_index(drop=True)
+            .equals(b[cols].sort_values(cols, na_position="last").reset_index(drop=True)))
+
+
+def mirror_to_store(existing, combined, db_path, time_col):
+    """Uploade vers data-store les partitions mensuelles dont l'ensemble de
+    lignes a CHANGÉ entre existing et combined (append, et compaction pour les
+    vintages), chacune re-vérifiée. Best-effort, jamais bloquant (git déjà
+    écrit, source de vérité). Signature identique à tous les pipelines racine."""
+    try:
+        changed = pd.concat([existing, combined]).drop_duplicates(keep=False)
+        if changed.empty:
+            return
+        months = sorted(pd.to_datetime(changed[time_col]).dt.strftime("%Y-%m").unique())
+        prefix = os.path.splitext(os.path.basename(db_path))[0]
+        c_month = pd.to_datetime(combined[time_col]).dt.strftime("%Y-%m").to_numpy()
+        _ensure_store_release()
+        with tempfile.TemporaryDirectory() as tmp:
+            for m in months:
+                sub = combined[c_month == m]
+                if sub.empty:
+                    continue
+                name = f"{prefix}_{m}.parquet"
+                path = os.path.join(tmp, name)
+                sub.to_parquet(path, index=False)
+                _gh(["release", "upload", C.STORE_TAG, path, "--clobber"])
+                back = os.path.join(tmp, "back_" + name)
+                _gh(["release", "download", C.STORE_TAG, "--pattern", name,
+                     "--output", back, "--clobber"])
+                if not _same_rows(pd.read_parquet(back), sub):
+                    raise RuntimeError(f"partition {name} divergente après upload")
+                print(f"   🪞 miroir store : {name} ({len(sub):,} lignes) vérifié")
+    except Exception as exc:  # noqa: BLE001 — jamais bloquant en double écriture
+        print(f"   ⚠️  miroir store échoué (git intact, source de vérité) : {exc}")
+
+
+# --------------------------------------------------------------------------- #
 #  Entrée
 # --------------------------------------------------------------------------- #
 def main():
@@ -230,10 +299,13 @@ def main():
     print(f"   {len(fresh)} échéance(s) 15 min, de {fresh['valid_time'].min():%d %b %H:%M} "
           f"à {fresh['valid_time'].max():%d %b %H:%M} UTC")
 
-    combined, n_new = persist(fresh, now=fetched_at)
+    existing = load_existing()
+    combined, n_new = persist(fresh, existing, now=fetched_at)
     print(f"✅ Base vintages mise à jour : +{n_new} vintage(s) frais "
           f"· {len(combined):,} ligne(s) au total (après compaction)")
     print(f"   → {C.DB_VINTAGE_PATH}")
+    if os.environ.get("WEATHER_STORE_WRITE", "").strip().lower() not in ("", "0", "false"):
+        mirror_to_store(existing, combined, C.DB_VINTAGE_PATH, "valid_time")
 
 
 if __name__ == "__main__":

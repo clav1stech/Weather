@@ -387,23 +387,59 @@ jobs:
           WEATHER_STORE_WRITE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Les flux neige sont INDÉPENDANTS (APIs, clés et parquets distincts) :
+          # l'échec de l'un ne doit jamais empêcher les autres de collecter.
+          # Sans cet isolement, `set -e` interrompt la marche au premier échec
+          # — un 401 sur une clé Météo-France faisait perdre le reste du cycle.
+          # Chaque flux est donc exécuté à part, ses échecs collectés, et le
+          # job ne tombe en erreur QUE si aucun flux n'a abouti (panne
+          # systémique). Un échec partiel laisse une annotation d'avertissement
+          # : visible sans noyer le job en rouge à chaque caprice d'un backend
+          # WCS ou d'une clé expirée.
+          OK=0
+          FAILED=""
+          run_flux() {  # run_flux <libellé> <script>
+            echo "::group::$1"
+            if python "$2"; then
+              OK=$((OK + 1))
+            else
+              echo "::warning title=Flux neige en échec::$1 ($2) — les autres flux continuent."
+              FAILED="$FAILED $1"
+            fi
+            echo "::endgroup::"
+          }
+
           # Sélection des flux : cron et target=snow/all lancent les deux ;
           # snow-ensemble / snow-hd relancent un flux isolément.
           RUN_ENS=true; RUN_HD=true
           [ "${{ github.event.inputs.target }}" = "snow-hd" ] && RUN_ENS=false
           [ "${{ github.event.inputs.target }}" = "snow-ensemble" ] && RUN_HD=false
-          [ "$RUN_ENS" = "true" ] && python apps/snow/pipeline/fetch_ensemble.py
-          [ "$RUN_ENS" = "true" ] && python apps/snow/pipeline/fetch_pe_arome.py
-          [ "$RUN_ENS" = "true" ] && python apps/snow/pipeline/fetch_pe_arpege.py
-          [ "$RUN_HD" = "true" ] && python apps/snow/pipeline/fetch_arome_pi.py
+
+          if [ "$RUN_ENS" = "true" ]; then
+            run_flux "Ensemble Megève"  apps/snow/pipeline/fetch_ensemble.py
+            run_flux "PE-AROME"         apps/snow/pipeline/fetch_pe_arome.py
+            run_flux "PE-ARPEGE"        apps/snow/pipeline/fetch_pe_arpege.py
+          fi
           if [ "$RUN_HD" = "true" ]; then
+            run_flux "AROME-PI"         apps/snow/pipeline/fetch_arome_pi.py
+            # Secret absent = flux volontairement non configuré : ni succès à
+            # compter, ni échec à signaler.
             if [ -n "$METEOFRANCE_AROME_IFS_KEY" ]; then
-              python apps/snow/pipeline/fetch_arome_ifs.py
+              run_flux "AROME-IFS"      apps/snow/pipeline/fetch_arome_ifs.py
             else
               echo "⚠️ Secret METEOFRANCE_AROME_IFS_KEY absent — AROME-IFS ignoré."
             fi
+            run_flux "Maille fine"      apps/snow/pipeline/fetch_hd.py
           fi
-          [ "$RUN_HD" = "true" ] && python apps/snow/pipeline/fetch_hd.py
+
+          if [ -n "$FAILED" ]; then
+            echo "⚠️ Flux en échec :$FAILED — les autres ont collecté normalement."
+          fi
+          if [ "$OK" -eq 0 ]; then
+            echo "::error title=Collecte neige totalement en échec::Aucun flux n'a abouti."
+            exit 1
+          fi
+          echo "✅ $OK flux collecté(s) avec succès."
           exit 0
 
   fetch-snow-obs:

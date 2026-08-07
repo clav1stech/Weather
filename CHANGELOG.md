@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.1.3] - 2026-08-07
+CI neige : isoler les flux pour résister aux échecs partiels.
+
+Les flux neige sont indépendants (APIs, clés et parquets distincts), mais le
+job les enchaînait directement : `set -e` interrompait la marche au premier
+échec. Un 401 sur la clé PE-AROME faisait ainsi perdre PE-ARPEGE, AROME-PI,
+AROME-IFS et la maille fine, pourtant sans rapport.
+
+Chaque flux s'exécute désormais à part, ses échecs sont collectés et annotés,
+et le job ne tombe en erreur que si aucun flux n'a abouti — une panne
+systémique reste visible, sans que le caprice d'un backend WCS ou une clé
+expirée ne mette le job en rouge à chaque passage.
+
 ## [3.1.2] - 2026-08-07
 Page « Lancer le pipeline » accessible en ligne, déclenchement protégé.
 

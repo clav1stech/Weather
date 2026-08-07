@@ -1,8 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Page « Lancer le pipeline » (local uniquement) : lancement manuel de
-Forecast.py / run_dual.py, import ciblé legacy → parquet et historique du
-contrôle croisé. Seule page qui ÉCRIT dans les données — toujours via les
-garde-fous de app/data/legacy_import.py et Forecast.persist."""
+"""Page « Lancer le pipeline » : déclenchement d'une collecte, import ciblé
+legacy → parquet et historique du contrôle croisé.
+
+VISIBLE PARTOUT, mais les capacités diffèrent selon l'environnement :
+  • **Consultation (partout, sans mot de passe)** : état du stock legacy,
+    historique du contrôle croisé — lecture seule.
+  • **Déclenchement d'une collecte** : en LOCAL, exécution directe des scripts
+    en sous-processus (comme avant) ; sur le CLOUD, `workflow_dispatch` du job
+    CI existant, protégé par mot de passe (app/services/pipeline_auth.py). Un
+    sous-processus lancé sur Streamlit Cloud n'écrirait que sur un disque
+    éphémère, sans aucun effet : le dashboard déployé ne collecte JAMAIS
+    lui-même, la CI reste l'unique écrivain des données.
+  • **Import ciblé legacy → parquet : LOCAL UNIQUEMENT.** C'est la seule
+    fonction qui ÉCRIT dans le parquet ; elle n'est jamais exposée en ligne
+    (invariant d'intégrité des données), et passe toujours par les garde-fous
+    de app/data/legacy_import.py et Forecast.persist."""
 
 import os
 from datetime import datetime
@@ -15,6 +27,8 @@ import config as C
 import run_dual
 from app.data.legacy_import import import_legacy_run, legacy_import_candidates
 from app.data.presence import legacy_signature
+from app.runtime import IS_LOCAL
+from app.services import github_dispatch, pipeline_auth
 from core.ui.pipeline import (
     execute as _core_execute,
     render_execution_results,
@@ -54,18 +68,47 @@ def load_cross_check_log(_sig):
     return df.sort_values("checked_at", ascending=False).reset_index(drop=True)
 
 
-def page_run(runs, sig):
-    st.title("🚀 Lancer le pipeline")
+def _render_remote_launcher():
+    """Bloc de déclenchement du CLOUD : POST workflow_dispatch sur le job CI,
+    derrière mot de passe et cooldown. Le cooldown est vérifié AVANT tout appel
+    réseau (garde-fou, pas un confort d'UX) et n'est consommé qu'après un
+    déclenchement réussi."""
+    st.subheader("▶️ Déclencher une collecte")
+    st.caption("La collecte est exécutée par l'intégration continue (le job "
+               "GitHub Actions habituel), jamais par ce dashboard : les "
+               "données sont écrites exactement comme lors d'un passage "
+               "automatique. Comptez une à deux minutes avant de voir le "
+               "résultat, puis rafraîchissez la page.")
 
-    now_utc = datetime.now(ZoneInfo("UTC"))
-    missing = run_dual._missing_legacy_slots(now_utc)
-    st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}**")
-    if missing:
-        st.info(f"📥 À rattraper côté Météociel : **{', '.join(missing)}** (publié mais pas "
-                "encore en stock) — le double run le scrapera.")
-    else:
-        st.success("✅ Stock legacy à jour : rien à rattraper pour l'instant.")
+    if not pipeline_auth.gate():
+        return
 
+    labels = [label for label, _, _ in C.PIPELINE_DISPATCH_TARGETS]
+    choix = st.radio("Flux à collecter", labels, horizontal=False)
+    label, target, aide = next(t for t in C.PIPELINE_DISPATCH_TARGETS
+                               if t[0] == choix)
+    st.caption(aide)
+
+    autorise, restant = github_dispatch.can_trigger()
+    if not autorise:
+        st.info(f"⏳ Déclenchement possible dans {int(restant // 60)} min "
+                f"{int(restant % 60)} s (limite anti-abus partagée).")
+        return
+
+    if st.button(f"🚀 Lancer — {label}", type="primary"):
+        with st.spinner("Demande envoyée à l'intégration continue…"):
+            ok, msg = github_dispatch.trigger_workflow(target)
+        if ok:
+            github_dispatch.record_trigger()  # jamais avant : un échec ne consomme pas
+            st.success(f"✅ {msg} Le job tourne côté CI ; rafraîchissez dans "
+                       "une à deux minutes.")
+        else:
+            st.error(f"❌ {msg}")
+
+
+def _render_local_launcher():
+    """Bloc de lancement LOCAL : exécution directe des scripts en
+    sous-processus, comportement historique inchangé."""
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.subheader("① Open-Meteo seul")
@@ -124,6 +167,10 @@ def page_run(runs, sig):
     # (jamais tassé dans une seule des 4 colonnes ci-dessus).
     render_execution_results(st.session_state.get("pipeline_results"))
 
+
+def _render_legacy_import(sig):
+    """Import ciblé legacy → parquet. LOCAL UNIQUEMENT : seule fonction de la
+    page qui écrit dans les données, jamais exposée en ligne."""
     st.markdown("---")
     st.subheader("🩹 Import ciblé depuis le legacy")
     st.caption("Comble une **absence avérée** du parquet Open-Meteo depuis un xlsx "
@@ -160,6 +207,9 @@ def page_run(runs, sig):
             else:
                 st.error(f"❌ {msg}")
 
+
+def _render_cross_check():
+    """Historique du contrôle croisé — lecture seule, visible de tous."""
     st.markdown("---")
     st.subheader("🔍 Historique du contrôle croisé")
     st.caption("Comparaison **médiane d'ensemble** (ECMWF/AIFS/GEFS) entre Open-Meteo et "
@@ -205,3 +255,30 @@ def page_run(runs, sig):
             st.download_button("⬇️ Télécharger l'historique (CSV)",
                                log.to_csv(index=False).encode("utf-8-sig"),
                                file_name="cross_check_log.csv", mime="text/csv")
+
+
+# --------------------------------------------------------------------------- #
+#  Entrée de page
+# --------------------------------------------------------------------------- #
+def page_run(runs, sig):
+    """Page complète. Consultation libre partout ; le DÉCLENCHEMENT d'une
+    collecte passe par les scripts en local et par le job CI (mot de passe) en
+    ligne ; l'import legacy, seule écriture directe dans le parquet, reste
+    strictement local."""
+    st.title("🚀 Lancer le pipeline")
+
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    missing = run_dual._missing_legacy_slots(now_utc)
+    st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}**")
+    if missing:
+        st.info(f"📥 À rattraper côté Météociel : **{', '.join(missing)}** (publié mais pas "
+                "encore en stock) — le double run le scrapera.")
+    else:
+        st.success("✅ Stock legacy à jour : rien à rattraper pour l'instant.")
+
+    if IS_LOCAL:
+        _render_local_launcher()
+        _render_legacy_import(sig)
+    else:
+        _render_remote_launcher()
+    _render_cross_check()

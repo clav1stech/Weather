@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.1.2] - 2026-08-07
+Page « Lancer le pipeline » accessible en ligne, déclenchement protégé.
+
+La page rejoint la navigation commune au lieu d'être réservée au mode local.
+Sa consultation (stock legacy, historique du contrôle croisé) reste libre et
+en lecture seule ; ce sont ses capacités d'action qui s'adaptent désormais à
+l'environnement.
+
+En ligne, lancer une collecte ne peut pas passer par un sous-processus — il
+n'écrirait que sur le disque éphémère du conteneur. Le bouton déclenche donc
+le job GitHub Actions existant (workflow_dispatch), qui reste l'unique
+écrivain des données : le mécanisme dormant de core/services/github_dispatch
+est réactivé pour cet usage, avec son cooldown partagé vérifié avant tout
+appel réseau et consommé seulement après un déclenchement réussi.
+
+Le déclenchement est protégé par un mot de passe (core/ui/auth.py, secret
+PIPELINE_PASSWORD côté Streamlit Cloud) : porte fermée par défaut — un secret
+absent refuse l'accès plutôt que de l'ouvrir —, comparaison à temps constant,
+mot de passe jamais journalisé ni conservé en session.
+
+L'import ciblé legacy → parquet, seule fonction du dashboard qui écrit dans
+les données, demeure strictement local et n'apparaît jamais en ligne, même
+une fois la porte franchie.
+
 ## [3.1.1] - 2026-08-07
 Sortie de git de la neige : magasin seul, sans double écriture.
 

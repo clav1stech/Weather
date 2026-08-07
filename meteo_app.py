@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "app
 
 import streamlit as st
 
-from app.runtime import IS_LOCAL
 from app.data.db import db_signature, list_runs
 from app.data.runsets import latest_refresh_status
 from app.domains import DOMAIN_PAGES
@@ -47,15 +46,16 @@ st.set_page_config(page_title="Dashboard Météo — Ensembles Paris",
                    page_icon="🌡️", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
-# Pages transverses, après les domaines. « Lancer le pipeline » n'apparaît
-# qu'en local (IS_LOCAL) : lancer un sous-processus n'a pas de sens sur le cloud.
+# Pages transverses, après les domaines. « Lancer le pipeline » est visible
+# PARTOUT : sa consultation (stock legacy, contrôle croisé) est en lecture
+# seule, et la page adapte elle-même ses capacités à l'environnement —
+# sous-processus en local, déclenchement du job CI derrière mot de passe en
+# ligne, import legacy jamais exposé hors local (cf. app/pages/pipeline.py).
 CORE_PAGES = [
     ("Vue d'ensemble", page_overview),
     ("Explorer un run", page_explore),
     ("Convergence des runs", page_convergence),
     ("Contrôle des runs", page_diagnostic),
-]
-LOCAL_PAGES = [
     ("Lancer le pipeline", page_run),
 ]
 
@@ -67,7 +67,7 @@ def main():
     sig = db_signature()
     runs = list_runs(sig)
 
-    renderers = dict(DOMAIN_PAGES + CORE_PAGES + (LOCAL_PAGES if IS_LOCAL else []))
+    renderers = dict(DOMAIN_PAGES + CORE_PAGES)
 
     st.sidebar.title("🌦️ Navigation")
     page = st.sidebar.radio("Aller à", list(renderers))
@@ -97,5 +97,5 @@ def main():
     renderers[page](runs, sig)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     main()

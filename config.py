@@ -367,14 +367,14 @@ STORE_FLUX = [
 ]
 
 # --------------------------------------------------------------------------- #
-#  Déclenchement à distance du workflow — NON UTILISÉ actuellement (dormant)
+#  Déclenchement à distance du workflow (page « Lancer le pipeline » du cloud)
 # --------------------------------------------------------------------------- #
-# Alternative écartée au profit du snapshot en direct ci-dessous (plus simple,
-# pas de PAT à gérer) : conservée telle quelle, secret et code compris
-# (app/services/github_dispatch.py), au cas où ce choix serait reconsidéré.
-# Le dashboard public ne collecte JAMAIS lui-même : il se contente de déclencher
-# (workflow_dispatch) le job CI existant, qui reste l'unique écrivain des
-# parquets. Dépôt visé — jamais en dur ailleurs que config.
+# Le dashboard déployé ne collecte JAMAIS lui-même : il se contente de
+# déclencher (workflow_dispatch) le job CI existant, qui reste l'unique
+# écrivain des données — un sous-processus lancé sur Streamlit Cloud
+# n'écrirait que sur un disque éphémère, sans aucun effet. Le lancement est
+# protégé par mot de passe (PIPELINE_PASSWORD_SECRET ci-dessous).
+# Dépôt visé — jamais en dur ailleurs que config.
 GITHUB_DISPATCH_OWNER = "clav1stech"
 GITHUB_DISPATCH_REPO = "Weather"
 GITHUB_DISPATCH_WORKFLOW = "run_forecast.yml"
@@ -393,6 +393,29 @@ GITHUB_DISPATCH_COOLDOWN_S = 600  # 10 min
 # conteneur (limite documentée, acceptable : pire cas = un cooldown remis à
 # zéro, jamais un abus permanent). Hors data/ : jamais un parquet de données.
 GITHUB_DISPATCH_STATE_PATH = os.path.join(BASE_DIR, ".runtime_state", "obs6m_dispatch_last.txt")
+
+# Nom du secret st.secrets portant le mot de passe de la page « Lancer le
+# pipeline ». La page elle-même est VISIBLE de tous (historique du contrôle
+# croisé, état du stock legacy — lecture seule) ; seul le DÉCLENCHEMENT d'une
+# collecte est protégé. Secret absent → aucun déclenchement possible (jamais
+# de valeur par défaut, jamais de repli permissif : un mot de passe non
+# configuré ferme la porte, il ne l'ouvre pas).
+PIPELINE_PASSWORD_SECRET = "PIPELINE_PASSWORD"
+# Cibles proposées au déclenchement distant : (libellé, input `target` du
+# workflow, aide). Sous-ensemble VOLONTAIRE des targets du workflow — le
+# scrape legacy et les rollovers n'ont rien à faire dans une page publique.
+PIPELINE_DISPATCH_TARGETS = [
+    ("🌡️ Prévisions d'ensemble (Open-Meteo)", "api",
+     "Interroge l'API Ensemble et met à jour la base principale."),
+    ("🌡️ Tx/Tn haute résolution", "t2m",
+     "Flux annexe Météo-France/DWD ICON (7 jours)."),
+    ("🛰️ Observations Météo-France (horaires)", "obs",
+     "Paquet horaire des 4 stations parisiennes."),
+    ("⏱️ Observations 6 min", "obs6m",
+     "Flux infra-horaire des cartes temps réel."),
+    ("🔭 Prévision Montsouris (vintages 15 min)", "vintages",
+     "Flux annexe minutely_15 au point de Montsouris."),
+]
 
 # --------------------------------------------------------------------------- #
 #  Snapshot EN DIRECT du bouton « Rafraîchir » (page Observations)

@@ -25,9 +25,17 @@ def db_signature():
 
     En mode magasin externe (WEATHER_STORE, docs/DESIGN_sortie_git.md) : la
     signature devient l'ensemble des (nom, etag) des partitions — même rôle de
-    clé opaque, invalidée dès qu'une partition change (mois courant re-uploadé)."""
+    clé opaque, invalidée dès qu'une partition change (mois courant re-uploadé).
+    Magasin injoignable (erreur réseau/API) → repli silencieux sur la signature
+    git ci-dessous, cohérent avec le repli de load_db (le parquet git reste le
+    filet de sécurité derrière le magasin, jamais un crash de page)."""
     if store_active():
-        return store_signature()
+        try:
+            sig = store_signature()
+        except Exception:  # noqa: BLE001 — magasin injoignable, repli sur git
+            sig = None
+        if sig is not None:
+            return sig
     sigs = []
     for path in (C.DB_PATH, C.DB_ARCHIVE_PATH):
         try:
@@ -51,26 +59,34 @@ def load_db(_sig):
 
     Filtre aussi les modèles legacy qui auraient pu rester dans un parquet plus
     ancien (ex. AIGEFS/ICON retirés de config.MODELS) — évite tout crash sur des
-    lignes orphelines sans couleur/config déclarée."""
+    lignes orphelines sans couleur/config déclarée.
+
+    Magasin externe PRIMAIRE, parquet git BACKUP automatique : en mode magasin
+    (WEATHER_STORE), toute erreur (réseau, API injoignable) ou tout résultat
+    vide bascule silencieusement sur la lecture git ci-dessous — jamais de page
+    en erreur pour une panne du magasin, jamais de perte de service tant que le
+    pipeline continue de committer dans git en double écriture."""
     if _sig is None:
         return pd.DataFrame(columns=C.SCHEMA)
     if store_active():
         # Magasin externe : la base = concat des partitions mensuelles (elles
         # représentent l'historique ENTIER, pas de hot/archive séparés).
-        df = load_store_df()
-        if df.empty:
-            return pd.DataFrame(columns=C.SCHEMA)
-    else:
-        if not os.path.exists(C.DB_PATH):
-            return pd.DataFrame(columns=C.SCHEMA)
-        df = pd.read_parquet(C.DB_PATH)
-        if os.path.exists(C.DB_ARCHIVE_PATH):
-            archive = pd.read_parquet(C.DB_ARCHIVE_PATH)
-            df = pd.concat([archive, df], ignore_index=True)
-            # Recouvrement hot/archive impossible après un rollover sain, mais la
-            # lecture ne doit pas en dépendre : dédup défensive, hot prioritaire.
-            df = df.drop_duplicates(subset=["run_date", "model", "member", "valid_time"],
-                                    keep="last")
+        try:
+            df = load_store_df()
+        except Exception:  # noqa: BLE001 — magasin injoignable, repli sur git
+            df = pd.DataFrame()
+        if not df.empty:
+            return _finalize(df)
+    if not os.path.exists(C.DB_PATH):
+        return pd.DataFrame(columns=C.SCHEMA)
+    df = pd.read_parquet(C.DB_PATH)
+    if os.path.exists(C.DB_ARCHIVE_PATH):
+        archive = pd.read_parquet(C.DB_ARCHIVE_PATH)
+        df = pd.concat([archive, df], ignore_index=True)
+        # Recouvrement hot/archive impossible après un rollover sain, mais la
+        # lecture ne doit pas en dépendre : dédup défensive, hot prioritaire.
+        df = df.drop_duplicates(subset=["run_date", "model", "member", "valid_time"],
+                                keep="last")
     return _finalize(df)
 
 

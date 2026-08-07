@@ -109,9 +109,16 @@ def flux_prefix(db_path):
 
 def flux_signature(db_path):
     """Signature de cache d'un flux annexe : etags des partitions si le magasin
-    est actif, sinon mtime du parquet git (None si absent)."""
+    est actif ET joignable, sinon mtime du parquet git (None si absent) — même
+    repli magasin→git que le flux principal (db.py), git reste le backup
+    automatique derrière le magasin."""
     if store_active():
-        return store_signature(prefix=flux_prefix(db_path))
+        try:
+            sig = store_signature(prefix=flux_prefix(db_path))
+        except Exception:  # noqa: BLE001 — magasin injoignable, repli sur git
+            sig = None
+        if sig is not None:
+            return sig
     try:
         return os.path.getmtime(db_path)
     except OSError:
@@ -119,18 +126,23 @@ def flux_signature(db_path):
 
 
 def load_flux(db_path, schema):
-    """Base complète d'un flux annexe, depuis le magasin (si actif) ou le parquet
-    git. Absent / vide / illisible / magasin injoignable → DataFrame vide au
-    schéma : l'appelant se comporte exactement comme sans ce flux."""
-    try:
-        if store_active():
+    """Base complète d'un flux annexe : magasin PRIMAIRE si actif, avec repli
+    automatique sur le parquet git (BACKUP) au moindre échec ou résultat vide —
+    puis absent / illisible des deux côtés → DataFrame vide au schéma :
+    l'appelant se comporte exactement comme sans ce flux (dégradation
+    silencieuse, invariant annexes)."""
+    if store_active():
+        try:
             df = load_store_df(prefix=flux_prefix(db_path))
-        elif os.path.exists(db_path):
-            df = pd.read_parquet(db_path)
-        else:
+        except Exception:  # noqa: BLE001 — magasin injoignable, repli sur git
             df = None
-        if df is None or df.empty:
-            return pd.DataFrame(columns=schema)
-        return df
-    except Exception:  # noqa: BLE001 — dégradation silencieuse (invariant annexes)
-        return pd.DataFrame(columns=schema)
+        if df is not None and not df.empty:
+            return df
+    try:
+        if os.path.exists(db_path):
+            df = pd.read_parquet(db_path)
+            if df is not None and not df.empty:
+                return df
+    except Exception:  # noqa: BLE001 — parquet git illisible/corrompu
+        pass
+    return pd.DataFrame(columns=schema)

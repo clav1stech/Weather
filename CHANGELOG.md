@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.1.0] - 2026-08-07
+Sortie de git des données canicule vers un magasin GitHub Release.
+
+Les cinq flux canicule (ensemble T850, Tx/Tn HD, observations horaires,
+observations 6 min, vintages Montsouris) quittent le versionnement git au
+profit d'assets d'un Release GitHub dédié (`data-store`), partitionnés par
+mois — git n'a plus vocation à servir de base binaire à croissance non
+bornée. Nouvelle abstraction `core/store/` à backends interchangeables
+(CLI `gh` en écriture pipeline, HTTPS/REST sans authentification en lecture
+dashboard) avec preuve de round-trip par mois.
+
+Le dashboard lit désormais le magasin en PRIMAIRE, avec repli automatique
+sur le parquet git en BACKUP au moindre échec ou résultat vide (réseau, API
+injoignable) — jamais de page en erreur pour une panne du magasin tant que
+la double écriture continue d'alimenter git en parallèle. Non-régression
+vérifiée : sorties de calcul et rendu des pages strictement identiques entre
+lecture git et lecture magasin.
+
 ## [3.0.3] - 2026-07-26
 Neige : vue d'ensemble repensée grand public et page « Maille fine Météo-France ».
 

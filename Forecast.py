@@ -27,6 +27,8 @@ import re
 import sys
 import datetime as dt
 import concurrent.futures
+import subprocess
+import tempfile
 
 import requests
 import numpy as np
@@ -632,6 +634,82 @@ def persist(fresh, existing=None):
 
 
 # --------------------------------------------------------------------------- #
+#  Miroir vers le magasin externe — double écriture (« sortie de git »)
+# --------------------------------------------------------------------------- #
+# Mécanisme INLINE : le pipeline racine n'importe jamais core/ ni app/ (la
+# partie critique de collecte garde ses propres implémentations, cf. CLAUDE.md),
+# d'où la petite duplication de split-par-mois / same_rows / appels gh.
+# En double écriture (Phase 1, docs/DESIGN_sortie_git.md) git reste la SOURCE DE
+# VÉRITÉ : le miroir est best-effort, JAMAIS bloquant — la collecte et persist()
+# ont déjà réussi côté git, un échec du miroir est journalisé et non propagé.
+# Activé uniquement si WEATHER_STORE_WRITE est positionné (CI post-merge) ;
+# absent → pipeline strictement inchangé.
+
+def _gh(args):
+    """`gh <args> --repo STORE_REPO`, stdout capturé, lève sur échec."""
+    return subprocess.run(["gh", *args, "--repo", C.STORE_REPO],
+                          check=True, text=True, capture_output=True).stdout
+
+
+def _ensure_store_release():
+    """Crée le release porteur des partitions s'il manque (idempotent)."""
+    try:
+        _gh(["release", "view", C.STORE_TAG, "--json", "tagName"])
+    except subprocess.CalledProcessError:
+        _gh(["release", "create", C.STORE_TAG,
+             "--title", "Données — partitions parquet (hors git)",
+             "--notes", "Magasin de données du pipeline météo (cf. "
+                        "docs/DESIGN_sortie_git.md). Ne pas supprimer.",
+             "--latest=false"])
+
+
+def _same_rows(a, b):
+    """True si a et b portent exactement les mêmes lignes (ordre indifférent,
+    NaN == NaN) — équivalent inline de core.store.partition.same_rows, pour
+    vérifier qu'une partition uploadée reproduit bien sa tranche de la base."""
+    if sorted(a.columns) != sorted(b.columns):
+        return False
+    cols = sorted(a.columns)
+    ca = a[cols].sort_values(cols, na_position="last").reset_index(drop=True)
+    cb = b[cols].sort_values(cols, na_position="last").reset_index(drop=True)
+    return ca.equals(cb)
+
+
+def mirror_to_store(existing, combined, db_path, time_col):
+    """Uploade vers le release `data-store` les partitions mensuelles dont
+    l'ensemble de lignes a CHANGÉ entre `existing` et `combined` (le préfixe
+    d'asset se déduit du basename de `db_path`, la partition du mois de
+    `time_col`), chacune re-téléchargée et comparée à sa tranche. Encapsulé pour
+    ne JAMAIS faire échouer le pipeline (git déjà écrit, source de vérité).
+    Signature générique identique dans tous les pipelines racine."""
+    try:
+        changed = pd.concat([existing, combined]).drop_duplicates(keep=False)
+        if changed.empty:
+            return
+        months = sorted(pd.to_datetime(changed[time_col]).dt.strftime("%Y-%m").unique())
+        prefix = os.path.splitext(os.path.basename(db_path))[0]
+        c_month = pd.to_datetime(combined[time_col]).dt.strftime("%Y-%m").to_numpy()
+        _ensure_store_release()
+        with tempfile.TemporaryDirectory() as tmp:
+            for m in months:
+                sub = combined[c_month == m]
+                if sub.empty:
+                    continue
+                name = f"{prefix}_{m}.parquet"
+                path = os.path.join(tmp, name)
+                sub.to_parquet(path, index=False)
+                _gh(["release", "upload", C.STORE_TAG, path, "--clobber"])
+                back = os.path.join(tmp, "back_" + name)
+                _gh(["release", "download", C.STORE_TAG, "--pattern", name,
+                     "--output", back, "--clobber"])
+                if not _same_rows(pd.read_parquet(back), sub):
+                    raise RuntimeError(f"partition {name} divergente après upload")
+                print(f"   🪞 miroir store : {name} ({len(sub):,} lignes) vérifié")
+    except Exception as exc:  # noqa: BLE001 — jamais bloquant en double écriture
+        print(f"   ⚠️  miroir store échoué (git intact, source de vérité) : {exc}")
+
+
+# --------------------------------------------------------------------------- #
 #  Entrée
 # --------------------------------------------------------------------------- #
 def main():
@@ -684,6 +762,12 @@ def main():
     n_runs = combined[["run_date", "model"]].drop_duplicates().shape[0]
     print(f"✅ Base mise à jour : {len(combined):,} lignes · {n_runs} run(s) modèle archivés")
     print(f"   → {C.DB_PATH}")
+
+    # Double écriture vers le magasin externe (git déjà écrit, source de vérité) —
+    # actif uniquement si WEATHER_STORE_WRITE positionné. Seules les partitions
+    # dont le contenu a changé sont ré-uploadées ; les mois clos restent intacts.
+    if os.environ.get("WEATHER_STORE_WRITE", "").strip().lower() not in ("", "0", "false"):
+        mirror_to_store(existing, combined, C.DB_PATH, "run_date")
 
 
 if __name__ == "__main__":

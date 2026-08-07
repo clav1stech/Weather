@@ -19,35 +19,31 @@ de tous les CALCULS : écart ICU, Tx/Tn journaliers, min/max du jour. Un flux
 6 min absent/vide/corrompu est un état NORMAL (flux plus récent que la base,
 API indisponible)."""
 
-import os
-
 import pandas as pd
 import streamlit as st
 
 import config as C
 from app.runtime import LOCAL_TZ
+from app.data.store import flux_signature, load_flux
 
 
 def obs_6m_signature():
-    """Signature (mtime) du parquet 6 min → invalide le cache à chaque collecte.
-    None si le fichier n'existe pas (état normal, pas une anomalie)."""
-    try:
-        return os.path.getmtime(C.DB_OBS_6M_PATH)
-    except OSError:
-        return None
+    """Signature du flux 6 min → invalide le cache à chaque collecte. None si le
+    flux n'existe pas encore. Bascule mtime git ↔ etags du magasin selon
+    WEATHER_STORE, de façon transparente."""
+    return flux_signature(C.DB_OBS_6M_PATH)
 
 
 @st.cache_data(show_spinner=False)
 def load_obs_6m(_sig):
     """Base 6 min complète, valid_time converti UTC → heure de Paris (naïf).
-    DataFrame vide au schéma OBS_6M_SCHEMA si le fichier est absent, illisible
-    ou sans colonne attendue."""
-    if _sig is None or not os.path.exists(C.DB_OBS_6M_PATH):
+    DataFrame vide au schéma OBS_6M_SCHEMA si le flux est absent, illisible ou
+    sans colonne attendue."""
+    if _sig is None:
         return pd.DataFrame(columns=C.OBS_6M_SCHEMA)
-    try:
-        df = pd.read_parquet(C.DB_OBS_6M_PATH)
-    except Exception:  # noqa: BLE001 — fichier corrompu/partiel : on dégrade, jamais de crash
-        return pd.DataFrame(columns=C.OBS_6M_SCHEMA)
+    df = load_flux(C.DB_OBS_6M_PATH, C.OBS_6M_SCHEMA)
+    if df.empty:
+        return df
     for col in C.OBS_6M_SCHEMA:
         if col not in df.columns:
             df[col] = pd.NA

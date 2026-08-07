@@ -14,34 +14,30 @@ du flux (comparer les prévisions émises à divers instants). `valid_time` et
 `fetched_at` sont des instants UTC tz-naïfs (comme tout le stockage) ; la
 conversion vers l'heure de Paris n'a lieu qu'à l'affichage."""
 
-import os
-
 import pandas as pd
 import streamlit as st
 
 import config as C
+from app.data.store import flux_signature, load_flux
 
 
 def vintages_signature():
-    """Signature (mtime) du parquet vintages → invalide le cache à chaque
-    collecte. None si le fichier n'existe pas (état normal, pas une anomalie)."""
-    try:
-        return os.path.getmtime(C.DB_VINTAGE_PATH)
-    except OSError:
-        return None
+    """Signature du flux vintages → invalide le cache à chaque collecte. None si
+    le flux n'existe pas encore. Bascule mtime git ↔ etags du magasin selon
+    WEATHER_STORE, de façon transparente."""
+    return flux_signature(C.DB_VINTAGE_PATH)
 
 
 @st.cache_data(show_spinner=False)
 def load_vintages(_sig):
     """Base vintages complète (append-only, bornée par compaction). DataFrame
-    vide au schéma VINTAGE_SCHEMA si le fichier est absent, illisible ou sans
+    vide au schéma VINTAGE_SCHEMA si le flux est absent, illisible ou sans
     colonne attendue. `valid_time`/`fetched_at` normalisés en datetime."""
-    if _sig is None or not os.path.exists(C.DB_VINTAGE_PATH):
+    if _sig is None:
         return pd.DataFrame(columns=C.VINTAGE_SCHEMA)
-    try:
-        df = pd.read_parquet(C.DB_VINTAGE_PATH)
-    except Exception:  # noqa: BLE001 — fichier corrompu/partiel : on dégrade, jamais de crash
-        return pd.DataFrame(columns=C.VINTAGE_SCHEMA)
+    df = load_flux(C.DB_VINTAGE_PATH, C.VINTAGE_SCHEMA)
+    if df.empty:
+        return df
     for col in C.VINTAGE_SCHEMA:
         if col not in df.columns:
             df[col] = pd.NA

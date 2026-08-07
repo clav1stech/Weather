@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from apps.snow import snow_config as SC
+from apps.snow.pipeline.store_mirror import load_existing as _store_existing, mirror
 from core.io.atomic import atomic_write_parquet
 from core.services import openmeteo as OM
 
@@ -92,16 +93,22 @@ def parse_payload(payload, fetched_at):
 # --------------------------------------------------------------------------- #
 #  Persistance
 # --------------------------------------------------------------------------- #
-def load_existing():
-    """Base HD existante, réalignée sur le schéma courant (colonne ajoutée
-    après coup → NaN) — même principe que les autres flux."""
-    if os.path.exists(SC.DB_HD_PATH):
-        df = pd.read_parquet(SC.DB_HD_PATH)
-        for col in SC.HD_SCHEMA:
+def _read_local(db_path, schema):
+    """Parquet local réaligné sur le schéma courant (colonne ajoutée après
+    coup → NaN) — même principe que les autres flux."""
+    if os.path.exists(db_path):
+        df = pd.read_parquet(db_path)
+        for col in schema:
             if col not in df.columns:
                 df[col] = np.nan
-        return df[SC.HD_SCHEMA]
-    return pd.DataFrame(columns=SC.HD_SCHEMA)
+        return df[schema]
+    return pd.DataFrame(columns=schema)
+
+
+def load_existing():
+    """Base HD existante : depuis le magasin quand il est actif (source de
+    vérité de la neige), sinon depuis le parquet local (dev)."""
+    return _store_existing(SC.DB_HD_PATH, SC.HD_SCHEMA, _read_local)
 
 
 def _drop_unchanged(fresh, existing):
@@ -159,12 +166,16 @@ def main():
         print(f"   {model_label} @ {site} : {len(g)} échéance(s), jusqu'au "
               f"{g['target_datetime'].max():%d %b %Hh}")
 
-    combined, n_new = persist(fresh)
+    existing = load_existing()
+    combined, n_new = persist(fresh, existing=existing)
     if n_new == 0:
         print("ℹ️  Valeurs identiques à la dernière collecte — rien à écrire.")
         return
     print(f"✅ Base maille fine mise à jour : +{n_new} ligne(s) · {len(combined):,} au total")
     print(f"   → {SC.DB_HD_PATH}")
+
+    # Magasin = source de vérité de la neige (la CI ne committe plus ces parquets).
+    mirror(existing, combined, SC.DB_HD_PATH, "fetched_at")
 
 
 if __name__ == "__main__":

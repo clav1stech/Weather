@@ -7,4 +7,4 @@ produit. `meteo_app.py` (APP_VERSION) et `snow_app.py` (SNOW_APP_VERSION)
 importent tous deux `SHARED_VERSION` — ne jamais les faire diverger.
 `tools/export_project.py` lit cette constante par regex."""
 
-SHARED_VERSION = "3.1.0"
+SHARED_VERSION = "3.1.1"

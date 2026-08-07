@@ -26,6 +26,7 @@ import pandas as pd
 import requests
 
 from apps.snow import snow_config as SC
+from apps.snow.pipeline.store_mirror import load_existing, mirror
 from apps.snow.pipeline import mf_summary as MS
 from core.pipeline import ensemble_runs as ER
 from core.services import meteofrance_wcs as WCS
@@ -203,7 +204,7 @@ def main():
         SC.MF_LOCAL_API_KEY_ENVS[MODEL], os.path.join(_ROOT, ".env"))
     session = requests.Session()
     run_date, coverages = discover_cycle(session, key)
-    existing = ER.load_existing(SC.DB_MF_LOCAL_PATH, SC.MF_LOCAL_SCHEMA)
+    existing = load_existing(SC.DB_MF_LOCAL_PATH, SC.MF_LOCAL_SCHEMA, ER.load_existing)
     if is_complete_in_store(existing, run_date):
         MS.persist_summary(existing[(existing["model"] == MODEL)
                                     & (pd.to_datetime(existing["run_date"])
@@ -225,6 +226,9 @@ def main():
     print(f"✅ Base Météo-France locale : {len(combined):,} lignes · "
           f"{n_runs} run(s) archivés")
     print(f"   → {SC.DB_MF_LOCAL_PATH}")
+
+    # Magasin = source de vérité de la neige (la CI ne committe plus ces parquets).
+    mirror(existing, combined, SC.DB_MF_LOCAL_PATH, "run_date")
 
 
 if __name__ == "__main__":

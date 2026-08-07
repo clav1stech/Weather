@@ -12,33 +12,25 @@ neige, vent… publiés par un sous-ensemble) : NaN structurel, toute statistiqu
 est tolérante aux NaN. Le parquet COLD éventuel (rollover hot/cold) est relu
 et concaténé : l'historique reste entier à l'affichage."""
 
-import os
-
 import pandas as pd
 import streamlit as st
 
 from apps.snow import snow_config as SC
+from apps.snow.app.data.store import flux_signature, read_flux
 from ..runtime import LOCAL_TZ
 
 
 def obs_signature():
-    """Signature (mtimes hot+cold) → invalide le cache à chaque collecte ou
-    rollover. None si aucun fichier (état normal, pas une anomalie)."""
-    sigs = []
-    for path in (SC.DB_OBS_PATH, SC.DB_OBS_COLD_PATH):
-        try:
-            sigs.append(os.path.getmtime(path))
-        except OSError:
-            sigs.append(None)
+    """Signature combinée hot+cold → invalide le cache à chaque collecte ou
+    rollover. None si aucun fichier (état normal, pas une anomalie). Suit la
+    source réellement lue : partitions du magasin si actif, mtime sinon."""
+    sigs = [flux_signature(p) for p in (SC.DB_OBS_PATH, SC.DB_OBS_COLD_PATH)]
     return None if all(s is None for s in sigs) else tuple(sigs)
 
 
 def _read(path):
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=SC.OBS_SCHEMA)
-    try:
-        df = pd.read_parquet(path)
-    except Exception:  # noqa: BLE001 — fichier corrompu/partiel : on dégrade, jamais de crash
+    df = read_flux(path)
+    if df is None:
         return pd.DataFrame(columns=SC.OBS_SCHEMA)
     for col in SC.OBS_SCHEMA:
         if col not in df.columns:

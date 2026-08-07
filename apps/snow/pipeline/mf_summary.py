@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from apps.snow import snow_config as SC
+from apps.snow.pipeline.store_mirror import load_existing, mirror
 from core.pipeline import ensemble_runs as ER
 
 
@@ -80,11 +81,13 @@ def persist_summary(raw, db_path=None):
     candidate = summarize_rows(raw)
     if candidate.empty:
         raise ValueError("Aucune ligne brute à synthétiser.")
-    existing = ER.load_existing(db_path, SC.MF_SUMMARY_SCHEMA)
+    existing = load_existing(db_path, SC.MF_SUMMARY_SCHEMA, ER.load_existing)
     if _same_summary(existing, candidate):
         return existing, False
     combined = ER.persist(
         candidate, db_path, schema=SC.MF_SUMMARY_SCHEMA,
         var_cols=SC.MF_SUMMARY_VAR_COLS,
         sort_cols=_GROUP_COLS, max_gap_h=24, existing=existing)
+    # Magasin = source de vérité de la neige (la CI ne committe plus ces parquets).
+    mirror(existing, combined, db_path, "run_date")
     return combined, True

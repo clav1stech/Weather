@@ -27,6 +27,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "..", "..")))
 
 from apps.snow import snow_config as SC
+from apps.snow.pipeline.store_mirror import load_existing, mirror
 from core.pipeline import observations as OBS
 from fetch_observations import api_key  # racine : gestion de clé mono-source
 
@@ -79,7 +80,7 @@ def main():
         print(f"   ⚠️  Station(s) absente(s) du paquet à ce poll (les autres sont "
               f"persistées, le paquet suivant comblera) : {', '.join(absentes)}")
 
-    existing = OBS.load_existing(SC.DB_OBS_PATH, SC.OBS_SCHEMA)
+    existing = load_existing(SC.DB_OBS_PATH, SC.OBS_SCHEMA, OBS.load_existing)
     combined, n_new = OBS.persist(fresh, SC.DB_OBS_PATH, SC.OBS_SCHEMA,
                                   existing=existing)
     if n_new == 0:
@@ -97,6 +98,9 @@ def main():
     print(f"✅ Base observations Alpes mise à jour : +{n_new} ligne(s) · "
           f"{len(combined):,} au total")
     print(f"   → {SC.DB_OBS_PATH}")
+
+    # Magasin = source de vérité de la neige (la CI ne committe plus ces parquets).
+    mirror(existing, combined, SC.DB_OBS_PATH, "valid_time")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ l'un par l'autre — dégradation silencieuse si l'un manque) :
 """
 
 import os
+import tempfile
 
 # --------------------------------------------------------------------------- #
 #  Points de mesure (FIXÉS — ne pas les redéterminer)
@@ -449,6 +450,38 @@ DB_OBS_COLD_PATH = os.path.join(DATA_DIR, "db_obs_alpes_archive.parquet")
 DB_MF_LOCAL_COLD_PATH = os.path.join(DATA_DIR, "db_megeve_mf_local_archive.parquet")
 DB_MF_REGIONAL_COLD_PATH = os.path.join(
     DATA_DIR, "db_megeve_arpege_pe_archive.parquet")
+
+# --------------------------------------------------------------------------- #
+#  Magasin de données externe (« sortie de git ») — docs/DESIGN_sortie_git.md
+# --------------------------------------------------------------------------- #
+# Même release `data-store` et mêmes réglages que le canicule (config.py) : le
+# préfixe d'asset se déduit du basename du parquet, donc les deux apps peuvent
+# partager un release sans collision (db_megeve_… vs database_paris_…).
+# Redéclaré ici plutôt qu'importé du config.py racine : snow_config est
+# volontairement indépendant du canicule (cf. en-tête).
+STORE_REPO = "clav1stech/Weather"
+STORE_TAG = "data-store"
+STORE_CACHE_DIR = os.path.join(tempfile.gettempdir(), "weather_store_cache")
+
+# Registre des flux neige sortis de git : (chemin parquet, colonne temporelle
+# de partition). Les parquets HOT et leur ARCHIVE (cold) figurent séparément :
+# chacun a son propre préfixe d'asset, ce qui préserve EXACTEMENT la
+# sémantique hot/cold du dashboard (load_db lit le hot, load_cold l'archive)
+# sans arbitrer entre les deux — le rollover continue de fonctionner comme
+# avant, il déplace simplement des lignes d'un flux du magasin vers l'autre.
+STORE_FLUX = [
+    (DB_ENS_PATH, "run_date"),
+    (DB_ENS_COLD_PATH, "run_date"),
+    (DB_HD_PATH, "fetched_at"),
+    (DB_HD_COLD_PATH, "fetched_at"),
+    (DB_OBS_PATH, "valid_time"),
+    (DB_OBS_COLD_PATH, "valid_time"),
+    (DB_MF_LOCAL_PATH, "run_date"),
+    (DB_MF_LOCAL_COLD_PATH, "run_date"),
+    (DB_MF_REGIONAL_PATH, "run_date"),
+    (DB_MF_REGIONAL_COLD_PATH, "run_date"),
+    (DB_MF_SUMMARY_PATH, "run_date"),
+]
 
 # --------------------------------------------------------------------------- #
 #  Dérivés (ne pas éditer)

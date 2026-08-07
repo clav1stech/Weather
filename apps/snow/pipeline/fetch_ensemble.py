@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 
 from apps.snow import snow_config as SC
+from apps.snow.pipeline.store_mirror import load_existing, mirror
 from core.pipeline import ensemble_runs as ER
 from core.services import openmeteo as OM
 
@@ -223,7 +224,7 @@ def main():
     print("   Cycle retenu par modèle : " +
           ", ".join(f"{label} {rd.hour:02d}Z" for label, rd in rd_by_model.items()))
 
-    existing = ER.load_existing(SC.DB_ENS_PATH, SC.ENS_SCHEMA)
+    existing = load_existing(SC.DB_ENS_PATH, SC.ENS_SCHEMA, ER.load_existing)
     fresh, stale, partial = ER.filter_fresh_rows(
         candidate, existing,
         var_cols=SC.ENS_VAR_COLS, id_cols=["kind", "member", "site"],
@@ -253,6 +254,9 @@ def main():
     print(f"✅ Base neige mise à jour : {len(combined):,} lignes · "
           f"{n_runs} run(s) modèle archivés")
     print(f"   → {SC.DB_ENS_PATH}")
+
+    # Magasin = source de vérité de la neige (la CI ne committe plus ces parquets).
+    mirror(existing, combined, SC.DB_ENS_PATH, "run_date")
 
 
 if __name__ == "__main__":

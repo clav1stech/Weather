@@ -9,21 +9,12 @@ l'affichage) ; les cycles réels (0/6/12/18Z) se retrouvent via utc_cycle().
 Parquet absent/vide/corrompu → DataFrame vide, dégradation silencieuse
 (jamais un crash, jamais une alerte intrusive)."""
 
-import os
-
 import pandas as pd
 import streamlit as st
 
 from apps.snow import snow_config as SC
+from apps.snow.app.data.store import flux_signature as _signature, read_flux
 from ..runtime import LOCAL_TZ
-
-
-def _signature(path):
-    """Signature (mtime) d'un parquet → invalide le cache au moindre run."""
-    try:
-        return os.path.getmtime(path)
-    except OSError:
-        return None
 
 
 def db_signature():
@@ -72,11 +63,8 @@ def _align_schema(df, schema):
 def _read_ens(path):
     """Un parquet au schéma ensemble → DataFrame filtré (labels de config) et
     converti en heure de Paris. Absent/corrompu → vide, dégradation silencieuse."""
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=SC.ENS_SCHEMA)
-    try:
-        df = pd.read_parquet(path)
-    except Exception:  # noqa: BLE001 — parquet corrompu = dégradation silencieuse
+    df = read_flux(path)
+    if df is None:
         return pd.DataFrame(columns=SC.ENS_SCHEMA)
     df = _align_schema(df, SC.ENS_SCHEMA)
     df = df[df["model"].isin(SC.ENS_LABELS + SC.MEAN_LABELS)].reset_index(drop=True)
@@ -85,11 +73,8 @@ def _read_ens(path):
 
 def _read_mf_local(path):
     """Parquet PNT Météo-France local, tolérant au schéma progressif."""
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=SC.MF_LOCAL_SCHEMA)
-    try:
-        df = pd.read_parquet(path)
-    except Exception:  # noqa: BLE001 — absence explicite dans l'UI en aval
+    df = read_flux(path)
+    if df is None:
         return pd.DataFrame(columns=SC.MF_LOCAL_SCHEMA)
     df = _align_schema(df, SC.MF_LOCAL_SCHEMA)
     return _to_paris(df, ("run_date", "valid_time"))
@@ -97,11 +82,8 @@ def _read_mf_local(path):
 
 def _read_mf_regional(path):
     """Parquet PE-ARPEGE dédié, absent tant que le flux n'a pas tourné."""
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=SC.MF_REGIONAL_SCHEMA)
-    try:
-        df = pd.read_parquet(path)
-    except Exception:  # noqa: BLE001
+    df = read_flux(path)
+    if df is None:
         return pd.DataFrame(columns=SC.MF_REGIONAL_SCHEMA)
     df = _align_schema(df, SC.MF_REGIONAL_SCHEMA)
     return _to_paris(df, ("run_date", "valid_time"))
@@ -109,11 +91,8 @@ def _read_mf_regional(path):
 
 def _read_mf_summary(path):
     """Archive moyenne compacte, tolérante aux futures colonnes ajoutées."""
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=SC.MF_SUMMARY_SCHEMA)
-    try:
-        df = pd.read_parquet(path)
-    except Exception:  # noqa: BLE001
+    df = read_flux(path)
+    if df is None:
         return pd.DataFrame(columns=SC.MF_SUMMARY_SCHEMA)
     df = _align_schema(df, SC.MF_SUMMARY_SCHEMA)
     return _to_paris(df, ("run_date", "valid_time"))
@@ -140,11 +119,8 @@ def load_cold(_sig):
 def load_hd(_sig):
     """Base maille fine (append-only). fetched_at / target_datetime convertis
     UTC → heure de Paris (naïf)."""
-    if _sig is None or not os.path.exists(SC.DB_HD_PATH):
-        return pd.DataFrame(columns=SC.HD_SCHEMA)
-    try:
-        df = pd.read_parquet(SC.DB_HD_PATH)
-    except Exception:  # noqa: BLE001
+    df = read_flux(SC.DB_HD_PATH) if _sig is not None else None
+    if df is None:
         return pd.DataFrame(columns=SC.HD_SCHEMA)
     df = _align_schema(df, SC.HD_SCHEMA)
     return _to_paris(df, ("fetched_at", "target_datetime"))

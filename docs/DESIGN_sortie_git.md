@@ -167,10 +167,16 @@ la suit à l'identique.** On ne coupe git qu'après cette preuve.
   - Dashboard : lit le store par défaut (`WEATHER_STORE=1` en prod / Streamlit Cloud).
   - Re-`check` non-régression : identique.
 
-- **Phase 4 — Nettoyage & généralisation.**
-  - Étendre la même mécanique aux autres flux, dans l'ordre du churn :
-    `obs_6m` (cadence 15 min, plus gros churn de fréquence) → autres annexes → snow.
-  - Retirer le double-write résiduel, la doc et CLAUDE.md à jour.
+- **Phase 4 — Nettoyage & généralisation.** *(neige faite)*
+  - Canicule : les cinq flux sont en double écriture, dashboard en lecture
+    magasin avec repli git. Reste la coupure de git (Phase 3) après validation.
+  - **Neige : passée directement en magasin seul** (pas de double écriture — le
+    mécanisme était déjà éprouvé côté canicule, et l'app est hors production).
+    La CI ne committe plus aucun parquet neige ; les fichiers restés dans git
+    sont figés et ne servent que de repli de lecture. Le pipeline lit son
+    existant DANS le magasin (le fichier local en CI étant la copie gelée).
+  - Corollaire : le rollover hot/cold neige devient sans objet (rollover
+    implicite du partitionnement mensuel, §5) — job CI `rollover-snow` supprimé.
 
 ## 9. Sécurité de la donnée de prod (règles absolues)
 

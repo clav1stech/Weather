@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.1.1] - 2026-08-07
+Sortie de git de la neige : magasin seul, sans double écriture.
+
+Les six flux neige (ensemble Megève, maille fine, PNT Météo-France local,
+PE-ARPEGE, synthèse par cycle, observations Alpes du Nord) et leurs archives
+passent au magasin externe partitionné par mois. Contrairement au canicule,
+pas de phase de double écriture : le magasin est d'emblée la source de vérité
+et la CI ne committe plus aucun parquet neige — les fichiers restés dans git
+sont figés et ne servent que de repli de lecture au dashboard.
+
+D'où la règle qui structure le pipeline : l'existant se lit TOUJOURS dans le
+magasin, jamais sur le disque — en CI le fichier local est la copie gelée, et
+repartir de lui tronquerait l'historique à chaque run. Un magasin injoignable
+lève donc côté pipeline, là où le dashboard se dégrade en silence.
+
+Le rollover hot/cold neige devient sans objet : le partitionnement mensuel
+fige un mois clos de lui-même. Le job CI `rollover-snow` est supprimé et le
+script ne travaille plus que sur les parquets locaux — le brancher sur le
+magasin ferait basculer la copie gelée par-dessus l'historique.
+
+Miroir d'écriture mutualisé dans `core/store/mirror.py` (les pipelines neige
+passant déjà par `core/pipeline/`, à la différence du canicule qui garde son
+implémentation inline), amorçage vérifié par `apps/snow/pipeline/seed_store.py`.
+
 ## [3.1.0] - 2026-08-07
 Sortie de git des données canicule vers un magasin GitHub Release.
 

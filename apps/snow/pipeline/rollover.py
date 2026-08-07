@@ -11,7 +11,15 @@ horodatage d'acquisition/observation.
 Sécurité (cf. hot_cold.py) : sauvegardes datées .bak avant écriture,
 vérification stricte de non-perte AVANT toute écriture — au moindre doute le
 script sort en erreur sans rien toucher. Idempotent (rien à basculer → aucun
-fichier touché). `--dry-run` : rapport complet sans aucune écriture."""
+fichier touché). `--dry-run` : rapport complet sans aucune écriture.
+
+DEVENU SANS OBJET depuis la sortie de git de la neige : les données vivent
+désormais dans le magasin externe, partitionnées par mois — un mois clos n'est
+plus jamais réécrit, il est de fait figé (« rollover implicite »,
+docs/DESIGN_sortie_git.md §5). Ce script n'opère que sur les parquets LOCAUX,
+qui ne sont plus alimentés : le lancer en CI reviendrait à faire basculer la
+copie gelée de git, sans effet sur le magasin. Conservé pour un usage local
+sur une copie, sans cron — ne jamais le rebrancher sur le magasin."""
 
 import os
 import sys

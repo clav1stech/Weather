@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.1.4] - 2026-08-07
+Page « Lancer le pipeline » du dashboard neige accessible en ligne.
+
+Le dashboard neige gardait sa page de lancement réservée au mode local : en
+ligne elle n'apparaissait pas du tout, alors que les deux apps partagent la
+même version affichée — de quoi croire à un déploiement en retard.
+
+Elle rejoint donc la navigation commune, avec la même mécanique que le
+canicule : saisie du mot de passe sur la page, comparée au secret côté
+serveur, puis déclenchement du job CI neige (workflow_dispatch) parmi ses
+quatre cibles — toutes les collectes, ensemble et régionaux, maille fine, ou
+observations. Le dashboard ne collecte jamais lui-même.
+
+Le diagnostic rollover reste local : il lance un sous-processus sur les
+parquets du conteneur, sans objet une fois les données dans le magasin.
+
 ## [3.1.3] - 2026-08-07
 CI neige : isoler les flux pour résister aux échecs partiels.
 

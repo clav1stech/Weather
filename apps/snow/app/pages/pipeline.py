@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Page locale de lancement des flux neige et diagnostic du rollover.
+"""Page « Lancer le pipeline neige ».
 
-Toutes les collectes actives sont relançables séparément ou en séquence. Le rollover
-est volontairement invoqué SANS ``--execute`` : depuis l'UI il reste donc un
-diagnostic dry-run, sans possibilité de mutation de l'archive hot/cold.
+VISIBLE PARTOUT, capacités adaptées à l'environnement :
+  • en LOCAL, les boutons lancent les scripts en sous-processus (toutes les
+    collectes relançables séparément ou en séquence) et le rollover est invoqué
+    SANS ``--execute`` — depuis l'UI il reste un diagnostic dry-run, jamais une
+    mutation de l'archive hot/cold ;
+  • EN LIGNE, un sous-processus n'écrirait que sur un disque éphémère : la page
+    déclenche donc le job CI existant (workflow_dispatch), qui reste l'unique
+    écrivain des données, derrière un mot de passe et un cooldown partagé. Le
+    diagnostic rollover n'y est pas exposé (il n'aurait aucun sens sur la copie
+    gelée du conteneur).
 """
 
 import os
@@ -13,6 +20,7 @@ import streamlit as st
 
 from apps.snow import snow_config as SC
 from apps.snow.app.runtime import IS_LOCAL
+from apps.snow.app.services import github_dispatch, pipeline_auth
 from core.services import cooldown
 from core.ui.pipeline import execute, render_execution_results
 
@@ -58,11 +66,46 @@ def _is_rollover_result(results):
     return bool(results) and results[0][0] == ROLLOVER_ENTRY[0][0]
 
 
+def _render_remote_launcher():
+    """Déclenchement EN LIGNE : POST workflow_dispatch sur le job CI neige,
+    derrière mot de passe et cooldown. Le cooldown est vérifié AVANT tout appel
+    réseau (garde-fou, pas un confort d'UX) et n'est consommé qu'après un
+    déclenchement réussi."""
+    st.caption("La collecte est exécutée par l'intégration continue (le job "
+               "GitHub Actions habituel), jamais par ce dashboard : les données "
+               "sont écrites dans le magasin exactement comme lors d'un passage "
+               "automatique. Comptez une à deux minutes, puis rafraîchissez.")
+
+    if not pipeline_auth.gate():
+        return
+
+    labels = [label for label, _, _ in SC.PIPELINE_DISPATCH_TARGETS]
+    choix = st.radio("Flux à collecter", labels)
+    label, target, aide = next(t for t in SC.PIPELINE_DISPATCH_TARGETS
+                               if t[0] == choix)
+    st.caption(aide)
+
+    autorise, restant = github_dispatch.can_trigger()
+    if not autorise:
+        st.info(f"⏳ Déclenchement possible dans {int(restant // 60)} min "
+                f"{int(restant % 60)} s (limite anti-abus partagée).")
+        return
+
+    if st.button(f"🚀 Lancer — {label}", type="primary"):
+        with st.spinner("Demande envoyée à l'intégration continue…"):
+            ok, msg = github_dispatch.trigger_workflow(target)
+        if ok:
+            github_dispatch.record_trigger()  # jamais avant : un échec ne consomme pas
+            st.success(f"✅ {msg} Le job tourne côté CI ; rafraîchissez dans "
+                       "une à deux minutes.")
+        else:
+            st.error(f"❌ {msg}")
+
+
 def page_run(runs, sig):
     st.title("🚀 Lancer le pipeline neige")
     if not IS_LOCAL:
-        st.warning("☁️ Exécution cloud détectée : cette page est sans effet. "
-                   "Les flux neige sont lancés uniquement par GitHub Actions.")
+        _render_remote_launcher()
         return
 
     st.success("💻 Exécution locale détectée — les boutons lancent les scripts "

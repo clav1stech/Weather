@@ -484,6 +484,44 @@ STORE_FLUX = [
 ]
 
 # --------------------------------------------------------------------------- #
+#  Déclenchement à distance du workflow (page « Lancer le pipeline » du cloud)
+# --------------------------------------------------------------------------- #
+# Le dashboard déployé ne collecte JAMAIS lui-même : il déclenche
+# (workflow_dispatch) le job CI existant, qui reste l'unique écrivain des
+# données — un sous-processus lancé sur Streamlit Cloud n'écrirait que sur un
+# disque éphémère. Même dépôt/workflow que le canicule (un seul fichier de
+# workflow porte tous les jobs), réglages redéclarés ici : snow_config est
+# volontairement indépendant du config.py racine.
+GITHUB_DISPATCH_OWNER = "clav1stech"
+GITHUB_DISPATCH_REPO = "Weather"
+GITHUB_DISPATCH_WORKFLOW = "run_forecast.yml"
+# Secrets à configurer dans les Secrets de STREAMLIT CLOUD (le dashboard n'a
+# aucun accès aux secrets GitHub Actions) : PAT fine-grained « Actions: write »
+# et mot de passe de la page. Absents → déclenchement impossible (fermé par
+# défaut, jamais de repli permissif).
+GITHUB_DISPATCH_TOKEN_SECRET = "GITHUB_DISPATCH_TOKEN"
+PIPELINE_PASSWORD_SECRET = "PIPELINE_PASSWORD"
+GITHUB_DISPATCH_COOLDOWN_S = 600  # 10 min — garde-fou anti-abus, pas un confort d'UX
+# Horodatage du dernier déclenchement, partagé par tous les visiteurs tant que
+# le conteneur vit (st.session_state seul serait contourné par un refresh).
+# Dossier temporaire : jamais dans data/.
+GITHUB_DISPATCH_STATE_PATH = os.path.join(
+    tempfile.gettempdir(), "weather_snow_dispatch_last.txt")
+# Cibles proposées au déclenchement distant : (libellé, input `target`, aide).
+# Sous-ensemble VOLONTAIRE des targets du workflow — les rollovers et les flux
+# canicule n'ont rien à faire dans cette page.
+PIPELINE_DISPATCH_TARGETS = [
+    ("🏔️ Toutes les collectes neige", "snow",
+     "Ensemble, ensembles régionaux Météo-France et maille fine, à la suite."),
+    ("🌍 Ensemble + régionaux Météo-France", "snow-ensemble",
+     "ECMWF/AIFS/GEFS (membres et moyennes), PE-AROME et PE-ARPEGE."),
+    ("🏔️ Maille fine (AROME-PI/IFS, HD)", "snow-hd",
+     "Très courte échéance locale : AROME-PI, AROME-IFS, AROME HD + ICON-D2."),
+    ("🛰️ Observations Alpes du Nord", "snow-obs",
+     "Paquet horaire des stations du département 74."),
+]
+
+# --------------------------------------------------------------------------- #
 #  Dérivés (ne pas éditer)
 # --------------------------------------------------------------------------- #
 SITE_CODES = [s["code"] for s in SITES]

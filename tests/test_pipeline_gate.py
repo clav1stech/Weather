@@ -24,6 +24,7 @@ from streamlit.testing.v1 import AppTest  # noqa: E402
 from core.ui import auth  # noqa: E402
 
 APP = os.path.join(_ROOT, "meteo_app.py")
+APP_SNOW = os.path.join(_ROOT, "snow_app.py")
 MDP = "s3cret"
 
 
@@ -123,6 +124,62 @@ def test_mode_local_inchange():
     assert any("Importer" in l for l in labels)
     assert not at.text_input  # aucune porte en local
     assert not at.exception
+
+
+# --------------------------------------------------------------------------- #
+#  Dashboard NEIGE — même porte, même invariant
+# --------------------------------------------------------------------------- #
+def _page_snow(secrets, local):
+    at = AppTest.from_file(APP_SNOW, default_timeout=180)
+    with patch("streamlit.secrets", secrets), \
+            patch("apps.snow.app.pages.pipeline.IS_LOCAL", local):
+        at.run()
+        at.sidebar.radio[0].set_value("Lancer le pipeline").run()
+    return at
+
+
+def test_snow_page_visible_en_ligne():
+    at = _page_snow({}, local=False)
+    assert "Lancer le pipeline" in at.sidebar.radio[0].options
+    assert not at.exception
+
+
+def test_snow_sans_secret_aucun_declenchement():
+    at = _page_snow({}, local=False)
+    assert not any("Lancer —" in l for l in _labels(at))
+    assert any("non configuré" in i.value for i in at.info)
+
+
+def test_snow_mot_de_passe_ouvre_le_declenchement():
+    at = _page_snow({"PIPELINE_PASSWORD": MDP}, local=False)
+    with patch("streamlit.secrets", {"PIPELINE_PASSWORD": MDP}), \
+            patch("apps.snow.app.pages.pipeline.IS_LOCAL", False):
+        at.text_input[0].set_value("mauvais").run()
+    assert any("incorrect" in e.value for e in at.error)
+    assert not any("Lancer —" in l for l in _labels(at))
+
+    at = _page_snow({"PIPELINE_PASSWORD": MDP}, local=False)
+    with patch("streamlit.secrets", {"PIPELINE_PASSWORD": MDP}), \
+            patch("apps.snow.app.pages.pipeline.IS_LOCAL", False):
+        at.text_input[0].set_value(MDP).run()
+    assert any("Lancer —" in l for l in _labels(at))
+
+
+def test_snow_rollover_jamais_expose_en_ligne():
+    """Le diagnostic rollover lance un sous-processus : sans objet en ligne."""
+    at = _page_snow({"PIPELINE_PASSWORD": MDP}, local=False)
+    with patch("streamlit.secrets", {"PIPELINE_PASSWORD": MDP}), \
+            patch("apps.snow.app.pages.pipeline.IS_LOCAL", False):
+        at.text_input[0].set_value(MDP).run()
+    assert not any("rollover" in l.lower() for l in _labels(at))
+
+
+def test_snow_mode_local_inchange():
+    at = _page_snow({}, local=True)
+    labels = _labels(at)
+    assert any("7 collectes actives" in l for l in labels)
+    assert any("rollover" in l.lower() for l in labels)
+    assert not at.text_input  # aucune porte en local
 
 
 if __name__ == "__main__":

@@ -30,7 +30,6 @@ from apps.snow.app.pages.diagnostic import page_diagnostic
 from apps.snow.app.pages.explore import page_explore
 from apps.snow.app.pages.meteofrance import page_meteofrance
 from apps.snow.app.pages.pipeline import page_run
-from apps.snow.app.runtime import IS_LOCAL
 from apps.snow.app.ui.theme import GLOBAL_CSS
 from core.version import SHARED_VERSION
 
@@ -40,13 +39,14 @@ st.set_page_config(page_title="Dashboard Neige — Megève",
                    page_icon="🏔️", layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
+# « Lancer le pipeline » est visible PARTOUT : la page adapte elle-même ses
+# capacités à l'environnement — sous-processus en local, déclenchement du job
+# CI derrière mot de passe en ligne (cf. apps/snow/app/pages/pipeline.py).
 CORE_PAGES = [
     ("Explorer un run", page_explore),
     ("Maille fine Météo-France", page_meteofrance),
     ("Convergence des runs", page_convergence),
     ("Contrôle des runs", page_diagnostic),
-]
-LOCAL_PAGES = [
     ("Lancer le pipeline", page_run),
 ]
 
@@ -55,7 +55,7 @@ def main():
     sig = db_signature()
     runs = list_runs(sig)
 
-    renderers = dict(DOMAIN_PAGES + CORE_PAGES + (LOCAL_PAGES if IS_LOCAL else []))
+    renderers = dict(DOMAIN_PAGES + CORE_PAGES)
 
     st.sidebar.title("🏔️ Navigation")
     page = st.sidebar.radio("Aller à", list(renderers))

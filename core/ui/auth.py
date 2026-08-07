@@ -27,19 +27,21 @@ def unlocked(session_key: str) -> bool:
 
 
 def gate(expected: str | None, session_key: str, *,
-         label: str = "Mot de passe", help_text: str | None = None) -> bool:
+         label: str = "Mot de passe", help_text: str | None = None,
+         diagnostic: str | None = None) -> bool:
     """Affiche le champ de saisie tant que la session n'est pas déverrouillée
     et renvoie l'état d'accès.
 
-    `expected` = mot de passe attendu (None/vide → accès refusé et message
-    d'indisponibilité : la fonctionnalité est simplement non configurée sur
-    cette instance, ce qui n'est pas une erreur à signaler comme une panne)."""
+    `expected` = mot de passe attendu (None/vide → accès refusé). `diagnostic`
+    permet à l'appelant de préciser POURQUOI il est absent — « secret manquant »
+    et « secrets illisibles » se corrigent différemment, et les confondre rend
+    la panne indiagnosticable depuis l'interface."""
     if unlocked(session_key):
         return True
 
     if not expected:
-        st.info("Déclenchement non configuré sur cette instance "
-                "(mot de passe absent côté serveur).")
+        st.info(diagnostic or "Déclenchement non configuré sur cette instance "
+                              "(mot de passe absent côté serveur).")
         return False
 
     saisi = st.text_input(label, type="password", key=f"{session_key}_input",

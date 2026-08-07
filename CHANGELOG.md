@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.1.5] - 2026-08-07
+Diagnostic explicite quand le mot de passe du pipeline est introuvable.
+
+Un seul message couvrait toutes les causes d'indisponibilité, ce qui rendait
+la situation indiagnosticable depuis l'interface : secrets illisibles, secret
+mal nommé ou rangé dans une section, et secrets posés sur une autre app
+(chaque app Streamlit a les siens) produisaient le même « mot de passe absent
+côté serveur ».
+
+Le message distingue désormais ces cas et indique combien de secrets l'app
+voit réellement — jamais leur nom ni leur valeur. Voir « aucun secret visible »
+alors qu'on vient de les saisir désigne immédiatement la bonne piste.
+
 ## [3.1.4] - 2026-08-07
 Page « Lancer le pipeline » du dashboard neige accessible en ligne.
 

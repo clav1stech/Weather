@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.1.6] - 2026-08-11
+Lecture des données depuis le magasin externe, effective en ligne.
+
+Le basculement du dashboard vers le magasin dépendait d'un flag lu dans le
+seul environnement, alors que Streamlit Cloud ne configure une application que
+par ses secrets : la bascule était donc inopérante en ligne. Le dashboard
+neige, dont le magasin est l'unique source de vérité, affichait de ce fait des
+données figées à la date de sortie de git.
+
+Les deux applications lisent maintenant le magasin par défaut en ligne, le
+parquet du dépôt ne servant plus que de repli, et restent sur le parquet en
+local pour que dev, tests et harnais ne dépendent jamais du réseau.
+`WEATHER_STORE` ne sert plus qu'à forcer explicitement l'une ou l'autre
+source, et se lit dans les secrets puis dans l'environnement.
+
+Côté collecte, les cinq pipelines canicule lisent désormais leur base
+existante dans le magasin (`WEATHER_STORE_SOURCE`), préalable au retrait des
+commits de parquet : sans cela, une collecte repartirait de la copie gelée du
+clone et réécrirait le magasin depuis un historique tronqué. Cette lecture est
+bloquante et refuse un magasin muet, l'amorçage restant du ressort des scripts
+dédiés. Même garde portée au pipeline neige, en laissant démarrer un flux
+réellement neuf.
+
 ## [3.1.5] - 2026-08-07
 Diagnostic explicite quand le mot de passe du pipeline est introuvable.
 

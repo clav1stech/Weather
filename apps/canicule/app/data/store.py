@@ -3,17 +3,21 @@
 lie config.py à core/store/ (règle CLAUDE.md : core/ reste config-agnostique,
 c'est l'adaptateur app/ qui apporte les réglages).
 
-INACTIF par défaut : tant que la variable d'environnement WEATHER_STORE n'est
-pas positionnée, le dashboard lit le parquet git comme avant (app/data/db.py
-ne bascule sur le store que si store_active()). Backend choisi par
-WEATHER_STORE_BACKEND (github par défaut, local pour tests/dev)."""
+Magasin PRIMAIRE EN LIGNE, git en BACKUP : le déployé lit le magasin par
+défaut (le parquet git n'y est plus qu'un filet, cf. app/data/db.py), tandis
+que le local reste sur le parquet — dev, tests et harnais de non-régression
+n'ont ainsi jamais besoin du réseau. Surchargeable dans les deux sens par
+WEATHER_STORE. Backend choisi par WEATHER_STORE_BACKEND (github_http par
+défaut, local pour tests/dev)."""
 
 import os
 import re
 
 import pandas as pd
+import streamlit as st
 
 import config as C
+from app.runtime import IS_LOCAL
 from core.store import (
     GitHubReleaseStore,
     LocalDirStore,
@@ -23,10 +27,40 @@ from core.store import (
 from core.store.github_http import GitHubReleaseHttpStore
 
 
+def _reglage(nom):
+    """Valeur d'un réglage, cherchée dans st.secrets PUIS dans l'environnement
+    — st.secrets est le SEUL canal de configuration de Streamlit Cloud (les
+    variables d'environnement n'y sont pas exposées), l'environnement reste
+    celui du local et des tests. Absent des deux → None.
+
+    La lecture de st.secrets appartient à l'adaptateur : core/ n'y touche
+    jamais. Elle lève quand aucun fichier de secrets n'existe (cas normal en
+    local) — d'où le repli silencieux."""
+    try:
+        valeur = st.secrets.get(nom)
+    except Exception:  # noqa: BLE001 — aucun secrets.toml (local), pas une anomalie
+        valeur = None
+    if valeur is None:
+        valeur = os.environ.get(nom)
+    return None if valeur is None else str(valeur).strip()
+
+
 def store_active() -> bool:
     """True si le dashboard doit lire depuis le magasin externe plutôt que le
-    parquet git. Toute valeur non vide/non « 0 »/« false » active."""
-    return os.environ.get("WEATHER_STORE", "").strip().lower() not in ("", "0", "false")
+    parquet git.
+
+    Par défaut : actif EN LIGNE, inactif en local. Le parquet git n'est plus
+    qu'un repli automatique côté cloud (db.py / load_flux), alors qu'il reste
+    la source normale en local — un harnais de non-régression doit comparer des
+    calculs sur la base locale, pas sur un magasin qui bouge toutes les 2 h.
+
+    WEATHER_STORE (secret Streamlit ou variable d'environnement) tranche dans
+    les deux sens : « 0 »/« false » force le parquet git, toute autre valeur
+    non vide force le magasin."""
+    valeur = _reglage("WEATHER_STORE")
+    if valeur:
+        return valeur.lower() not in ("0", "false")
+    return not IS_LOCAL
 
 
 def get_store():
@@ -38,7 +72,7 @@ def get_store():
     Le reste du code ne voit qu'une interface DataStore, jamais le backend.
     L'ÉCRITURE (double écriture pipeline) ne passe pas par ici : elle est inline
     dans Forecast.py via gh."""
-    backend = os.environ.get("WEATHER_STORE_BACKEND", "github_http").strip().lower()
+    backend = (_reglage("WEATHER_STORE_BACKEND") or "github_http").lower()
     if backend == "local":
         return LocalDirStore(os.environ["WEATHER_STORE_DIR"])
     if backend == "github":

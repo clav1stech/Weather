@@ -161,10 +161,19 @@ la suit à l'identique.** On ne coupe git qu'après cette preuve.
     (lecture store) — **100 % identique** attendu (même base, même heure ronde).
 
 - **Phase 3 — Coupure de git.**
+  - **Prérequis, fait** : le pipeline lit l'existant DANS LE MAGASIN
+    (`WEATHER_STORE_SOURCE=1` dans les cinq jobs canicule, branché au niveau de
+    `load_existing()`). Sans cela, couper les commits ferait repartir chaque run
+    de la copie gelée du clone, puis réécrirait le magasin depuis cet historique
+    tronqué. À valider sur quelques cycles CI **avant** de couper : git reste
+    committé pendant cette fenêtre, donc réversible en retirant une ligne.
   - Pipeline : cesse `git add data/*.parquet` + commit ; **uploade seulement**.
   - `git rm --cached data/database_paris.parquet` + ajout à `.gitignore` (fichier retiré
     du suivi, copie de travail conservée). L'historique reste **gelé** (décision §2).
-  - Dashboard : lit le store par défaut (`WEATHER_STORE=1` en prod / Streamlit Cloud).
+  - Dashboard : lit le store par défaut en ligne (`store_active()` = `not IS_LOCAL`,
+    `WEATHER_STORE` ne servant qu'à forcer l'un ou l'autre). Le flag se lit dans
+    `st.secrets` puis dans l'environnement — un flag lu du seul `os.environ` reste
+    inactif sur Streamlit Cloud, qui n'expose pas de variables d'environnement.
   - Re-`check` non-régression : identique.
 
 - **Phase 4 — Nettoyage & généralisation.** *(neige faite)*

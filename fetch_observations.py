@@ -192,7 +192,14 @@ def parse_observations(payload):
 # --------------------------------------------------------------------------- #
 def load_existing():
     """Base observations existante, réalignée sur le schéma courant (colonne
-    ajoutée après coup → NaN) — même principe que les autres pipelines."""
+    ajoutée après coup → NaN) — même principe que les autres pipelines.
+
+    Source de vérité : le magasin externe dès que WEATHER_STORE_SOURCE est
+    positionné (le parquet du disque n'est alors qu'une copie potentiellement
+    gelée), sinon le disque comme avant. Le branchement vit ICI et non dans
+    main() pour couvrir aussi le rechargement interne de persist()."""
+    if _store_source_active():
+        return load_existing_from_store(C.DB_OBS_PATH, C.OBS_SCHEMA)
     if os.path.exists(C.DB_OBS_PATH):
         df = pd.read_parquet(C.DB_OBS_PATH)
         for col in C.OBS_SCHEMA:
@@ -291,6 +298,81 @@ def mirror_to_store(existing, combined, db_path, time_col):
                 print(f"   🪞 miroir store : {name} ({len(sub):,} lignes) vérifié")
     except Exception as exc:  # noqa: BLE001 — jamais bloquant en double écriture
         print(f"   ⚠️  miroir store échoué (git intact, source de vérité) : {exc}")
+
+
+# --------------------------------------------------------------------------- #
+#  Lecture de l'EXISTANT depuis le magasin (bascule « magasin source de vérité »)
+# --------------------------------------------------------------------------- #
+# Étape préalable au débranchement des commits de parquet : dès que la CI cesse
+# de committer, le fichier du clone est une copie GELÉE — repartir de lui
+# tronquerait l'historique à chaque run, et la fusion réécrirait ensuite le
+# magasin à partir de cette base amputée. L'existant doit donc venir du magasin.
+#
+# Activé par WEATHER_STORE_SOURCE, indépendant de WEATHER_STORE_WRITE : le
+# miroir (écriture) et la source de l'existant (lecture) se basculent
+# séparément, ce qui permet de valider la lecture en CI réelle alors que git
+# reste committé et source de vérité.
+#
+# Contrairement au miroir, cette lecture est BLOQUANTE : un magasin injoignable
+# doit faire échouer le run, jamais se rabattre sur le parquet du disque (cf.
+# apps/snow/pipeline/store_mirror.load_existing, même règle). Bloc INLINE
+# identique dans chaque pipeline racine (n'importe jamais core/ ni app/).
+
+def _store_source_active():
+    """True si l'existant doit être lu dans le magasin plutôt que sur le disque."""
+    return os.environ.get("WEATHER_STORE_SOURCE", "").strip().lower() \
+        not in ("", "0", "false")
+
+
+def _store_partition_names(prefix):
+    """Assets du flux `prefix`, triés par mois. Filtrage par préfixe
+    STRICTEMENT ÉGAL (parse du nom) et jamais un startswith : `database_paris`
+    attraperait sinon `database_paris_t2m` et mélangerait deux flux."""
+    sortie = _gh(["release", "view", C.STORE_TAG, "--json", "assets",
+                  "--jq", ".assets[].name"])
+    noms = []
+    for nom in sortie.split():
+        if not nom.endswith(".parquet"):
+            continue
+        prefixe, _, mois = nom[:-len(".parquet")].rpartition("_")
+        if prefixe != prefix or len(mois) != 7 or mois[4] != "-":
+            continue
+        if mois[:4].isdigit() and mois[5:].isdigit():
+            noms.append(nom)
+    return sorted(noms)
+
+
+def load_existing_from_store(db_path, schema):
+    """Base existante reconstituée depuis les partitions mensuelles du magasin,
+    réalignée sur `schema` (colonne ajoutée après coup → NaN, comme la lecture
+    disque). Toute erreur (magasin injoignable, asset illisible) se propage.
+
+    Un magasin SANS aucune partition pour ce flux lève également : l'amorçage
+    est le rôle explicite de tools/seed_store.py, jamais l'effet de bord d'un
+    poll. Sans cette garde, un listing vide ferait repartir la collecte d'une
+    base nulle, puis réécrirait la partition du mois courant avec le seul lot
+    frais — l'historique du magasin y serait perdu."""
+    prefix = os.path.splitext(os.path.basename(db_path))[0]
+    noms = _store_partition_names(prefix)
+    if not noms:
+        raise RuntimeError(
+            f"magasin sans partition pour {prefix} — amorçage attendu via "
+            f"tools/seed_store.py, jamais par une collecte")
+    frames = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for nom in noms:
+            dest = os.path.join(tmp, nom)
+            _gh(["release", "download", C.STORE_TAG, "--pattern", nom,
+                 "--output", dest, "--clobber"])
+            frames.append(pd.read_parquet(dest))
+    df = pd.concat(frames, ignore_index=True)
+    for col in schema:
+        if col not in df.columns:
+            df[col] = pd.NA
+    print(f"   📦 existant lu du magasin : {len(df):,} lignes "
+          f"({len(noms)} partition(s))")
+    return df[schema]
+
 
 
 # --------------------------------------------------------------------------- #

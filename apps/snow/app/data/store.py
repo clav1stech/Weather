@@ -4,9 +4,12 @@ snow_config.py à core/store/ (règle CLAUDE.md : core/ reste config-agnostique,
 c'est l'adaptateur app/ qui apporte les réglages).
 
 Même mécanique que l'adaptateur canicule (apps/canicule/app/data/store.py),
-avec les réglages neige : magasin PRIMAIRE quand WEATHER_STORE est positionné,
-parquet git en BACKUP automatique au moindre échec ou résultat vide. Flag
-absent → lecture git strictement inchangée.
+avec les réglages neige : magasin PRIMAIRE en ligne, parquet git en BACKUP
+automatique au moindre échec ou résultat vide, lecture git par défaut en local.
+
+L'enjeu est plus fort ici que côté canicule : la neige est SORTIE de git (le
+magasin en est l'unique source de vérité, les parquets du dépôt sont gelés à la
+bascule) — magasin inactif = dashboard figé à cette date.
 
 Les parquets HOT et leur ARCHIVE (cold) sont des flux DISTINCTS du magasin
 (un préfixe d'asset chacun) : la sémantique hot/cold du dashboard est
@@ -16,8 +19,10 @@ import os
 import re
 
 import pandas as pd
+import streamlit as st
 
 from apps.snow import snow_config as SC
+from apps.snow.app.runtime import IS_LOCAL
 from core.store import (
     GitHubReleaseStore,
     LocalDirStore,
@@ -27,10 +32,36 @@ from core.store import (
 from core.store.github_http import GitHubReleaseHttpStore
 
 
+def _reglage(nom):
+    """Valeur d'un réglage, cherchée dans st.secrets PUIS dans l'environnement
+    — st.secrets est le SEUL canal de configuration de Streamlit Cloud (les
+    variables d'environnement n'y sont pas exposées), l'environnement reste
+    celui du local et des tests. Absent des deux → None.
+
+    La lecture de st.secrets appartient à l'adaptateur : core/ n'y touche
+    jamais. Elle lève quand aucun fichier de secrets n'existe (cas normal en
+    local) — d'où le repli silencieux."""
+    try:
+        valeur = st.secrets.get(nom)
+    except Exception:  # noqa: BLE001 — aucun secrets.toml (local), pas une anomalie
+        valeur = None
+    if valeur is None:
+        valeur = os.environ.get(nom)
+    return None if valeur is None else str(valeur).strip()
+
+
 def store_active() -> bool:
     """True si le dashboard doit lire depuis le magasin externe plutôt que le
-    parquet git. Toute valeur non vide/non « 0 »/« false » active."""
-    return os.environ.get("WEATHER_STORE", "").strip().lower() not in ("", "0", "false")
+    parquet git.
+
+    Par défaut : actif EN LIGNE, inactif en local (le parquet local, lui, est
+    alimenté par les collectes de dev). WEATHER_STORE (secret Streamlit ou
+    variable d'environnement) tranche dans les deux sens : « 0 »/« false »
+    force le parquet git, toute autre valeur non vide force le magasin."""
+    valeur = _reglage("WEATHER_STORE")
+    if valeur:
+        return valeur.lower() not in ("0", "false")
+    return not IS_LOCAL
 
 
 def get_store():
@@ -38,7 +69,7 @@ def get_store():
     défaut (API REST + HTTPS, sans `gh` ni token : le seul backend utilisable
     sur Streamlit Cloud), « github » via la CLI `gh`, « local » pour les tests.
     L'ÉCRITURE (double écriture pipeline) ne passe pas par ici."""
-    backend = os.environ.get("WEATHER_STORE_BACKEND", "github_http").strip().lower()
+    backend = (_reglage("WEATHER_STORE_BACKEND") or "github_http").lower()
     if backend == "local":
         return LocalDirStore(os.environ["WEATHER_STORE_DIR"])
     if backend == "github":

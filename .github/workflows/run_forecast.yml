@@ -86,6 +86,11 @@ jobs:
           # APRÈS avoir écrit git (source de vérité) — best-effort, jamais bloquant.
           # gh utilise GH_TOKEN (mêmes droits contents:write que le push git).
           WEATHER_STORE_WRITE: "1"
+          # Existant lu dans le magasin (et non sur le disque) : étape de
+          # validation avant le débranchement des commits de parquet — le
+          # fichier du clone deviendra alors une copie gelée. Bloquant : un
+          # magasin injoignable fait échouer le run, jamais de repli disque.
+          WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "action@github.com"
@@ -142,6 +147,11 @@ jobs:
           # Double écriture « sortie de git » : miroir best-effort vers data-store
           # après l'écriture git (source de vérité). gh via GH_TOKEN.
           WEATHER_STORE_WRITE: "1"
+          # Existant lu dans le magasin (et non sur le disque) : étape de
+          # validation avant le débranchement des commits de parquet — le
+          # fichier du clone deviendra alors une copie gelée. Bloquant : un
+          # magasin injoignable fait échouer le run, jamais de repli disque.
+          WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "action@github.com"
@@ -199,6 +209,11 @@ jobs:
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
           # Double écriture « sortie de git » vers data-store (best-effort).
           WEATHER_STORE_WRITE: "1"
+          # Existant lu dans le magasin (et non sur le disque) : étape de
+          # validation avant le débranchement des commits de parquet — le
+          # fichier du clone deviendra alors une copie gelée. Bloquant : un
+          # magasin injoignable fait échouer le run, jamais de repli disque.
+          WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "action@github.com"
@@ -256,6 +271,11 @@ jobs:
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
           # Double écriture « sortie de git » vers data-store (best-effort).
           WEATHER_STORE_WRITE: "1"
+          # Existant lu dans le magasin (et non sur le disque) : étape de
+          # validation avant le débranchement des commits de parquet — le
+          # fichier du clone deviendra alors une copie gelée. Bloquant : un
+          # magasin injoignable fait échouer le run, jamais de repli disque.
+          WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "action@github.com"
@@ -319,6 +339,11 @@ jobs:
         env:
           # Double écriture « sortie de git » vers data-store (best-effort).
           WEATHER_STORE_WRITE: "1"
+          # Existant lu dans le magasin (et non sur le disque) : étape de
+          # validation avant le débranchement des commits de parquet — le
+          # fichier du clone deviendra alors une copie gelée. Bloquant : un
+          # magasin injoignable fait échouer le run, jamais de repli disque.
+          WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config --local user.email "action@github.com"

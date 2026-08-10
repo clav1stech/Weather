@@ -48,7 +48,16 @@ def load_existing(db_path, schema, fallback):
 
     Un magasin injoignable lève : contrairement à la lecture du dashboard, un
     pipeline ne doit JAMAIS se rabattre sur le parquet gelé de git — il
-    réécrirait ensuite le magasin à partir d'un historique tronqué."""
+    réécrirait ensuite le magasin à partir d'un historique tronqué.
+
+    Même exigence sur un listing VIDE, qui ne lève pas de lui-même : repartir
+    d'une base nulle ferait ensuite réécrire la partition du mois courant avec
+    le seul lot frais, effaçant l'historique du magasin. Un flux réellement
+    NEUF doit pourtant pouvoir démarrer (un flux ajouté n'a par construction
+    aucune partition, ex. PE-ARPEGE). Les deux cas se distinguent par le
+    parquet local : un fichier non vide atteste d'un historique, donc un
+    magasin muet est une anomalie ; aucun fichier = flux neuf, départ à vide
+    légitime."""
     if not store_write_active():
         return fallback(db_path, schema)
     prefix = os.path.splitext(os.path.basename(db_path))[0]
@@ -64,6 +73,11 @@ def load_existing(db_path, schema, fallback):
             frames.append(pd.read_parquet(dest))
     df = concat_partitions(frames)
     if df.empty:
+        if not fallback(db_path, schema).empty:
+            raise RuntimeError(
+                f"magasin sans partition pour {prefix} alors que le parquet "
+                f"local en porte : listing suspect, collecte interrompue "
+                f"(resynchronisation via apps/snow/pipeline/seed_store.py)")
         return pd.DataFrame(columns=schema)
     for col in schema:
         if col not in df.columns:

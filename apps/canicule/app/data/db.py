@@ -45,9 +45,19 @@ def db_signature():
     return None if sigs[0] is None else tuple(sigs)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def load_db(_sig):
     """Base complète. run_date / valid_time convertis UTC → heure de Paris (naïf).
+
+    Cachée en `cache_resource` et NON en `cache_data` : cette dernière sérialise
+    (pickle) la valeur retournée et en désérialise une COPIE COMPLÈTE à chaque
+    appel — soit, pour une base de plusieurs centaines de Mo, autant de copies
+    que de fonctions cachées qui l'appellent (runsets, presence…), au-delà du
+    quota mémoire de Streamlit Cloud (le process est alors tué sans trace dans
+    les logs applicatifs). `cache_resource` partage UNE instance : le dashboard
+    étant strictement en lecture seule sur la base (tous les appelants filtrent
+    immédiatement, et un filtrage booléen pandas renvoie une copie), aucun
+    appelant ne peut muter l'objet partagé.
 
     Si le parquet COLD de l'archivage hot/cold existe (rollover canicule activé
     un jour — cf. config.DB_ARCHIVE_PATH), il est concaténé AVANT le hot : la
@@ -93,14 +103,33 @@ def load_db(_sig):
 def _finalize(df):
     """Traitement aval commun aux deux sources (parquet git OU partitions du
     magasin) : filtre les modèles legacy orphelins (sans config/couleur
-    déclarée) puis convertit run_date/valid_time UTC → heure de Paris (naïf).
-    Isolé pour garantir un DataFrame IDENTIQUE quelle que soit la provenance —
-    c'est ce qui rend la bascule non régressive."""
+    déclarée), compacte les dtypes puis convertit run_date/valid_time UTC →
+    heure de Paris (naïf). Isolé pour garantir un DataFrame IDENTIQUE quelle que
+    soit la provenance — c'est ce qui rend la bascule non régressive."""
     df = df[df["model"].isin(C.MODEL_LABELS)].reset_index(drop=True)
+    df = _compact_dtypes(df)
     for col in ("run_date", "valid_time"):
         s = pd.to_datetime(df[col])
         df[col] = (s.dt.tz_localize("UTC").dt.tz_convert(LOCAL_TZ).dt.tz_localize(None))
     return df
+
+
+def _compact_dtypes(df):
+    """Dtypes minimaux à information CONSTANTE — la base tient entièrement en
+    mémoire et croît d'environ 5 M de lignes par mois, ce qui la rend seule
+    responsable de l'essentiel de l'empreinte du dashboard.
+
+    Conversions STRICTEMENT sans perte, pour que les valeurs restent au bit près
+    celles du parquet : `member` est un indice d'ensemble à deux chiffres, et
+    `model` ne prend que les quelques labels de config.MODELS, d'où la catégorie
+    (le stockage d'une chaîne par ligne y coûte à lui seul près d'un quart de la
+    table). Les colonnes de variables restent en float64 : le float32 les
+    couvrirait largement en précision physique (~1e-6 °C), mais introduirait un
+    écart numérique que les harnais de non-régression compareraient à jamais à
+    des références divergentes, pour moins de 6 % d'empreinte gagnée.
+    Colonne absente (variable ajoutée après coup, cf. z500) → ignorée."""
+    casts = {"member": "int16", "model": "category"}
+    return df.astype({c: t for c, t in casts.items() if c in df.columns})
 
 
 def utc_cycle(local_run_date):

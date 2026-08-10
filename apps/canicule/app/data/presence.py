@@ -125,7 +125,10 @@ def _missing_by_run(om):
     # Un modèle avec lead_h NaN ou ≤ 0 (données uniquement pré-cycle, pur rebouchage)
     # est équivalent à une absence : ses données post-cycle seront prises ailleurs.
     _has_fut = om[om["lead_h"].fillna(0) > 0]
-    present_by_rd = (_has_fut.groupby("run_date")["model"].agg(set)
+    # `model` est catégoriel dans la base (compacité mémoire) : pandas tente de
+    # recaster le résultat d'une agrégation pointwise dans le dtype d'origine, ce
+    # qu'un set ne permet pas — d'où le retour explicite en chaînes ici.
+    present_by_rd = (_has_fut["model"].astype(str).groupby(_has_fut["run_date"]).agg(set)
                      if not _has_fut.empty else pd.Series(dtype=object))
     out = {}
     for rd in om["run_date"].unique():

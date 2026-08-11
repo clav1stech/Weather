@@ -498,10 +498,13 @@ PERSIST_MAX_GAP_H = 24
 # --------------------------------------------------------------------------- #
 # Normale climatique saisonnière modélisée par un cosinus :
 #   normale(jour) = MEAN + AMPLITUDE * cos(2π (doy - PEAK_DOY) / 365.25)
-# Paramètres pour la T850 région parisienne (max ~mi-juillet).
-CLIM_MEAN = 3          # °C — moyenne annuelle
-CLIM_AMPLITUDE = 7.0     # °C — demi-amplitude saisonnière
-CLIM_PEAK_DOY = 198      # jour de l'année du maximum (~17 juillet)
+# Paramètres pour la T850 région parisienne (max ~début août), fit cosinus
+# 1 harmonique (RMSE 0,42 °C) sur la climatologie mensuelle réelle ERA5
+# 1991-2020 (Copernicus CDS, reanalysis-era5-pressure-levels-monthly-means,
+# interpolation bilinéaire au point exact 48,8534°N/2,3488°E).
+CLIM_MEAN = 4.38         # °C — moyenne annuelle
+CLIM_AMPLITUDE = 5.59    # °C — demi-amplitude saisonnière
+CLIM_PEAK_DOY = 213.5    # jour de l'année du maximum (~1er août)
 
 SEUIL_CHALEUR_850 = 14.0   # °C — ligne de repère « chaleur notable »
 SEUIL_CANICULE_850 = 18.0  # °C — seuil de canicule exceptionnelle (pilote le risque)

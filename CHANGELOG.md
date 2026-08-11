@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.1.9] - 2026-08-12
+Normale climatique T850 calée sur ERA5 1991-2020 au lieu de valeurs estimées.
+
+CLIM_MEAN/AMPLITUDE/PEAK_DOY (3 °C / 7,0 °C / jour 198) étaient une pure
+estimation sans normale officielle derrière. Je les remplace par un fit
+cosinus 1 harmonique sur la climatologie mensuelle réelle ERA5 1991-2020
+(Copernicus CDS, point exact de Paris) : moyenne 4,38 °C, amplitude 5,59 °C,
+pic au jour 213,5 (~1er août, contre le 17 juillet estimé auparavant).
+
 ## [3.1.8] - 2026-08-11
 Cooldown du déclenchement manuel du pipeline ramené à 1 min.
 

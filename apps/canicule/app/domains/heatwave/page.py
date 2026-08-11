@@ -107,8 +107,8 @@ def page_grand_public(runs, sig):
         st.markdown("---")
         st.caption(
             "**Normale climatique (T850).** Modélisée par un cosinus saisonnier "
-            "`moyenne + amplitude × cos(2π(jour − pic)/365)` — ce sont des valeurs "
-            "**estimées**, pas une normale officielle calculée sur une série d'observations. "
+            "`moyenne + amplitude × cos(2π(jour − pic)/365)`, calé sur la climatologie "
+            "réelle ERA5 1991-2020 au point exact de Paris. "
             "Ajustez-les ici si elles ne correspondent pas à votre référence ; le réglage "
             "s'applique à toute l'appli (cartes KPI et graphiques) tant que la session reste "
             "ouverte.")
@@ -118,7 +118,7 @@ def page_grand_public(runs, sig):
                            float(mean0), 0.5, key="clim_mean")
         col_amp.number_input("Amplitude saisonnière (°C)", 0.0, 15.0,
                              float(amp0), 0.5, key="clim_amplitude")
-        col_pic.number_input("Jour du pic (1-365, ~17 juil. = 198)",
+        col_pic.number_input("Jour du pic (1-365, ~1er août = 214)",
                              1, 365, int(peak0), 1, key="clim_peak_doy")
         st.caption(f"Normale du jour actuel : {clim_normal(pd.Timestamp(datetime.now().date())):.1f} °C")
 

@@ -2,9 +2,9 @@
 """Climatologie (normale saisonnière en cosinus) & anomalie — adaptateur
 canicule de core/stats/climato.py (formule cosinus mutualisée).
 
-Les 3 paramètres par défaut (config.CLIM_MEAN/AMPLITUDE/PEAK_DOY) sont une
-ESTIMATION, pas une normale officielle issue d'une série climatologique réelle
-— ajustables via la page Indicateur de canicule → Réglages avancés, stockés en
+Les 3 paramètres par défaut (config.CLIM_MEAN/AMPLITUDE/PEAK_DOY) sont calés
+sur la climatologie réelle ERA5 1991-2020 (cf. config.py) — ajustables via la
+page Indicateur de canicule → Réglages avancés, stockés en
 session pour s'appliquer partout (KPI, graphiques) tant que l'appli reste
 ouverte. La gestion de session vit ici, pas dans core/ : c'est un choix propre
 à cette app (core/ n'importe ni config ni état Streamlit)."""

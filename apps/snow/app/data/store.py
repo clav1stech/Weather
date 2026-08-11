@@ -74,7 +74,13 @@ def get_store():
         return LocalDirStore(os.environ["WEATHER_STORE_DIR"])
     if backend == "github":
         return GitHubReleaseStore(repo=SC.STORE_REPO, tag=SC.STORE_TAG)
-    return GitHubReleaseHttpStore(repo=SC.STORE_REPO, tag=SC.STORE_TAG)
+    # Jeton réutilisé du déclenchement pipeline (portée Actions, mais suffisant
+    # pour élever le quota anonyme 60/h → 5000/h sur un dépôt public : la
+    # lecture de release n'exige aucune permission particulière côté GitHub).
+    # GitHubReleaseHttpStore ne lit lui-même que os.environ (inerte côté
+    # Streamlit Cloud) — le jeton doit donc transiter par cet adaptateur.
+    return GitHubReleaseHttpStore(repo=SC.STORE_REPO, tag=SC.STORE_TAG,
+                                   token=_reglage(SC.GITHUB_DISPATCH_TOKEN_SECRET))
 
 
 def flux_prefix(db_path):

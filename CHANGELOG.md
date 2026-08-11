@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.1.7] - 2026-08-11
+Jeton d'authentification sur la lecture du magasin externe en ligne.
+
+`GitHubReleaseHttpStore` ne lisait un jeton que dans l'environnement, un canal
+inerte sur Streamlit Cloud : la lecture du magasin y restait anonyme, plafonnée
+à 60 requêtes/h côté API GitHub. Le quota une fois atteint, le dashboard
+basculait silencieusement sur le repli parquet git et pouvait rester figé sur
+un run périmé bien après le retour à la normale côté données, un état dont
+seul un redémarrage complet du process permettait de sortir.
+
+Les adaptateurs canicule et neige transmettent maintenant `GITHUB_DISPATCH_TOKEN`
+(déjà utilisé pour déclencher un run) à ce client, portant le quota à 5000
+requêtes/h — l'authentification d'un jeton suffit à en bénéficier sur un dépôt
+public, sans permission particulière requise pour la lecture.
+
 ## [3.1.6] - 2026-08-11
 Lecture des données depuis le magasin externe, effective en ligne.
 

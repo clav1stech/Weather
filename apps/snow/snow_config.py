@@ -501,7 +501,7 @@ GITHUB_DISPATCH_WORKFLOW = "run_forecast.yml"
 # défaut, jamais de repli permissif).
 GITHUB_DISPATCH_TOKEN_SECRET = "GITHUB_DISPATCH_TOKEN"
 PIPELINE_PASSWORD_SECRET = "PIPELINE_PASSWORD"
-GITHUB_DISPATCH_COOLDOWN_S = 600  # 10 min — garde-fou anti-abus, pas un confort d'UX
+GITHUB_DISPATCH_COOLDOWN_S = 60  # 1 min — calé sur la limite secondaire GitHub, pas un confort d'UX
 # Horodatage du dernier déclenchement, partagé par tous les visiteurs tant que
 # le conteneur vit (st.session_state seul serait contourné par un refresh).
 # Dossier temporaire : jamais dans data/.

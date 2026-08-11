@@ -382,11 +382,12 @@ GITHUB_DISPATCH_WORKFLOW = "run_forecast.yml"
 # scopé à ce seul dépôt) — jamais versionné, à configurer manuellement dans les
 # secrets Streamlit Cloud, cf. CLAUDE.md.
 GITHUB_DISPATCH_TOKEN_SECRET = "GITHUB_DISPATCH_TOKEN"
-# Cooldown mini entre deux déclenchements publics du flux 6 min — aligné sur sa
-# cadence naturelle (10,25,40,55) pour qu'un utilisateur ne fasse jamais mieux
-# qu'attendre le prochain créneau de toute façon. Empêche le spam/l'épuisement
-# du quota Actions par un public anonyme non authentifié.
-GITHUB_DISPATCH_COOLDOWN_S = 600  # 10 min
+# Cooldown mini entre deux déclenchements publics, tous flux confondus —
+# calé sur la limite secondaire (anti-abus) de l'API GitHub, pas sur la
+# cadence d'un flux en particulier : cette limite tolère largement plus qu'un
+# clic manuel occasionnel, 60 s suffit à écarter tout script d'appels en
+# rafale par un public anonyme non authentifié.
+GITHUB_DISPATCH_COOLDOWN_S = 60  # 1 min
 # Fichier d'horodatage du dernier déclenchement, partagé par tous les visiteurs
 # tant que le conteneur Streamlit Cloud vit (PAS st.session_state seul, trivial
 # à contourner par un simple refresh) — mais ne survit pas à un redémarrage du

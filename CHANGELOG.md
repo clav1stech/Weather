@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.1.8] - 2026-08-11
+Cooldown du déclenchement manuel du pipeline ramené à 1 min.
+
+Les deux pages « Lancer le pipeline » (canicule et neige) imposaient 10 min
+entre deux déclenchements publics, calées sur la cadence du flux 6 min plutôt
+que sur une contrainte API réelle. La limite secondaire (anti-abus) de l'API
+GitHub tolère largement plus qu'un clic manuel occasionnel : 1 min suffit à
+écarter un script d'appels en rafale tout en restant confortable pour un
+usage humain normal.
+
 ## [3.1.7] - 2026-08-11
 Jeton d'authentification sur la lecture du magasin externe en ligne.
 

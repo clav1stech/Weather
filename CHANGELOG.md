@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.1.10] - 2026-08-12
+Normale climatique T850 : table journalière réelle ERA5 au lieu du seul cosinus.
+
+Le cosinus 1 harmonique (v3.1.9) impose une symétrie printemps/automne que le
+cycle annuel réel n'a pas (jusqu'à 1°C d'écart en fin d'année). Je calcule
+la vraie moyenne journalière ERA5 1991-2020 (4 échéances synoptiques/jour,
+point exact de Paris) jour par jour, lissée par moyenne glissante circulaire
+de 21 jours pour absorber le bruit d'un échantillon de 30 ans, et stocke le
+résultat (365 valeurs) comme table statique dans config.py — calculée une
+fois pour toutes, jamais recalculée à l'affichage (core.stats.climato.
+daily_table_normal, un simple indexage). Le modèle cosinus (CLIM_MEAN/
+AMPLITUDE/PEAK_DOY, fit sur cette même table) devient le repli manuel : la
+page Réglages avancés y bascule automatiquement dès qu'on modifie un des 3
+réglages, sinon la table fait foi par défaut.
+
 ## [3.1.9] - 2026-08-12
 Normale climatique T850 calée sur ERA5 1991-2020 au lieu de valeurs estimées.
 

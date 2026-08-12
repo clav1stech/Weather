@@ -496,12 +496,64 @@ PERSIST_MAX_GAP_H = 24
 # --------------------------------------------------------------------------- #
 #  Climatologie & seuils (à 850 hPa)
 # --------------------------------------------------------------------------- #
-# Normale climatique saisonnière modélisée par un cosinus :
+# Normale climatique T850 JOURNALIÈRE réelle (365 valeurs, index 0 = 1er
+# janvier, 29 février fusionné au 28 — cf. core.stats.climato.doy365) :
+# moyenne des 4 échéances synoptiques/jour (00/06/12/18 UTC) sur 1991-2020,
+# ERA5 (Copernicus CDS, reanalysis-era5-pressure-levels, interpolation
+# bilinéaire au point exact 48,8534°N/2,3488°E), lissée par moyenne glissante
+# circulaire de 21 jours pour absorber le bruit d'un échantillon de 30 ans.
+# C'est la table utilisée par défaut (core.stats.climato.daily_table_normal,
+# un simple indexage, calculée une fois pour toutes — jamais recalculée à
+# l'affichage). CLIM_MEAN/AMPLITUDE/PEAK_DOY ci-dessous restent le modèle
+# cosinus 1 harmonique fitté sur cette même table (RMSE 0,48 °C — l'écart
+# vient de l'asymétrie réelle du cycle annuel, non capturée par 1 harmonique) :
+# ils ne servent plus qu'à la normale AJUSTABLE (page Réglages avancés).
+CLIM_T850_DAILY_NORMAL = [
+    0.20, 0.12, 0.05, -0.03, -0.03, 0.01, -0.03, -0.06, -0.11, -0.20,
+    -0.27, -0.28, -0.25, -0.25, -0.29, -0.33, -0.41, -0.49, -0.54, -0.56,
+    -0.54, -0.52, -0.55, -0.63, -0.63, -0.65, -0.70, -0.73, -0.76, -0.78,
+    -0.79, -0.81, -0.85, -0.92, -0.95, -0.92, -0.88, -0.88, -0.86, -0.89,
+    -0.94, -1.03, -1.09, -1.11, -1.07, -1.04, -1.06, -1.11, -1.11, -1.08,
+    -1.07, -1.03, -0.99, -1.02, -0.99, -0.95, -0.89, -0.82, -0.72, -0.61,
+    -0.50, -0.40, -0.27, -0.12, 0.05, 0.20, 0.29, 0.36, 0.49, 0.57,
+    0.66, 0.78, 0.86, 0.92, 1.01, 1.07, 1.11, 1.08, 1.09, 1.10,
+    1.11, 1.17, 1.19, 1.16, 1.09, 1.03, 0.97, 0.92, 0.97, 1.01,
+    1.06, 1.08, 1.05, 1.05, 1.10, 1.16, 1.25, 1.30, 1.34, 1.41,
+    1.53, 1.65, 1.72, 1.85, 2.03, 2.18, 2.24, 2.32, 2.42, 2.50,
+    2.57, 2.68, 2.80, 2.94, 3.07, 3.18, 3.34, 3.51, 3.67, 3.87,
+    4.00, 4.03, 4.06, 4.09, 4.09, 4.13, 4.22, 4.33, 4.40, 4.51,
+    4.63, 4.72, 4.81, 4.95, 5.12, 5.28, 5.41, 5.51, 5.57, 5.67,
+    5.72, 5.81, 5.97, 6.09, 6.21, 6.35, 6.47, 6.59, 6.72, 6.86,
+    6.98, 7.03, 7.11, 7.17, 7.24, 7.29, 7.31, 7.38, 7.48, 7.60,
+    7.69, 7.80, 7.85, 7.86, 7.94, 8.04, 8.19, 8.31, 8.40, 8.50,
+    8.61, 8.73, 8.86, 8.99, 9.13, 9.20, 9.22, 9.27, 9.28, 9.28,
+    9.30, 9.32, 9.35, 9.41, 9.47, 9.52, 9.61, 9.63, 9.65, 9.71,
+    9.77, 9.78, 9.77, 9.82, 9.88, 9.90, 9.97, 10.11, 10.20, 10.31,
+    10.38, 10.42, 10.51, 10.60, 10.66, 10.71, 10.78, 10.82, 10.87, 10.89,
+    10.87, 10.86, 10.88, 10.91, 10.86, 10.81, 10.79, 10.76, 10.71, 10.73,
+    10.72, 10.70, 10.69, 10.67, 10.64, 10.61, 10.61, 10.57, 10.51, 10.39,
+    10.27, 10.16, 10.06, 9.93, 9.80, 9.74, 9.70, 9.61, 9.53, 9.45,
+    9.37, 9.32, 9.27, 9.21, 9.10, 8.99, 8.88, 8.75, 8.62, 8.49,
+    8.42, 8.37, 8.35, 8.34, 8.35, 8.34, 8.28, 8.17, 8.09, 8.03,
+    7.98, 7.91, 7.82, 7.73, 7.61, 7.52, 7.41, 7.34, 7.24, 7.11,
+    7.05, 7.00, 6.97, 6.96, 6.88, 6.83, 6.76, 6.70, 6.67, 6.59,
+    6.48, 6.35, 6.21, 6.07, 5.96, 5.92, 5.90, 5.88, 5.83, 5.81,
+    5.81, 5.75, 5.68, 5.61, 5.51, 5.41, 5.31, 5.17, 5.04, 4.94,
+    4.86, 4.74, 4.61, 4.47, 4.36, 4.23, 4.06, 3.88, 3.74, 3.62,
+    3.44, 3.26, 3.07, 2.89, 2.70, 2.50, 2.34, 2.23, 2.14, 2.02,
+    1.88, 1.78, 1.74, 1.69, 1.64, 1.57, 1.51, 1.45, 1.35, 1.20,
+    1.12, 1.09, 1.04, 1.06, 1.07, 1.04, 1.01, 0.94, 0.83, 0.74,
+    0.71, 0.71, 0.68, 0.61, 0.58, 0.62, 0.66, 0.67, 0.65, 0.63,
+    0.65, 0.59, 0.56, 0.56, 0.53, 0.45, 0.36, 0.30, 0.29, 0.28,
+    0.30, 0.30, 0.29, 0.25, 0.22,
+]
+
+# Normale climatique saisonnière AJUSTABLE, modélisée par un cosinus :
 #   normale(jour) = MEAN + AMPLITUDE * cos(2π (doy - PEAK_DOY) / 365.25)
-# Paramètres pour la T850 région parisienne (max ~début août), fit cosinus
-# 1 harmonique (RMSE 0,42 °C) sur la climatologie mensuelle réelle ERA5
-# 1991-2020 (Copernicus CDS, reanalysis-era5-pressure-levels-monthly-means,
-# interpolation bilinéaire au point exact 48,8534°N/2,3488°E).
+# Fit cosinus 1 harmonique sur CLIM_T850_DAILY_NORMAL ci-dessus (RMSE 0,48 °C).
+# Sert de repli/override manuel (page Réglages avancés) — le calcul par
+# défaut utilise la table journalière, plus précise (asymétrie réelle du
+# cycle annuel non capturée par 1 seule harmonique).
 CLIM_MEAN = 4.38         # °C — moyenne annuelle
 CLIM_AMPLITUDE = 5.59    # °C — demi-amplitude saisonnière
 CLIM_PEAK_DOY = 213.5    # jour de l'année du maximum (~1er août)

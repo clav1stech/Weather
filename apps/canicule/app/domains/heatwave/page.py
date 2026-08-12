@@ -106,12 +106,13 @@ def page_grand_public(runs, sig):
 
         st.markdown("---")
         st.caption(
-            "**Normale climatique (T850).** Modélisée par un cosinus saisonnier "
-            "`moyenne + amplitude × cos(2π(jour − pic)/365)`, calé sur la climatologie "
-            "réelle ERA5 1991-2020 au point exact de Paris. "
-            "Ajustez-les ici si elles ne correspondent pas à votre référence ; le réglage "
-            "s'applique à toute l'appli (cartes KPI et graphiques) tant que la session reste "
-            "ouverte.")
+            "**Normale climatique (T850).** Par défaut, valeur réelle jour par jour "
+            "(climatologie ERA5 1991-2020 au point exact de Paris, lissée). "
+            "Modifier un réglage ci-dessous bascule sur un modèle simplifié "
+            "`moyenne + amplitude × cos(2π(jour − pic)/365)` calé sur cette même "
+            "climatologie — utile pour tester une hypothèse différente. "
+            "Le réglage s'applique à toute l'appli (cartes KPI et graphiques) tant que "
+            "la session reste ouverte.")
         col_m, col_amp, col_pic = st.columns(3)
         mean0, amp0, peak0 = clim_params()
         col_m.number_input("Moyenne annuelle (°C @850)", -5.0, 20.0,

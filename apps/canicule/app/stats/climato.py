@@ -1,18 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Climatologie (normale saisonnière en cosinus) & anomalie — adaptateur
-canicule de core/stats/climato.py (formule cosinus mutualisée).
+"""Climatologie (normale saisonnière T850) & anomalie — adaptateur canicule
+de core/stats/climato.py.
 
-Les 3 paramètres par défaut (config.CLIM_MEAN/AMPLITUDE/PEAK_DOY) sont calés
-sur la climatologie réelle ERA5 1991-2020 (cf. config.py) — ajustables via la
-page Indicateur de canicule → Réglages avancés, stockés en
-session pour s'appliquer partout (KPI, graphiques) tant que l'appli reste
-ouverte. La gestion de session vit ici, pas dans core/ : c'est un choix propre
-à cette app (core/ n'importe ni config ni état Streamlit)."""
+Par défaut, la normale est lue directement dans CLIM_T850_DAILY_NORMAL (table
+de 365 valeurs réelles ERA5 1991-2020, lissée une fois pour toutes — un simple
+indexage, jamais recalculée à l'affichage). CLIM_MEAN/AMPLITUDE/PEAK_DOY (fit
+cosinus sur cette même table) ne servent que de repli manuel : dès que
+l'utilisateur modifie un des 3 réglages avancés (page Indicateur de canicule
+→ Réglages avancés), stockés en session, le calcul bascule sur le modèle
+cosinus ajustable pour refléter son choix. La gestion de session vit ici, pas
+dans core/ : c'est un choix propre à cette app (core/ n'importe ni config ni
+état Streamlit)."""
 
 import streamlit as st
 
 import config as C
-from core.stats.climato import cosine_normal
+from core.stats.climato import cosine_normal, daily_table_normal
 
 
 def clim_params():
@@ -25,8 +28,23 @@ def clim_params():
 
 
 def clim_normal(when):
-    """Normale climatique T850 saisonnière (cosinus). `when` : Timestamp ou Series."""
+    """Normale climatique T850. `when` : Timestamp ou Series. Table journalière
+    réelle par défaut ; cosinus ajustable dès qu'un réglage avancé est modifié.
+
+    Le widget « jour du pic » est un number_input ENTIER (UX en jours) : sa
+    valeur en session est un int dès qu'il a été rendu au moins une fois, mais
+    tant que la page n'a jamais été visitée, `clim_params()` retombe sur
+    C.CLIM_PEAK_DOY tel quel — un float (213.5, précision du fit). Comparer
+    en int des deux côtés couvre les deux cas sans détecter à tort une
+    modification."""
     mean, amplitude, peak_doy = clim_params()
+    is_default = (
+        mean == C.CLIM_MEAN
+        and amplitude == C.CLIM_AMPLITUDE
+        and int(peak_doy) == int(C.CLIM_PEAK_DOY)
+    )
+    if is_default:
+        return daily_table_normal(when, C.CLIM_T850_DAILY_NORMAL)
     return cosine_normal(when, mean, amplitude, peak_doy)
 
 

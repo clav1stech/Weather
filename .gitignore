@@ -43,3 +43,7 @@ data/backups/
 # État local du cooldown de déclenchement à distance (bouton « Rafraîchir »)
 # — horodatage éphémère, jamais une donnée du projet.
 .runtime_state/
+
+# Outil local one-off de téléchargement ERA5 (normale climatique T850) —
+# script/venv/données/état de suivi, jamais versionnés.
+era5/

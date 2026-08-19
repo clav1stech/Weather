@@ -29,11 +29,11 @@ def obs_signature():
 
 
 @st.cache_data(show_spinner=False)
-def load_obs(_sig):
+def load_obs(sig):
     """Base observations complète (historique append-only), valid_time converti
     UTC → heure de Paris (naïf). DataFrame vide au schéma OBS_SCHEMA si le flux
     est absent, illisible ou sans colonne attendue."""
-    if _sig is None:
+    if sig is None:
         return pd.DataFrame(columns=C.OBS_SCHEMA)
     df = load_flux(C.DB_OBS_PATH, C.OBS_SCHEMA)
     if df.empty:
@@ -51,11 +51,11 @@ def load_obs(_sig):
 
 
 @st.cache_data(show_spinner=False)
-def latest_obs(_sig):
+def latest_obs(sig):
     """Dernière observation de CHAQUE station (une ligne par station, dans
     l'ordre de config.OBS_STATIONS). Une station sans la moindre ligne en base
     est simplement absente du résultat — l'appelant affiche ce qu'il a."""
-    df = load_obs(_sig)
+    df = load_obs(sig)
     if df.empty:
         return df
     last = (df.sort_values("valid_time")
@@ -65,10 +65,10 @@ def latest_obs(_sig):
                 .sort_values("_ord").drop(columns="_ord").reset_index(drop=True))
 
 
-def obs_window(_sig, hours):
+def obs_window(sig, hours):
     """Observations des `hours` dernières heures (depuis la dernière obs en
     base, pas depuis l'horloge — une base qui date de la veille reste lisible)."""
-    df = load_obs(_sig)
+    df = load_obs(sig)
     if df.empty:
         return df
     end = df["valid_time"].max()
@@ -76,7 +76,7 @@ def obs_window(_sig, hours):
 
 
 @st.cache_data(show_spinner=False)
-def txtn_du_jour(_sig, jour):
+def txtn_du_jour(sig, jour):
     """Tx/Tn observés « jusqu'à présent » du jour civil `jour` (minuit, heure
     de Paris), par station : max des tx horaires / min des tn horaires depuis
     00h00. À la différence de daily_txtn_obs (jours révolus, complétude jugée
@@ -84,7 +84,7 @@ def txtn_du_jour(_sig, jour):
     provisoire sur un jour en cours — l'appelant doit la présenter comme telle
     (« depuis 00 h »), jamais comme un extrême définitif du jour. Stations sans
     observation ce jour : absentes du résultat (NaN partiels tolérés)."""
-    df = load_obs(_sig)
+    df = load_obs(sig)
     cols = ["station_id", "tx", "tn"]
     if df.empty:
         return pd.DataFrame(columns=cols)
@@ -98,13 +98,13 @@ def txtn_du_jour(_sig, jour):
 
 
 @st.cache_data(show_spinner=False)
-def daily_txtn_obs(_sig):
+def daily_txtn_obs(sig):
     """Tx/Tn OBSERVÉS par (station, jour civil de Paris) : max des tx horaires /
     min des tn horaires (tx/tn API = extrêmes de l'heure écoulée, donc leurs
     extrêmes journaliers sont les vrais extrêmes du jour). `n_heures` = nombre
     d'observations du jour — l'appelant juge la complétude (un jour en cours ou
     troué donnerait un faux Tn/Tx s'il était pris pour argent comptant)."""
-    df = load_obs(_sig)
+    df = load_obs(sig)
     cols = ["station_id", "station_nom", "date", "tx", "tn", "n_heures"]
     if df.empty:
         return pd.DataFrame(columns=cols)

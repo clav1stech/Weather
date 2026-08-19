@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.1.11] - 2026-08-20
+Bouton « Rafraîchir » : les caches se vident réellement, dashboards figés
+jusqu'au reboot corrigés.
+
+Les fonctions cachées des couches données recevaient leur signature sous le nom
+`_sig` : Streamlit exclut du hachage tout argument préfixé d'un underscore, la
+clé de cache ne contenait donc pas la signature et une nouvelle collecte
+n'invalidait rien. Je renomme le paramètre en `sig` partout (canicule et neige)
+pour que l'invalidation automatique fonctionne comme les docstrings le
+décrivent. La base canicule, cachée en `cache_resource`, échappait en plus au
+`st.cache_data.clear()` du bouton : elle est désormais bornée à une entrée et
+le bouton vide les trois niveaux — métadonnées du magasin (mémoïsées avec TTL
+côté processus), `cache_data` et `cache_resource`. Tant que les données
+transitaient par git, chaque commit du pipeline redéployait l'app et purgeait
+les caches toutes les 2 h ; la sortie de git a supprimé ce redémarrage
+implicite et rendu le défaut visible.
+
 ## [3.1.10] - 2026-08-12
 Normale climatique T850 : table journalière réelle ERA5 au lieu du seul cosinus.
 

@@ -27,10 +27,10 @@ def t2m_signature():
 
 
 @st.cache_data(show_spinner=False)
-def load_t2m(_sig):
+def load_t2m(sig):
     """Base Tx/Tn complète (historique append-only). DataFrame vide au schéma
     T2M_SCHEMA si le flux est absent, illisible ou sans colonne attendue."""
-    if _sig is None:
+    if sig is None:
         return pd.DataFrame(columns=C.T2M_SCHEMA)
     df = load_flux(C.DB_T2M_PATH, C.T2M_SCHEMA)
     if df.empty:
@@ -47,7 +47,7 @@ _TXTN_COLS = ["date", "tx", "tn", "model", "model_alt", "ecart_tx", "ecart_tn", 
 
 
 @st.cache_data(show_spinner=False)
-def txtn_by_day(_sig):
+def txtn_by_day(sig):
     """Un SEUL couple Tx/Tn affiché par jour cible, + de quoi juger sa fiabilité :
     DataFrame _TXTN_COLS [date, tx, tn, model, model_alt, ecart_tx, ecart_tn, solo].
 
@@ -65,7 +65,7 @@ def txtn_by_day(_sig):
 
     Les jours passés sont conservés (dernier état connu) ; le filtrage temporel
     appartient à l'appelant."""
-    df = load_t2m(_sig)
+    df = load_t2m(sig)
     empty = pd.DataFrame(columns=_TXTN_COLS)
     if df.empty:
         return empty

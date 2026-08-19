@@ -34,7 +34,7 @@ def _member_id_from_col(col_name):
 
 
 @st.cache_data(show_spinner=False)
-def legacy_import_candidates(_db_sig, _legacy_sig):
+def legacy_import_candidates(db_sig, legacy_sig):
     """Couples (run_date, modèle) présents dans les xlsx legacy mais sans la
     moindre valeur valide dans le parquet Open-Meteo — les seuls importables.
 
@@ -42,7 +42,7 @@ def legacy_import_candidates(_db_sig, _legacy_sig):
     jamais load_db qui convertit run_date en heure de Paris. Si plusieurs xlsx
     couvrent le même run (re-scrapes), on garde le plus complet (last_vt max,
     puis scrape le plus récent)."""
-    leg = legacy_presence(_legacy_sig)
+    leg = legacy_presence(legacy_sig)
     if leg.empty:
         return leg
     leg = leg.dropna(subset=["run_date"])

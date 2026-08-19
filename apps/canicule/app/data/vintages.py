@@ -29,11 +29,11 @@ def vintages_signature():
 
 
 @st.cache_data(show_spinner=False)
-def load_vintages(_sig):
+def load_vintages(sig):
     """Base vintages complète (append-only, bornée par compaction). DataFrame
     vide au schéma VINTAGE_SCHEMA si le flux est absent, illisible ou sans
     colonne attendue. `valid_time`/`fetched_at` normalisés en datetime."""
-    if _sig is None:
+    if sig is None:
         return pd.DataFrame(columns=C.VINTAGE_SCHEMA)
     df = load_flux(C.DB_VINTAGE_PATH, C.VINTAGE_SCHEMA)
     if df.empty:

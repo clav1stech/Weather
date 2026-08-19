@@ -30,7 +30,7 @@ FULL_HORIZON_TOLERANCE_H = 24
 
 
 @st.cache_data(show_spinner=False)
-def latest_complete_run_sub(_sig, as_of=None):
+def latest_complete_run_sub(sig, as_of=None):
     """Pool multi-modèles où CHAQUE modèle est représenté par son dernier run à
     HORIZON PLEIN — base des vues combinées (super-ensemble global).
 
@@ -55,7 +55,7 @@ def latest_complete_run_sub(_sig, as_of=None):
       - sub     : lignes poolées (mêmes colonnes que la base) ;
       - sources : {label → run_date retenu} ;
       - partial : modèles principaux sans aucun run à horizon plein récent."""
-    df = load_db(_sig)
+    df = load_db(sig)
     if as_of is not None:
         df = df[df["run_date"] <= pd.Timestamp(as_of)]
     if df.empty:
@@ -95,13 +95,13 @@ def latest_complete_run_sub(_sig, as_of=None):
 
 
 @st.cache_data(show_spinner=False)
-def latest_run_sub(_sig):
+def latest_run_sub(sig):
     """Pool « dernier run » : pour CHAQUE modèle, son dernier run non vide, quel
     que soit son cycle (0/6/12/18Z) — contrairement aux vues combinées
     (latest_complete_run_sub), AUCUNE exigence d'horizon plein : on montre
     l'information la plus fraîche disponible, même partielle. Chaque modèle
     garde son propre run_date/cycle. Retourne (sub, sources)."""
-    df = load_db(_sig)
+    df = load_db(sig)
     if df.empty:
         return df, {}
     frames, sources = [], {}
@@ -119,7 +119,7 @@ def latest_run_sub(_sig):
 
 
 @st.cache_data(show_spinner=False)
-def latest_z500_sub(_sig, as_of=None):
+def latest_z500_sub(sig, as_of=None):
     """Pool Z500 : pour CHAQUE modèle, son dernier run contenant du z500 valide —
     en remontant l'historique si le run T850 retenu par latest_complete_run_sub
     n'en a pas (ex. juste après l'ajout de la variable, ou run legacy comblé
@@ -130,7 +130,7 @@ def latest_z500_sub(_sig, as_of=None):
     latest_complete_run_sub (rejeu « Vu depuis »). z500 absent partout (base
     pas encore alimentée à cette date, runs legacy) → pool vide, dégradation
     silencieuse en aval (var_median renvoie None)."""
-    df = load_db(_sig)
+    df = load_db(sig)
     if as_of is not None:
         df = df[df["run_date"] <= pd.Timestamp(as_of)]
     if df.empty or "z500" not in df.columns:
@@ -359,8 +359,8 @@ def _convergence_runs(runs):
 
 
 @st.cache_data(show_spinner=False)
-def convergence_long(_sig):
-    """Cœur lourd de la page Convergence, calculé UNE fois par donnée (clé `_sig`,
+def convergence_long(sig):
+    """Cœur lourd de la page Convergence, calculé UNE fois par donnée (clé `sig`,
     invalidée comme load_db). Retourne (long, backfill_src) :
       • long : format long (run_dt / lead / target / median / p10 / p90) — médiane
         et P10/P90 JOURNALIÈRES de chaque run affiché, super-ensemble COMPLÉTÉ
@@ -374,13 +374,13 @@ def convergence_long(_sig):
     de la base en mémoire), remplace le rescan O(N) que run_slice referait à
     chaque run × chaque fenêtre de backfill. Sortie strictement identique à la
     boucle historique (mêmes lignes, même ordre) : seul le chemin d'accès change."""
-    runs_full = list_runs(_sig).reset_index(drop=True)
+    runs_full = list_runs(sig).reset_index(drop=True)
     runs = _convergence_runs(runs_full)
     if len(runs) < 2:
         return pd.DataFrame(columns=["run_dt", "lead", "target",
                                      "median", "p10", "p90"]), {}
     full_pos = {rd: i for i, rd in enumerate(runs_full["run_date"])}
-    df = load_db(_sig)
+    df = load_db(sig)
     slices = {rd: g for rd, g in df.groupby("run_date", sort=False)}
     _empty = df.iloc[0:0]
     slicer = lambda _s, rd: slices.get(rd, _empty)
@@ -389,7 +389,7 @@ def convergence_long(_sig):
     for pos in range(len(runs)):
         r = runs.iloc[pos]
         syn, sources = completed_super_ensemble_daily(
-            runs_full, full_pos[r["run_date"]], _sig, run_slicer=slicer)
+            runs_full, full_pos[r["run_date"]], sig, run_slicer=slicer)
         backfill_src[r["run_date"]] = sources
         if syn is None or syn.empty:
             continue
@@ -409,7 +409,7 @@ def convergence_long(_sig):
 
 
 @st.cache_data(show_spinner=False)
-def trend_daily_medians(_sig, n_runs=8):
+def trend_daily_medians(sig, n_runs=8):
     """Médiane/P10/P90 JOURNALIÈRES des `n_runs` derniers runs affichables —
     format long (run_dt / target / median / p10 / p90), pour la section grand
     public « évolution au fil des runs ».
@@ -421,12 +421,12 @@ def trend_daily_medians(_sig, n_runs=8):
     sont écartés via _convergence_runs (le backfill, lui, cherche dans TOUS les
     runs). Seules les journées À VENIR de chaque run sont gardées (target ≥ jour
     du cycle) — le passé rebouché par l'API fausserait la comparaison."""
-    runs_full = list_runs(_sig).reset_index(drop=True)
+    runs_full = list_runs(sig).reset_index(drop=True)
     shown = _convergence_runs(runs_full).head(n_runs)
     full_pos = {rd: i for i, rd in enumerate(runs_full["run_date"])}
     records = []
     for rd in shown["run_date"]:
-        syn, _ = completed_super_ensemble_daily(runs_full, full_pos[rd], _sig)
+        syn, _ = completed_super_ensemble_daily(runs_full, full_pos[rd], sig)
         if syn is None or syn.empty:
             continue
         run_day = pd.Timestamp(rd).normalize()

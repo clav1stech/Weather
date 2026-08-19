@@ -66,24 +66,24 @@ def _latest_by_policy(df, labels, require_full):
     return pd.concat(parts, ignore_index=True), flags
 
 
-def latest_complete_run_sub(_sig):
+def latest_complete_run_sub(sig):
     """Vues combinées : dernier run à horizon plein de chaque modèle membres.
     Renvoie (sub, flags) — flags[label]="horizon réduit" en cas de repli."""
-    return _latest_by_policy(members_db(_sig), SC.ENS_LABELS, require_full=True)
+    return _latest_by_policy(members_db(sig), SC.ENS_LABELS, require_full=True)
 
 
-def latest_run_sub(_sig):
+def latest_run_sub(sig):
     """Option « Dernier run » : dernier run non vide de chaque modèle membres,
     sans exigence d'horizon (fraîcheur maximale, même partielle — voulu)."""
-    sub, _ = _latest_by_policy(members_db(_sig), SC.ENS_LABELS, require_full=False)
+    sub, _ = _latest_by_policy(members_db(sig), SC.ENS_LABELS, require_full=False)
     return sub
 
 
-def previous_runs_sub(_sig, sub):
+def previous_runs_sub(sig, sub):
     """Pour chaque modèle de `sub`, les lignes de son run STRICTEMENT
     antérieur (dernier run de CE modèle avant celui affiché) — support des
     colonnes Δ. Vide si aucun modèle n'a de run antérieur."""
-    df = members_db(_sig)
+    df = members_db(sig)
     parts = []
     for label in sub["model"].unique():
         current = sub.loc[sub["model"] == label, "run_date"].max()
@@ -96,13 +96,13 @@ def previous_runs_sub(_sig, sub):
     return pd.concat(parts, ignore_index=True)
 
 
-def mean_runs(_sig, base_label, n_runs, kind="mean"):
+def mean_runs(sig, base_label, n_runs, kind="mean"):
     """Les N derniers runs du flux _MEAN d'une famille (`base_label` ∈
     ENS_LABELS), du plus récent au plus ancien. C'est le support de la
     convergence : rétention API longue, une seule série par run (la moyenne
     d'ensemble), directement comparable de run en run."""
     label = SC.MEAN_LABEL_BY_BASE.get(base_label)
-    df = mean_db(_sig, kind)
+    df = mean_db(sig, kind)
     sub = df[df["model"] == label]
     if sub.empty:
         return sub
@@ -110,7 +110,7 @@ def mean_runs(_sig, base_label, n_runs, kind="mean"):
     return sub[sub["run_date"].isin(keep)]
 
 
-def mean_runs_all(_sig, n_runs):
+def mean_runs_all(sig, n_runs):
     """Runs `_MEAN` comparables pour le consensus « Tous modèles ».
 
     Un cycle n'entre dans la sélection que si au moins deux familles y sont
@@ -118,7 +118,7 @@ def mean_runs_all(_sig, n_runs):
     ces cycles : la composition reste stable et une arrivée/disparition de
     modèle ne peut pas simuler une révision du scénario.
     """
-    df = mean_db(_sig, "mean")
+    df = mean_db(sig, "mean")
     if df.empty:
         return df
     by_run = df.groupby("run_date")["model"].nunique()
@@ -126,14 +126,14 @@ def mean_runs_all(_sig, n_runs):
     return df[df["run_date"].isin(eligible)]
 
 
-def latest_refresh_status(runs, _sig):
+def latest_refresh_status(runs, sig):
     """(instant du dernier run, complet ?, modèles manquants) pour le bloc
     fraîcheur de la sidebar — l'attendu se juge sur expected_cycles du cycle
     du dernier run (cycles ≠ expected_cycles, cf. canicule)."""
     if runs.empty:
         return None, True, []
     latest = runs.iloc[0]["run_date"]
-    df = members_db(_sig)
+    df = members_db(sig)
     present = set(df.loc[df["run_date"] == latest, "model"].unique())
     from .db import utc_cycle
     hour = utc_cycle(latest).hour

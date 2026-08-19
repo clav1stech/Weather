@@ -61,8 +61,8 @@ def cross_check_log_signature():
 
 
 @st.cache_data(show_spinner=False)
-def load_cross_check_log(_sig):
-    if _sig is None or not os.path.exists(C.CROSS_CHECK_LOG_PATH):
+def load_cross_check_log(sig):
+    if sig is None or not os.path.exists(C.CROSS_CHECK_LOG_PATH):
         return pd.DataFrame()
     df = pd.read_csv(C.CROSS_CHECK_LOG_PATH, parse_dates=["checked_at", "run_date", "valid_time"])
     return df.sort_values("checked_at", ascending=False).reset_index(drop=True)

@@ -99,7 +99,7 @@ def _read_mf_summary(path):
 
 
 @st.cache_data(show_spinner=False)
-def load_db(_sig):
+def load_db(sig):
     """Base ensemble HOT (membres + mean/spread, colonne `kind`) — le fichier
     que le pipeline écrit, fenêtre récente bornée par le rollover. C'est le
     support des vues interactives ; l'historique archivé se lit via load_cold
@@ -108,7 +108,7 @@ def load_db(_sig):
 
 
 @st.cache_data(show_spinner=False)
-def load_cold(_sig):
+def load_cold(sig):
     """Base ensemble COLD (archive du rollover hot/cold) — chargée seulement
     par les usages qui remontent loin (historique _MEAN de la convergence).
     Absente = cas normal (rollover jamais encore déclenché)."""
@@ -116,10 +116,10 @@ def load_cold(_sig):
 
 
 @st.cache_data(show_spinner=False)
-def load_hd(_sig):
+def load_hd(sig):
     """Base maille fine (append-only). fetched_at / target_datetime convertis
     UTC → heure de Paris (naïf)."""
-    df = read_flux(SC.DB_HD_PATH) if _sig is not None else None
+    df = read_flux(SC.DB_HD_PATH) if sig is not None else None
     if df is None:
         return pd.DataFrame(columns=SC.HD_SCHEMA)
     df = _align_schema(df, SC.HD_SCHEMA)
@@ -127,47 +127,47 @@ def load_hd(_sig):
 
 
 @st.cache_data(show_spinner=False)
-def load_mf_local(_sig):
+def load_mf_local(sig):
     """Runs locaux/régionaux HOT ; l'absence du nouveau parquet est normale."""
     return _read_mf_local(SC.DB_MF_LOCAL_PATH)
 
 
 @st.cache_data(show_spinner=False)
-def load_mf_regional(_sig):
+def load_mf_regional(sig):
     """Runs PE-ARPEGE HOT ; le parquet dédié peut ne pas encore exister."""
     return _read_mf_regional(SC.DB_MF_REGIONAL_PATH)
 
 
 @st.cache_data(show_spinner=False)
-def load_mf_summary(_sig):
+def load_mf_summary(sig):
     """Historique compact des moyennes PI/IFS/PE-AROME/PE-ARPEGE."""
     return _read_mf_summary(SC.DB_MF_SUMMARY_PATH)
 
 
-def mf_local_members(_sig):
+def mf_local_members(sig):
     """Membres PE-AROME au village, sans les déterministes PI/IFS futurs."""
-    df = load_mf_local(_sig)
+    df = load_mf_local(sig)
     return df[(df["kind"] == "member") & (df["model"] == SC.PE_AROME_MODEL)]
 
 
-def latest_mf_local_members(_sig):
+def latest_mf_local_members(sig):
     """Dernier cycle PE-AROME complet stocké, sans mélanger les runs."""
-    df = mf_local_members(_sig)
+    df = mf_local_members(sig)
     if df.empty:
         return df
     return df[df["run_date"] == df["run_date"].max()].reset_index(drop=True)
 
 
-def latest_mf_regional_members(_sig):
+def latest_mf_regional_members(sig):
     """Dernier cycle PE-ARPEGE complet stocké, sans mélanger les runs."""
-    df = load_mf_regional(_sig)
+    df = load_mf_regional(sig)
     df = df[(df["kind"] == "member") & (df["model"] == SC.PE_ARPEGE_MODEL)]
     if df.empty:
         return df
     return df[df["run_date"] == df["run_date"].max()].reset_index(drop=True)
 
 
-def latest_mf_local_deterministic(_sig, model):
+def latest_mf_local_deterministic(sig, model):
     """Dernier cycle d'un modèle local déterministe, sans mélanger les runs.
 
     Le filtre de fraîcheur météorologique reste à la logique du domaine :
@@ -176,25 +176,25 @@ def latest_mf_local_deterministic(_sig, model):
     """
     if model not in SC.MF_LOCAL_MODELS:
         raise ValueError(f"Modèle Météo-France local inconnu : {model}")
-    df = load_mf_local(_sig)
+    df = load_mf_local(sig)
     df = df[(df["kind"] == "deterministic") & (df["model"] == model)]
     if df.empty:
         return df
     return df[df["run_date"] == df["run_date"].max()].reset_index(drop=True)
 
 
-def members_db(_sig):
+def members_db(sig):
     """Lignes membres (flux Ensemble API) — le pool des vues probabilistes."""
-    df = load_db(_sig)
+    df = load_db(sig)
     return df[df["kind"] == "member"]
 
 
-def mean_db(_sig, kind="mean"):
+def mean_db(sig, kind="mean"):
     """Lignes mean (ou spread) du flux Ensemble Mean — rétention API longue,
     support de l'historique/convergence : lit hot + cold (l'historique de
     convergence doit traverser la fenêtre du rollover). Dédup défensive au
     cas où un crash de rollover aurait laissé un recouvrement (hot prioritaire)."""
-    df = pd.concat([load_cold(_sig), load_db(_sig)], ignore_index=True)
+    df = pd.concat([load_cold(sig), load_db(sig)], ignore_index=True)
     df = df.drop_duplicates(subset=["run_date", "model", "kind", "member",
                                     "site", "valid_time"], keep="last")
     return df[df["kind"] == kind]
@@ -213,10 +213,10 @@ def run_label_text(local_run_date):
 
 
 @st.cache_data(show_spinner=False)
-def list_runs(_sig):
+def list_runs(sig):
     """Runs membres disponibles (run_date distinctes), du plus récent au plus
     ancien — les runs _MEAN ne pilotent pas la navigation (flux d'appui)."""
-    df = members_db(_sig)
+    df = members_db(sig)
     if df.empty:
         return pd.DataFrame(columns=["run_date", "label"])
     runs = pd.DataFrame({"run_date": sorted(df["run_date"].unique(), reverse=True)})

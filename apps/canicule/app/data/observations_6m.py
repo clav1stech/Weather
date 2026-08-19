@@ -35,11 +35,11 @@ def obs_6m_signature():
 
 
 @st.cache_data(show_spinner=False)
-def load_obs_6m(_sig):
+def load_obs_6m(sig):
     """Base 6 min complète, valid_time converti UTC → heure de Paris (naïf).
     DataFrame vide au schéma OBS_6M_SCHEMA si le flux est absent, illisible ou
     sans colonne attendue."""
-    if _sig is None:
+    if sig is None:
         return pd.DataFrame(columns=C.OBS_6M_SCHEMA)
     df = load_flux(C.DB_OBS_6M_PATH, C.OBS_6M_SCHEMA)
     if df.empty:
@@ -55,7 +55,7 @@ def load_obs_6m(_sig):
 
 
 @st.cache_data(show_spinner=False)
-def obs_6m_depuis(_sig, debut):
+def obs_6m_depuis(sig, debut):
     """Mesures 6 min STRICTEMENT postérieures à `debut` (heure de Paris,
     tz-naïf) : le complément de fraîcheur du graphique inter-stations, au-delà
     de la dernière heure consolidée du flux horaire (qui accuse un délai de
@@ -64,20 +64,20 @@ def obs_6m_depuis(_sig, debut):
     (RADOME comme ETENDU) — une station sans point récent y est simplement
     absente, cas normal (poll manqué, station momentanément muette). Vide si
     rien de plus frais."""
-    df = load_obs_6m(_sig)
+    df = load_obs_6m(sig)
     if df.empty or pd.isna(pd.Timestamp(debut)):
         return df.iloc[0:0]
     return df[df["valid_time"] > pd.Timestamp(debut)].reset_index(drop=True)
 
 
 @st.cache_data(show_spinner=False)
-def latest_obs_6m(_sig):
+def latest_obs_6m(sig):
     """Dernière mesure 6 min de CHAQUE station présente en base (dans l'ordre de
     config.OBS_STATIONS) — les 4 stations y figurent normalement, avec un
     contenu inégal (ETENDU : température/pluie seules, cf. module). Une
     station sans la moindre ligne 6 min est simplement absente du résultat —
     l'appelant retombe alors sur l'observation horaire."""
-    df = load_obs_6m(_sig)
+    df = load_obs_6m(sig)
     if df.empty:
         return df
     last = (df.sort_values("valid_time")

@@ -27,17 +27,17 @@ _LEGACY_FILE_RE = re.compile(r"Forecast-(\d{8})-(.+)\.xlsx$", re.IGNORECASE)
 
 
 @st.cache_data(show_spinner=False)
-def openmeteo_presence(_sig):
+def openmeteo_presence(sig):
     """Une ligne par (run_date, modèle) présent dans le parquet Open-Meteo :
     nb de membres, première/dernière échéance RÉELLE (valeur non-NaN), horizon
     (lead, en heures) et cycle synoptique. `expected` = ce modèle publie-t-il à ce
     cycle (config `cycles`) — sert à distinguer une absence anormale d'un cycle où
     le modèle ne tourne simplement pas (ex. GEM à 6Z/18Z).
 
-    Cachée (clé `_sig`, invalidée comme load_db par redéploiement / Rafraîchir) :
+    Cachée (clé `sig`, invalidée comme load_db par redéploiement / Rafraîchir) :
     balayage groupby O(N) de toute la base, sinon repayé à chaque rerun des pages
     Convergence et Contrôle. Le résultat (une ligne par run×modèle) est minuscule."""
-    df = load_db(_sig)
+    df = load_db(sig)
     cols = ["run_date", "model", "n_members", "first_vt", "last_vt",
             "lead_h", "run_utc", "cycle_h", "expected"]
     if df.empty:
@@ -76,7 +76,7 @@ def legacy_signature():
 
 
 @st.cache_data(show_spinner=False)
-def legacy_presence(_sig):
+def legacy_presence(sig):
     """Présence/horizon côté Météociel (legacy), une ligne par (fichier, modèle).
 
     run_date = celui déclaré par Météociel dans l'en-tête du xlsx (source fiable,
@@ -87,7 +87,7 @@ def legacy_presence(_sig):
     cols = ["run_label", "scrape_date", "file", "model", "run_date",
             "n_members", "last_vt", "lead_h", "n_ech"]
     rows = []
-    for fname, _ in _sig:
+    for fname, _ in sig:
         m = _LEGACY_FILE_RE.search(fname)
         if not m:
             continue

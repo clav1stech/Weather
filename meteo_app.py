@@ -31,6 +31,7 @@ import streamlit as st
 
 from app.data.db import db_signature, list_runs
 from app.data.runsets import latest_refresh_status
+from app.data.store import vider_cache_magasin
 from app.domains import DOMAIN_PAGES
 from app.pages.convergence import page_convergence
 from app.pages.diagnostic import page_diagnostic
@@ -85,7 +86,14 @@ def main():
         else:
             st.sidebar.caption(f"⚠️ Données partielles — manque : {', '.join(missing)}")
     if st.sidebar.button("🔄 Rafraîchir"):
+        # Les trois caches, dans cet ordre : le magasin externe (métadonnées du
+        # release, mémoïsées avec un TTL taillé pour le rythme automatique), les
+        # calculs (cache_data) et la base elle-même (cache_resource, que
+        # cache_data.clear() ne touche PAS). En sauter un laisse la page sur les
+        # données précédentes jusqu'au redémarrage du process.
+        vider_cache_magasin()
         st.cache_data.clear()
+        st.cache_resource.clear()
         st.rerun()
     st.sidebar.markdown("---")
     st.sidebar.markdown("<small>🕐 **Mise à jour automatique** 4×/jour via "

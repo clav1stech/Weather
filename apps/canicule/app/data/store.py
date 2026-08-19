@@ -24,7 +24,10 @@ from core.store import (
     concat_partitions,
     parse_partition_name,
 )
-from core.store.github_http import GitHubReleaseHttpStore
+from core.store.github_http import (
+    GitHubReleaseHttpStore,
+    reset_release_cache,
+)
 
 
 def _reglage(nom):
@@ -186,3 +189,13 @@ def load_flux(db_path, schema):
     except Exception:  # noqa: BLE001 — parquet git illisible/corrompu
         pass
     return pd.DataFrame(columns=schema)
+
+
+def vider_cache_magasin():
+    """Oublie tout ce qui est mémoïsé du magasin : métadonnées du release (TTL
+    processus) — le cache disque des partitions, lui, est clé par etag et se
+    renouvelle donc de lui-même dès qu'une partition change. Appelé par le
+    bouton « Rafraîchir » : sans cela, un clic dans les secondes qui suivent le
+    chargement de la page relirait la MÊME liste d'assets et donc les mêmes
+    fichiers, sans voir la collecte qui vient d'aboutir."""
+    reset_release_cache()

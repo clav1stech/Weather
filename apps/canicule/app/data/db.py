@@ -45,9 +45,16 @@ def db_signature():
     return None if sigs[0] is None else tuple(sigs)
 
 
-@st.cache_resource(show_spinner=False)
-def load_db(_sig):
+@st.cache_resource(show_spinner=False, max_entries=1)
+def load_db(sig):
     """Base complète. run_date / valid_time convertis UTC → heure de Paris (naïf).
+
+    `sig` (db_signature) est un paramètre HASHÉ, jamais préfixé d'un underscore :
+    c'est lui — et lui seul — qui fait entrer une nouvelle collecte dans le
+    dashboard. Masqué du hachage, il figerait la base pour toute la vie du
+    process, le `st.cache_data.clear()` du bouton « Rafraîchir » ne touchant pas
+    le cache RESSOURCE. `max_entries=1` en borne la contrepartie : la base pèse
+    plusieurs centaines de Mo, seule la signature courante est retenue.
 
     Cachée en `cache_resource` et NON en `cache_data` : cette dernière sérialise
     (pickle) la valeur retournée et en désérialise une COPIE COMPLÈTE à chaque
@@ -76,7 +83,7 @@ def load_db(_sig):
     vide bascule silencieusement sur la lecture git ci-dessous — jamais de page
     en erreur pour une panne du magasin, jamais de perte de service tant que le
     pipeline continue de committer dans git en double écriture."""
-    if _sig is None:
+    if sig is None:
         return pd.DataFrame(columns=C.SCHEMA)
     if store_active():
         # Magasin externe : la base = concat des partitions mensuelles (elles
@@ -152,9 +159,9 @@ def run_label_text(local_run_date):
 
 
 @st.cache_data(show_spinner=False)
-def list_runs(_sig):
+def list_runs(sig):
     """Runs disponibles (run_date distinctes), du plus récent au plus ancien."""
-    df = load_db(_sig)
+    df = load_db(sig)
     if df.empty:
         return pd.DataFrame(columns=["run_date", "label"])
     runs = pd.DataFrame({"run_date": sorted(df["run_date"].unique(), reverse=True)})
@@ -162,6 +169,6 @@ def list_runs(_sig):
     return runs.reset_index(drop=True)
 
 
-def run_slice(_sig, run_date):
-    df = load_db(_sig)
+def run_slice(sig, run_date):
+    df = load_db(sig)
     return df[df["run_date"] == run_date]

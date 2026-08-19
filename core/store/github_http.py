@@ -30,6 +30,13 @@ _REL_CACHE = {}          # (repo, tag) -> (t_monotonic, json_or_None)
 _REL_TTL = 30.0
 
 
+def reset_release_cache():
+    """Vide la mémoïsation du release — à appeler quand l'utilisateur demande
+    explicitement des données fraîches (bouton « Rafraîchir »), le TTL étant
+    calibré pour le rythme automatique et non pour une demande manuelle."""
+    _REL_CACHE.clear()
+
+
 class GitHubReleaseHttpStore:
     """`repo` = « owner/nom », `tag` = release porteur des assets."""
 

@@ -39,12 +39,12 @@ def _read(path):
 
 
 @st.cache_data(show_spinner=False)
-def load_obs(_sig):
+def load_obs(sig):
     """Base observations complète (cold + hot, historique append-only),
     valid_time converti UTC → heure de Paris (naïf). Stations retirées de la
     config après coup : lignes orphelines filtrées (même principe que load_db
     avec les modèles legacy)."""
-    if _sig is None:
+    if sig is None:
         return pd.DataFrame(columns=SC.OBS_SCHEMA)
     df = pd.concat([_read(SC.DB_OBS_COLD_PATH), _read(SC.DB_OBS_PATH)],
                    ignore_index=True)
@@ -61,11 +61,11 @@ def load_obs(_sig):
 
 
 @st.cache_data(show_spinner=False)
-def latest_obs(_sig):
+def latest_obs(sig):
     """Dernière observation de CHAQUE station (une ligne par station, dans
     l'ordre de config). Une station sans la moindre ligne en base est
     simplement absente du résultat — l'appelant affiche ce qu'il a."""
-    df = load_obs(_sig)
+    df = load_obs(sig)
     if df.empty:
         return df
     last = (df.sort_values("valid_time")
@@ -75,10 +75,10 @@ def latest_obs(_sig):
                 .sort_values("_ord").drop(columns="_ord").reset_index(drop=True))
 
 
-def obs_window(_sig, hours):
+def obs_window(sig, hours):
     """Observations des `hours` dernières heures (depuis la dernière obs en
     base, pas depuis l'horloge — une base qui date de la veille reste lisible)."""
-    df = load_obs(_sig)
+    df = load_obs(sig)
     if df.empty:
         return df
     end = df["valid_time"].max()
@@ -86,12 +86,12 @@ def obs_window(_sig, hours):
 
 
 @st.cache_data(show_spinner=False)
-def daily_txtn_obs(_sig):
+def daily_txtn_obs(sig):
     """Tx/Tn OBSERVÉS par (station, jour civil de Paris) : max des tx horaires /
     min des tn horaires (tx/tn API = extrêmes de l'heure écoulée). `n_heures` =
     nombre d'observations du jour — l'appelant juge la complétude via
     OBS_JOUR_COMPLET_MIN_H (un jour troué donnerait un faux extrême)."""
-    df = load_obs(_sig)
+    df = load_obs(sig)
     cols = ["station_id", "station_nom", "date", "tx", "tn", "n_heures"]
     if df.empty:
         return pd.DataFrame(columns=cols)

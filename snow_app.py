@@ -24,6 +24,7 @@ import streamlit as st
 
 from apps.snow.app.data.db import db_signature, list_runs
 from apps.snow.app.data.runsets import latest_refresh_status
+from apps.snow.app.data.store import vider_cache_magasin
 from apps.snow.app.domains import DOMAIN_PAGES
 from apps.snow.app.pages.convergence import page_convergence
 from apps.snow.app.pages.diagnostic import page_diagnostic
@@ -68,7 +69,14 @@ def main():
         else:
             st.sidebar.caption(f"⚠️ Données partielles — manque : {', '.join(missing)}")
     if st.sidebar.button("🔄 Rafraîchir"):
+        # Les trois caches, dans cet ordre : le magasin externe (métadonnées du
+        # release, mémoïsées avec un TTL taillé pour le rythme automatique), les
+        # calculs (cache_data) et la base elle-même (cache_resource, que
+        # cache_data.clear() ne touche PAS). En sauter un laisse la page sur les
+        # données précédentes jusqu'au redémarrage du process.
+        vider_cache_magasin()
         st.cache_data.clear()
+        st.cache_resource.clear()
         st.rerun()
     st.sidebar.markdown("---")
     st.sidebar.markdown("<small><b>Modèles et sources</b><br>"

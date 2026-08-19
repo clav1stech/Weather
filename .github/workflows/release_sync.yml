@@ -1,23 +1,33 @@
-# Synchronise le tag mobile vX.Y et sa release GitHub avec le dépôt.
+# Synchronise une release GitHub avec le dépôt, depuis un environnement sans
+# accès direct à l'API releases.
 #
-# Convention du projet : un seul tag/release par version Y, le tag est MOBILE
-# (redéplacé sur le dernier commit de la ligne à chaque bump Z) et le corps de
-# la release s'enrichit au fil des Z. Le corps vit dans docs/releases/<tag>.md,
-# versionné avec le code - ce workflow ne fait que pousser le tag et recopier
-# ce fichier dans la release (créée si absente, mise à jour sinon). Déclenchement
-# manuel uniquement : le passage en « Latest » reste une décision explicite, jamais automatique.
+# Convention du projet : une release par ligne Y, portée par le tag vX.Y.0 et
+# enrichie d'une section à chaque bump Z ; les tags sont IMMUABLES. Le corps
+# vit dans docs/releases/vX.Y.md, versionné avec le code - ce workflow ne fait
+# que recopier ce fichier dans la release (créée si absente, mise à jour
+# sinon). Le déplacement d'un tag reste possible (force_tag) mais exceptionnel,
+# réservé à un tag PAS ENCORE distribué. Déclenchement manuel uniquement : le
+# passage en « Latest » reste une décision explicite, jamais automatique.
 name: release-sync
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag mobile à synchroniser (ex. v2.5)"
+        description: "Tag portant la release (ex. v3.1.0)"
         required: true
+      previous_tag:
+        description: "Tag portant actuellement la release, si elle doit être RECIBLÉE sur `tag`"
+        required: false
+        default: ""
       target_sha:
         description: "Commit cible du tag (vide = HEAD de la branche de déclenchement)"
         required: false
         default: ""
+      force_tag:
+        description: "Déplacer le tag sur target_sha (tag NON encore distribué uniquement)"
+        type: boolean
+        default: false
       make_latest:
         description: "Promouvoir la release en Latest (retire le statut Pre-release)"
         type: boolean
@@ -34,23 +44,42 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Déplacer le tag mobile
+      - name: Poser ou déplacer le tag
         run: |
           set -euo pipefail
           SHA="${{ inputs.target_sha }}"
           if [ -z "$SHA" ]; then SHA="$(git rev-parse HEAD)"; fi
-          git tag -f "${{ inputs.tag }}" "$SHA"
-          git push -f origin "refs/tags/${{ inputs.tag }}"
+          if git rev-parse -q --verify "refs/tags/${{ inputs.tag }}" >/dev/null; then
+            if [ "${{ inputs.force_tag }}" != "true" ]; then
+              echo "Tag existant, laissé intact (tags immuables)."
+              exit 0
+            fi
+            git tag -f "${{ inputs.tag }}" "$SHA"
+            git push -f origin "refs/tags/${{ inputs.tag }}"
+          else
+            git tag "${{ inputs.tag }}" "$SHA"
+            git push origin "refs/tags/${{ inputs.tag }}"
+          fi
 
       - name: Créer ou mettre à jour la release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          NOTES="docs/releases/${{ inputs.tag }}.md"
+          # Le corps est nommé d'après la LIGNE Y (docs/releases/vX.Y.md), le
+          # tag porteur restant vX.Y.0 ; l'ancien nommage par tag sert de repli.
+          LIGNE="$(echo "${{ inputs.tag }}" | sed -E 's/^(v[0-9]+\.[0-9]+).*/\1/')"
+          NOTES="docs/releases/$LIGNE.md"
+          if [ ! -f "$NOTES" ]; then NOTES="docs/releases/${{ inputs.tag }}.md"; fi
           if [ ! -f "$NOTES" ]; then
             echo "Fichier de notes absent : $NOTES" >&2
             exit 1
+          fi
+          # Une release par ligne Y : elle suit le dernier tag de la ligne, on
+          # la recible donc sur `tag` au lieu d'en créer une par Z.
+          PREV="${{ inputs.previous_tag }}"
+          if [ -n "$PREV" ] && gh release view "$PREV" >/dev/null 2>&1; then
+            gh release edit "$PREV" --tag "${{ inputs.tag }}"
           fi
           if gh release view "${{ inputs.tag }}" >/dev/null 2>&1; then
             ARGS=(--notes-file "$NOTES")
@@ -63,5 +92,5 @@ jobs:
             if [ "${{ inputs.make_latest }}" = "true" ]; then
               LATEST_ARGS=(--latest)
             fi
-            gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --notes-file "$NOTES" "${LATEST_ARGS[@]}"
+            gh release create "${{ inputs.tag }}" --title "$LIGNE" --notes-file "$NOTES" "${LATEST_ARGS[@]}"
           fi

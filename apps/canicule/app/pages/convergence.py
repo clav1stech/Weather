@@ -16,11 +16,12 @@ from app.data.presence import openmeteo_presence
 from app.data.runsets import (
     _convergence_runs, convergence_long, main_labels_expected_at)
 from app.ui.theme import _ink, _rgba
+from core.ui.components import empty_state, page_header
 from core.ui.plotly_theme import apply_layout
 
 
 def page_convergence(runs, sig):
-    st.title("Révisions & convergence des prévisions")
+    page_header("Révisions & convergence des prévisions", eyebrow="Analyse")
     st.caption(
         "Chaque nouveau calcul (run) corrige le précédent. Cette page montre **comment la "
         "prévision d'une même date a évolué d'un run à l'autre** : si elle se stabilise, "
@@ -134,7 +135,7 @@ def page_convergence(runs, sig):
                      x_title="Date prévue", y_title="Révision (°C)")
         st.plotly_chart(fig, width="stretch")
     else:
-        st.info("Pas de run antérieur comparable.")
+        empty_state("Pas de run antérieur comparable.")
 
     st.markdown("---")
 

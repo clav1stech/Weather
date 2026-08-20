@@ -19,14 +19,18 @@ from app.stats.climato import clim_normal, clim_params
 from app.stats.ensemble import daily_aggregate, daily_risk, super_ensemble
 from app.ui.components import complete_runs_caption
 from app.domains.heatwave.charts import (
-    calendrier_risques, confiance_chart, ligne_de_flottaison, tendance_heatmap)
+    cases_calendrier_risques, confiance_chart, ligne_de_flottaison, tendance_heatmap)
 from app.domains.heatwave.logic import (
     PROB_CANICULE_QUASI, PROB_RISQUE_MARQUE, PROB_RISQUE_MODERE, episode_chaleur,
     signal_synoptique, tendance_recente)
+from core.ui.components import (empty_state, kpi_card, page_header,
+                                risk_calendar, status_banner)
 
 
 def page_grand_public(runs, sig):
-    st.title("Indicateur de canicule")
+    page_header("Indicateur de canicule", eyebrow="Suivi",
+                sub="Ce que disent aujourd'hui les modèles d'ensemble sur la "
+                    "chaleur à venir sur Paris.")
     if runs.empty:
         st.warning("Base vide.")
         return
@@ -140,7 +144,9 @@ def page_grand_public(runs, sig):
     high_set = set(high_dates)
     today = pd.Timestamp(datetime.now().date())
     pic = jours.loc[jours["prob"].idxmax()]
-    c1, c2, c3 = st.columns(3)
+    # Statut = BANDEAU pleine largeur (le message principal de la page), puis
+    # deux cartes chiffrées. Le détail qui vivait en infobulle de st.metric
+    # devient visible : c'est lui qui nuance le mot du statut.
     if not high_dates:
         # Statut GRADUÉ (mêmes paliers que le calendrier) : « aucune canicule
         # probable » ne veut pas dire « rien à signaler » — un pic à 37 % ou une
@@ -149,47 +155,51 @@ def page_grand_public(runs, sig):
         chauds = avenir[avenir["Médiane"] >= seuil_chaleur]
         pic_av = avenir.loc[avenir["prob"].idxmax()] if not avenir.empty else None
         if pic_av is not None and pic_av["prob"] >= PROB_RISQUE_MARQUE:
-            c1.metric("Statut canicule", "Risque à surveiller",
-                      help=f"Pas de canicule probable (≥ {PROB_CANICULE_QUASI:.0%}) à ce "
-                           f"stade, mais le risque monte à {pic_av['prob']:.0%} "
-                           f"le {pic_av['date']:%a %d %b}.")
+            statut, niveau = "Risque à surveiller", 2
+            detail = (f"Pas de canicule probable (≥ {PROB_CANICULE_QUASI:.0%}) à ce "
+                      f"stade, mais le risque monte à {pic_av['prob']:.0%} "
+                      f"le {pic_av['date']:%a %d %b}.")
         elif pic_av is not None and pic_av["prob"] >= PROB_RISQUE_MODERE:
-            c1.metric("Statut canicule", "Signal faible",
-                      help=f"Quelques scénarios voient une canicule (jusqu'à "
-                           f"{pic_av['prob']:.0%} le {pic_av['date']:%a %d %b}) — "
-                           f"minoritaires, à suivre.")
+            statut, niveau = "Signal faible", 1
+            detail = (f"Quelques scénarios voient une canicule (jusqu'à "
+                      f"{pic_av['prob']:.0%} le {pic_av['date']:%a %d %b}) — "
+                      f"minoritaires, à suivre.")
         elif not chauds.empty:
-            c1.metric("Statut canicule", "Chaleur sans canicule",
-                      help=f"Pas de canicule en vue, mais de la chaleur notable "
-                           f"(≥ {seuil_chaleur:.0f} °C @850) est prévue autour du "
-                           f"{chauds.iloc[0]['date']:%a %d %b}.")
+            statut, niveau = "Chaleur sans canicule", 1
+            detail = (f"Pas de canicule en vue, mais de la chaleur notable "
+                      f"(≥ {seuil_chaleur:.0f} °C @850) est prévue autour du "
+                      f"{chauds.iloc[0]['date']:%a %d %b}.")
         else:
-            c1.metric("Statut canicule", "Aucune en vue")
+            statut, niveau, detail = "Aucune canicule en vue", 0, None
         # 2e carte adaptée au niveau d'alerte : jours à surveiller (risque marqué),
         # sinon jours de chaleur notable, sinon rien à quantifier.
         n_watch = int((avenir["prob"] >= PROB_RISQUE_MARQUE).sum()) if not avenir.empty else 0
         if n_watch:
-            c2.metric("Jours à surveiller", f"{n_watch} jour{'s' if n_watch > 1 else ''}",
-                      help=f"Jours avec au moins {PROB_RISQUE_MARQUE:.0%} de risque de canicule.")
+            carte2 = dict(label="Jours à surveiller",
+                          valeur=f"{n_watch} jour{'s' if n_watch > 1 else ''}",
+                          aide=f"Jours avec au moins {PROB_RISQUE_MARQUE:.0%} "
+                               "de risque de canicule.")
         elif not chauds.empty:
             n_ch = len(chauds)
-            c2.metric("Chaleur notable", f"{n_ch} jour{'s' if n_ch > 1 else ''}",
-                      help=f"Jours dont la médiane atteint {seuil_chaleur:.0f} °C @850 "
-                           f"(≈ 30 °C au sol), sans franchir le seuil canicule.")
+            carte2 = dict(label="Chaleur notable",
+                          valeur=f"{n_ch} jour{'s' if n_ch > 1 else ''}",
+                          aide=f"Jours dont la médiane atteint {seuil_chaleur:.0f} °C @850 "
+                               f"(≈ 30 °C au sol), sans franchir le seuil canicule.")
         else:
-            c2.metric("Durée prévue", "—")
+            carte2 = dict(label="Durée prévue", valeur="—")
     else:
         # Durée/fin d'épisode TOLÉRANTES aux creux chauds (episode_chaleur) :
         # un jour sous PROB_CANICULE_QUASI mais ≥ seuil_chaleur en médiane ne
-        # coupe pas l'épisode affiché. Le badge Statut, lui, reste strict
+        # coupe pas l'épisode affiché. Le statut, lui, reste strict
         # (aujourd'hui ∈ high_set), définition inchangée.
         if today in high_set:
             ep_cours = episode_chaleur(jours, seuil_chaleur, depuis=today)
-            c1.metric("Statut canicule", "En cours",
-                      help=f"Au moins jusqu'au {ep_cours['fin']:%a %d %b}")
+            statut, niveau = "Canicule en cours", 3
+            detail = f"Au moins jusqu'au {ep_cours['fin']:%a %d %b}."
         else:
             prochaine = next((d for d in high_dates if d > today), high_dates[0])
-            c1.metric("Prochaine canicule", prochaine.strftime("%a %d %b"))
+            statut, niveau = f"Prochaine canicule : {prochaine:%a %d %b}", 2
+            detail = None
         ep = episode_chaleur(jours, seuil_chaleur)
         if ep["jours_creux"]:
             aide = (f"Du {ep['debut']:%a %d %b} au {ep['fin']:%a %d %b} : "
@@ -202,10 +212,14 @@ def page_grand_public(runs, sig):
             aide = (f"Du {ep['debut']:%a %d %b} au {ep['fin']:%a %d %b}, "
                     f"jours consécutifs de canicule probable "
                     f"(≥ {PROB_CANICULE_QUASI:.0%}).")
-        c2.metric("Durée de l'épisode",
-                  f"{ep['duree']} jour{'s' if ep['duree'] > 1 else ''}", help=aide)
-    c3.metric("Pic de risque", f"{pic['prob'] * 100:.0f} %",
-              help=f"{pic['date']:%a %d %b} · médiane {pic['Médiane']:.1f} °C")
+        carte2 = dict(label="Durée de l'épisode",
+                      valeur=f"{ep['duree']} jour{'s' if ep['duree'] > 1 else ''}",
+                      aide=aide)
+    status_banner(statut, sub=detail, niveau=niveau)
+    c1, c2 = st.columns(2)
+    kpi_card(carte2.pop("label"), carte2.pop("valeur"), into=c1, **carte2)
+    kpi_card("Pic de risque", f"{pic['prob'] * 100:.0f} %", into=c2,
+             sub=f"{pic['date']:%a %d %b} · médiane {pic['Médiane']:.1f} °C")
 
     # ── Contexte atmosphérique (Z500) — appui discret du message T850 ─────────
     # Signal qualitatif uniquement : la valeur brute du géopotentiel ne parle
@@ -246,7 +260,7 @@ def page_grand_public(runs, sig):
                    f"{modeles}, sur ~7 jours). Le détail — min, modèle, fiabilité (un seul "
                    "modèle au-delà de ~4 jours, ou désaccord marqué entre eux) — s'affiche "
                    "au survol, ou d'un tap sur mobile.")
-    st.plotly_chart(calendrier_risques(jours, seuil_canicule, txtn), width="stretch")
+    risk_calendar(cases_calendrier_risques(jours, seuil_canicule, txtn))
 
     # ── Tendance récente des runs (vulgarisé, en un coup d'œil) ──────────────
     st.subheader("Les modèles changent-ils d'avis ?")
@@ -260,7 +274,7 @@ def page_grand_public(runs, sig):
     tend = tendance_recente(trend)
     tend = tend[tend["target"] >= today] if not tend.empty else tend
     if tend.empty:
-        st.info("Pas encore assez de runs en base pour mesurer une tendance.")
+        empty_state("Pas encore assez de runs en base pour mesurer une tendance.")
     else:
         # Verdict global qualitatif : moyenne des révisions sur la période à venir
         # (seuil plus bas que par jour : une dérive d'ensemble se voit sur la moyenne).
@@ -290,7 +304,7 @@ def page_grand_public(runs, sig):
     daily = daily_aggregate(syn)
     daily = daily[daily["date"] >= today] if daily is not None else None
     if daily is None or daily.empty:
-        st.info("Fourchettes journalières non calculables.")
+        empty_state("Fourchettes journalières non calculables.")
     else:
         st.caption("Couleur de la barre = accord des scénarios : vert = groupés (bonne "
                    "confiance) · jaune = partagés · orange = très dispersés (chiffre "

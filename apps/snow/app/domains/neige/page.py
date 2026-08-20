@@ -22,7 +22,7 @@ from . import logic, weather_type
 from .charts import (daily_snow_chart, lpn_chart,
                      hourly_vertical_weather_chart, weather_type_chart,
                      weather_type_strip_chart)
-from core.ui.components import kpi_card
+from core.ui.components import empty_state, kpi_card, page_header, status_banner
 
 
 def _kpi_prochaine_chute(daily):
@@ -57,17 +57,21 @@ def _hd_daily_table(summary):
     return table
 
 
-def _tuile_prochaine_neige(daily_sommet):
-    """Tuile héros : le prochain jour à neige (mot + cm + % conservés)."""
+def _bandeau_prochaine_neige(daily_sommet):
+    """Message principal de la page, en BANDEAU pleine largeur : le prochain
+    jour à neige au sommet (mot + cm + % conservés). La teinte du bandeau suit
+    le palier d'intensité (logic.niveau_neige) et rien d'autre — même règle que
+    la couleur des cases du calendrier canicule, qui ne porte qu'un signal."""
     chute = _kpi_prochaine_chute(daily_sommet)
-    if chute is not None:
-        palier = logic.palier_neige(chute["attendu"])
-        kpi_card("Prochaine neige (sommet)", f"{chute['date']:%a %d %b}",
-                 sub=f"{palier} · ~{chute['attendu']:.0f} cm · "
-                     f"{chute['prob'] * 100:.0f} %")
-    else:
-        kpi_card("Prochaine neige (sommet)", "aucune",
-                 sub="sur l'horizon visible")
+    if chute is None:
+        status_banner("Pas de chute de neige en vue au sommet", niveau=0,
+                      sub="sur l'horizon visible des runs à horizon plein")
+        return
+    palier = logic.palier_neige(chute["attendu"])
+    status_banner(f"Prochaine neige au sommet : {chute['date']:%a %d %b}",
+                  niveau=logic.niveau_neige(chute["attendu"]),
+                  sub=f"{palier} · ~{chute['attendu']:.0f} cm attendus · "
+                      f"{chute['prob'] * 100:.0f} % des scénarios")
 
 
 def _tuile_lpn(lpn):
@@ -100,15 +104,15 @@ def _tuile_changement_temps(weather, bascule):
 
 
 def page_neige(runs, sig):
-    st.title("Vue d'ensemble neige — Megève")
+    page_header("Vue d'ensemble neige — Megève", eyebrow="Suivi")
     sub, flags = latest_complete_run_sub(sig)
     if sub.empty:
-        st.info("Aucune donnée d'ensemble disponible pour l'instant — le "
+        empty_state("Aucune donnée d'ensemble disponible pour l'instant — le "
                 "pipeline n'a pas encore collecté de run complet.")
         return
     up = logic.upcoming(sub)
     if up.empty:
-        st.info("Plus d'échéance à venir dans les runs stockés — en attente "
+        empty_state("Plus d'échéance à venir dans les runs stockés — en attente "
                 "du prochain cycle.")
         return
     village = up[up["site"] == "village"]
@@ -128,12 +132,12 @@ def page_neige(runs, sig):
         village, regional_sub=pe_arome, arpege_sub=pe_arpege)
 
     # ------------------------------------- A. La réponse en une ligne --
-    c1, c2, c3 = st.columns(3)
+    # Le signal principal en bandeau, les deux lectures d'appui en cartes.
+    _bandeau_prochaine_neige(daily_sommet)
+    c1, c2 = st.columns(2)
     with c1:
-        _tuile_prochaine_neige(daily_sommet)
-    with c2:
         _tuile_lpn(lpn)
-    with c3:
+    with c2:
         _tuile_changement_temps(weather, bascule)
 
     cycles = ", ".join(f"{m} {run_label_text(rd)}"
@@ -199,7 +203,7 @@ def page_neige(runs, sig):
                        "directement les cumuls pluie/neige. Le premier et le dernier jour "
                        "peuvent être partiels car la fenêtre est glissante sur 48 h.")
     else:
-        st.info(profile.reason)
+        empty_state(profile.reason)
 
     # ------------------------------------ C. Les jours suivants (tendance) --
     st.subheader("Tendance à 15 jours")
@@ -286,7 +290,7 @@ def page_neige(runs, sig):
                            "le jour car leur précipitation est inconnue ; ils sont "
                            "exclus du dénominateur, jamais assimilés à du sec.")
     else:
-        st.info(weather.reason)
+        empty_state(weather.reason)
 
     # Quantités attendues au sommet (reste visible).
     st.markdown("**Cumuls de neige — Mont d'Arbois**")
@@ -306,12 +310,12 @@ def page_neige(runs, sig):
         traces = daily_sommet[(daily_sommet["prob"] > 0)
                               | (daily_sommet["attendu"] > 0)]
         if traces.empty:
-            st.info("Aucun signal de neige sur l'horizon visible.")
+            empty_state("Aucun signal de neige sur l'horizon visible.")
         else:
             douceur = (f"La température médiane au sommet est d'environ "
                         f"{t2m_sommet_48h:.0f} °C sur 48 h. "
                         if t2m_sommet_48h is not None else "")
-            st.info("Aucun signal de neige crédible sur l'horizon visible. "
+            empty_state("Aucun signal de neige crédible sur l'horizon visible. "
                     + douceur
                     + f"Les sorties isolées restent sous {traces['prob'].max() * 100:.1f} % "
                     f"de probabilité et {traces['attendu'].max():.2f} cm de cumul "

@@ -18,6 +18,7 @@ from apps.snow import snow_config as SC
 from ..data.db import run_label_text
 from ..data.runsets import mean_runs, mean_runs_all
 from ..ui.theme import _ink, _rgba
+from core.ui.components import empty_state, page_header
 from core.ui.plotly_theme import apply_layout
 
 N_RUNS = 8   # valeur initiale du nombre de runs mean superposés / comparés
@@ -180,7 +181,7 @@ def _revisions_table(piv):
 
 
 def page_convergence(runs, sig):
-    st.title("Convergence des runs — Megève")
+    page_header("Convergence des runs — Megève", eyebrow="Analyse")
     st.caption("Moyennes d'ensemble successives (flux mean, rétention longue) : "
                "plus les traits récents se superposent, plus le scénario est "
                "acquis. Les écarts inter-runs ci-dessous alimenteront le bilan "
@@ -204,7 +205,7 @@ def page_convergence(runs, sig):
         sub = mean_runs(sig, base, n_runs)
         piv = _runs_pivot(sub, site, col) if not sub.empty else None
     if piv is None:
-        st.info("Pas encore de runs mean exploitables pour cette variable / ce "
+        empty_state("Pas encore de runs mean exploitables pour cette variable / ce "
                 "modèle (cas normal : flux mean sans iso 0°, GEFS_MEAN sans "
                 "niveaux de pression, ou historique trop court).")
         return
@@ -243,7 +244,7 @@ def page_convergence(runs, sig):
                "les 15 jours lisibles.")
     delta = _revision_pivot(piv)
     if delta is None:
-        st.info("Pas assez d'échéances communes entre deux runs pour construire "
+        empty_state("Pas assez d'échéances communes entre deux runs pour construire "
                 "la heatmap.")
     else:
         st.plotly_chart(_revision_heatmap(delta, unit), use_container_width=True)

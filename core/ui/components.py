@@ -209,22 +209,36 @@ def empty_state(message, into=None):
 # --------------------------------------------------------------------------- #
 #  Tableaux
 # --------------------------------------------------------------------------- #
-def table_style(df, *, formats=None, gradient=None, cmap="RdYlBu_r",
+def table_style(df, *, formats=None, na_rep=None, gradient=None,
+                cmap="RdYlBu_r", gradient_axis=None, alerte=None,
                 precision=1, dark=None):
     """Styler pandas habillé aux couleurs du thème, pour que les tableaux ne
-    détonnent pas avec le reste (bordures, en-têtes, encre).
+    détonnent pas avec le reste (en-têtes, bordures, aplats d'alerte).
 
-    formats  : dict colonne → format, passé à Styler.format.
-    gradient : colonnes à colorer en dégradé (sous-ensemble numérique).
+    formats       : dict colonne → format, passé à Styler.format.
+    gradient      : colonnes à colorer en dégradé (sous-ensemble numérique).
+    gradient_axis : axe du dégradé (None = sur tout le bloc, cf. pandas).
+    alerte        : prédicat ligne → bool ; les lignes retenues prennent
+                    l'aplat `danger_soft` du thème. C'est le SEUL endroit où se
+                    définit une couleur d'alerte de tableau — une page ne code
+                    jamais une teinte en dur.
+
     Retourne un Styler : `st.dataframe` l'accepte directement, et la donnée
     sous-jacente reste intacte (les harnais la comparent telle quelle)."""
     pal = tokens(dark)
-    sty = df.style.format(formats, precision=precision) if formats \
-        else df.style.format(precision=precision)
+    sty = df.style.format(formats, precision=precision, na_rep=na_rep) if formats \
+        else df.style.format(precision=precision, na_rep=na_rep)
     if gradient:
         cols = [c for c in gradient if c in df.columns]
         if cols:
-            sty = sty.background_gradient(cmap=cmap, subset=cols)
+            sty = sty.background_gradient(cmap=cmap, subset=cols, axis=gradient_axis)
+            # Le dégradé impose ses propres fonds : l'encre est fixée pour
+            # rester lisible sur toute la rampe, quel que soit le thème.
+            sty = sty.set_properties(subset=cols, color="#1a2330")
+    if alerte is not None:
+        marque = f"background-color:{pal['danger_soft']};color:{pal['danger']}"
+        sty = sty.apply(
+            lambda row: [marque if alerte(row) else "" for _ in row], axis=1)
     return sty.set_table_styles([
         {"selector": "th", "props": [("background-color", pal["surface_alt"]),
                                      ("color", pal["ink_soft"]),

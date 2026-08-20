@@ -15,6 +15,7 @@ from apps.snow import snow_config as SC  # noqa: E402
 from apps.snow.app.data.quality import quality_report  # noqa: E402
 from apps.snow.app.pages.pipeline import (  # noqa: E402
     FETCH_ENTRIES, ROLLOVER_ENTRY, ROOT_DIR)
+from core.testing.apptest_nav import aller_a, page_rendue  # noqa: E402
 from core.ui.pipeline import run_script  # noqa: E402
 
 
@@ -86,14 +87,13 @@ def test_snow_operational_pages_render_without_exception(monkeypatch):
     monkeypatch.setenv("WEATHER_LOCAL", "1")
     at = AppTest.from_file(os.path.join(_ROOT, "snow_app.py"), default_timeout=60)
     at.run()
-    options = at.sidebar.radio[0].options
-    assert "Convergence des runs" in options
-    assert "Contrôle des runs" in options
-    assert "Lancer le pipeline" in options
-    for page in ("Convergence des runs", "Contrôle des runs", "Lancer le pipeline"):
-        at.sidebar.radio[0].set_value(page).run()
+    for page in ("Convergence des runs", "Contrôle des runs",
+                 "Lancer le pipeline", "Maille fine Météo-France"):
+        aller_a(at, page).run()
         assert not at.exception, (page, at.exception)
-    assert "Maille fine Météo-France" in options
+        # L'en-tête rendu prouve que la navigation a bien atteint la page
+        # visée (et pas la page par défaut).
+        assert page_rendue(at, page.split(" — ")[0]), page
 
 
 def test_neige_overview_and_explore_pages_render_without_exception(monkeypatch):
@@ -105,5 +105,5 @@ def test_neige_overview_and_explore_pages_render_without_exception(monkeypatch):
     at.run()
     for page in ("Vue d'ensemble neige", "Explorer un run",
                  "Maille fine Météo-France"):
-        at.sidebar.radio[0].set_value(page).run()
+        aller_a(at, page).run()
         assert not at.exception, (page, at.exception)

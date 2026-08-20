@@ -23,6 +23,7 @@ from apps.snow.app.runtime import IS_LOCAL
 from apps.snow.app.services import github_dispatch, pipeline_auth
 from core.services import cooldown
 from core.ui.pipeline import execute, render_execution_results
+from core.ui.components import page_header
 
 ROOT_DIR = os.path.dirname(os.path.dirname(SC.SNOW_DIR))
 RESULTS_KEY = "snow_pipeline_results"
@@ -103,7 +104,7 @@ def _render_remote_launcher():
 
 
 def page_run(runs, sig):
-    st.title("Lancer le pipeline neige")
+    page_header("Lancer le pipeline neige", eyebrow="Données")
     if not IS_LOCAL:
         _render_remote_launcher()
         return

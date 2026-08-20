@@ -20,10 +20,11 @@ from app.stats.climato import clim_normal
 from app.stats.ensemble import daily_risk, multimodel_cutoff, super_ensemble, var_median
 from app.ui.charts import fan_chart, models_median_chart, z500_median_chart
 from app.ui.components import _kpi_card, complete_runs_caption
+from core.ui.components import page_header
 
 
 def page_overview(runs, sig):
-    st.title("Dashboard Météo — Prévisions d'ensemble (Paris)")
+    page_header("Dashboard Météo — Prévisions d'ensemble (Paris)", eyebrow="Analyse")
     if runs.empty:
         st.warning("Base vide. Lancez le pipeline `Forecast.py` pour la remplir.")
         return
@@ -134,41 +135,36 @@ def page_overview(runs, sig):
     anom = (win["Médiane"] - clim_normal(win["valid_time"])).mean()
 
     r1c1, r1c2, r1c3 = st.columns(3)
-    r1c1.markdown(_kpi_card("Prochaine échéance (médiane)", f"{first['Médiane']:.1f} °C",
-                            "Scénario central pour la première échéance à venir",
-                            value_point=first["Médiane"], valid_time=first["valid_time"],
-                            sub=f"{first['valid_time']:%a %d %b %Hh}"),
-                  unsafe_allow_html=True)
-    r1c2.markdown(_kpi_card("Pic de chaleur (médiane)", f"{peak['Médiane']:.1f} °C",
-                            "Maximum du scénario central ; P90 = scénario chaud "
-                            "plausible à la même échéance",
-                            value_point=peak["Médiane"], valid_time=peak["valid_time"],
-                            sub=f"{peak['valid_time']:%a %d %b %Hh} · P90 {peak['P90']:.1f} °C"),
-                  unsafe_allow_html=True)
-    r1c3.markdown(_kpi_card("Tendance vs runs précédents", delta_txt,
-                            "Δ moyen de la médiane du super-ensemble vs le run "
-                            "précédent de CHAQUE modèle (échéances communes à venir)",
-                            sub=delta_sub),
-                  unsafe_allow_html=True)
+    _kpi_card("Prochaine échéance (médiane)", f"{first['Médiane']:.1f} °C",
+              "Scénario central pour la première échéance à venir",
+              value_point=first["Médiane"], valid_time=first["valid_time"],
+              sub=f"{first['valid_time']:%a %d %b %Hh}", into=r1c1)
+    _kpi_card("Pic de chaleur (médiane)", f"{peak['Médiane']:.1f} °C",
+              "Maximum du scénario central ; P90 = scénario chaud "
+              "plausible à la même échéance",
+              value_point=peak["Médiane"], valid_time=peak["valid_time"],
+              sub=f"{peak['valid_time']:%a %d %b %Hh} · P90 {peak['P90']:.1f} °C",
+              into=r1c2)
+    _kpi_card("Tendance vs runs précédents", delta_txt,
+              "Δ moyen de la médiane du super-ensemble vs le run "
+              "précédent de CHAQUE modèle (échéances communes à venir)",
+              sub=delta_sub, into=r1c3)
 
     r2c1, r2c2, r2c3 = st.columns(3)
-    r2c1.markdown(_kpi_card("Horizon de confiance", conf_txt,
-                            f"Première échéance où le spread P90−P10 du super-ensemble "
-                            f"dépasse {C.KPI_SPREAD_CONF_MAX_C:.0f} °C",
-                            sub=conf_sub),
-                  unsafe_allow_html=True)
-    r2c2.markdown(_kpi_card("Jours à risque canicule", risk_txt,
-                            f"Jours où P(≥ {C.SEUIL_CANICULE_850:.0f} °C) ≥ "
-                            f"{C.KPI_RISK_PROB_MIN:.0%} OU dépassement attendu ≥ "
-                            f"{C.KPI_RISK_EXCESS_MIN_C:.1f} °C (probabilité × sévérité)",
-                            sub=risk_sub),
-                  unsafe_allow_html=True)
-    r2c3.markdown(_kpi_card(f"Anomalie {C.KPI_ANOMALIE_FENETRE_J} j vs normale",
-                            f"{anom:+.1f} °C",
-                            f"Écart moyen de la médiane à la normale climatique sur "
-                            f"les {C.KPI_ANOMALIE_FENETRE_J} prochains jours",
-                            sub="médiane du super-ensemble vs normale saisonnière"),
-                  unsafe_allow_html=True)
+    _kpi_card("Horizon de confiance", conf_txt,
+              f"Première échéance où le spread P90−P10 du super-ensemble "
+              f"dépasse {C.KPI_SPREAD_CONF_MAX_C:.0f} °C",
+              sub=conf_sub, into=r2c1)
+    _kpi_card("Jours à risque canicule", risk_txt,
+              f"Jours où P(≥ {C.SEUIL_CANICULE_850:.0f} °C) ≥ "
+              f"{C.KPI_RISK_PROB_MIN:.0%} OU dépassement attendu ≥ "
+              f"{C.KPI_RISK_EXCESS_MIN_C:.1f} °C (probabilité × sévérité)",
+              sub=risk_sub, into=r2c2)
+    _kpi_card(f"Anomalie {C.KPI_ANOMALIE_FENETRE_J} j vs normale",
+              f"{anom:+.1f} °C",
+              f"Écart moyen de la médiane à la normale climatique sur "
+              f"les {C.KPI_ANOMALIE_FENETRE_J} prochains jours",
+              sub="médiane du super-ensemble vs normale saisonnière", into=r2c3)
 
     st.caption("**Panache de dispersion** : ligne rouge = médiane ; bandes = part "
                "croissante des scénarios (Min–Max, P10–P90, P25–P75).")

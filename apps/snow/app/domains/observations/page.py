@@ -17,7 +17,7 @@ from ...data.observations import (daily_txtn_obs, latest_obs, obs_signature,
                                   obs_window)
 from . import logic
 from .charts import stations_chart
-from core.ui.components import kpi_card
+from core.ui.components import empty_state, kpi_card, page_header
 
 
 def _carte_station(col, station, obs):
@@ -44,11 +44,11 @@ def _carte_station(col, station, obs):
 
 
 def page_observations(runs, sig):
-    st.title("Observations — Alpes du Nord")
+    page_header("Observations — Alpes du Nord", eyebrow="Suivi")
     obs_sig = obs_signature()
     latest = latest_obs(obs_sig)
     if latest.empty:
-        st.info("Aucune observation en base pour l'instant — le flux "
+        empty_state("Aucune observation en base pour l'instant — le flux "
                 "DPPaquetObs n'a pas encore collecté (ou la clé API n'est pas "
                 "configurée côté pipeline).")
         return

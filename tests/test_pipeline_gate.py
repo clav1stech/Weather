@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(_ROOT, "apps", "canicule"))
 import pytest  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
+from core.testing.apptest_nav import aller_a, page_rendue  # noqa: E402
 from core.ui import auth  # noqa: E402
 
 APP = os.path.join(_ROOT, "meteo_app.py")
@@ -63,7 +64,7 @@ def _page(secrets, local):
     with patch("streamlit.secrets", secrets), \
             patch("app.pages.pipeline.IS_LOCAL", local):
         at.run()
-        at.sidebar.radio[0].set_value("Lancer le pipeline").run()
+        aller_a(at, "Lancer le pipeline").run()
     return at
 
 
@@ -74,7 +75,7 @@ def _labels(at):
 def test_page_visible_en_ligne():
     """La page est proposée dans la navigation même hors local."""
     at = _page({}, local=False)
-    assert "Lancer le pipeline" in at.sidebar.radio[0].options
+    assert page_rendue(at, "Lancer le pipeline")
     assert not at.exception
 
 
@@ -134,13 +135,13 @@ def _page_snow(secrets, local):
     with patch("streamlit.secrets", secrets), \
             patch("apps.snow.app.pages.pipeline.IS_LOCAL", local):
         at.run()
-        at.sidebar.radio[0].set_value("Lancer le pipeline").run()
+        aller_a(at, "Lancer le pipeline").run()
     return at
 
 
 def test_snow_page_visible_en_ligne():
     at = _page_snow({}, local=False)
-    assert "Lancer le pipeline" in at.sidebar.radio[0].options
+    assert page_rendue(at, "Lancer le pipeline")
     assert not at.exception
 
 

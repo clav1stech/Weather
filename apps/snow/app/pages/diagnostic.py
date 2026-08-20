@@ -8,6 +8,7 @@ import streamlit as st
 from apps.snow import snow_config as SC
 from apps.snow.app.data.db import load_db
 from apps.snow.app.data.quality import quality_report
+from core.ui.components import page_header, table_style
 from core.ui.plotly_theme import apply_layout
 
 
@@ -41,7 +42,7 @@ def _quality_heatmap(history):
 
 
 def page_diagnostic(runs, sig):
-    st.title("Contrôle des runs neige")
+    page_header("Contrôle des runs neige", eyebrow="Données")
     st.caption("État opérationnel des flux membres et mean/spread : fraîcheur "
                "empirique, portée contiguë, complétude et cycles attendus. "
                "Les calculs emploient les mêmes fonctions et seuils que le "
@@ -70,12 +71,11 @@ def page_diagnostic(runs, sig):
     display = summary.copy()
     for col in ("Dernier run UTC", "Dernier cycle attendu UTC"):
         display[col] = pd.to_datetime(display[col]).dt.strftime("%d/%m %HZ")
-    styler = display.style.apply(
-        lambda row: ["background-color:#fdecea;color:#611a15"
-                     if row["Publication"] == "en retard"
-                     or row["Complétude"] in ("partiel", "absent") else ""
-                     for _ in row], axis=1
-    ).format({"Âge (h)": "{:.1f}", "Portée (h)": "{:.0f}"}, na_rep="—")
+    styler = table_style(
+        display, na_rep="—",
+        formats={"Âge (h)": "{:.1f}", "Portée (h)": "{:.0f}"},
+        alerte=lambda row: (row["Publication"] == "en retard"
+                            or row["Complétude"] in ("partiel", "absent")))
     st.dataframe(styler, use_container_width=True, hide_index=True)
 
     st.markdown("---")

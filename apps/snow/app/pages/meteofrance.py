@@ -24,6 +24,7 @@ from ..data.db import (latest_mf_local_deterministic, latest_mf_local_members,
                        mf_regional_signature, run_label_text)
 from ..domains.neige import weather_type
 from ..domains.neige.charts import mf_meteogram, mf_member_box, ptype_strip
+from core.ui.components import empty_state, page_header
 
 _RATIO = weather_type.RATIO_NEIGE_CM_PAR_MM
 _PALIERS = SC.PALIERS_NEIGE_CM   # [1, 5, 20] cm
@@ -128,7 +129,7 @@ def _site_selector(key):
 
 
 def page_meteofrance(runs, sig):
-    st.title("Maille fine Météo-France — Megève")
+    page_header("Maille fine Météo-France — Megève", eyebrow="Analyse")
     st.caption("Sources PNT Météo-France en lecture directe : haute résolution "
                "court terme (AROME-PI/IFS) et dimension probabiliste locale "
                "(PE-AROME/PE-ARPEGE). Complément des vues combinées, jamais "
@@ -137,7 +138,7 @@ def page_meteofrance(runs, sig):
     mf_sig = mf_local_signature()
     local = load_mf_local(mf_sig)
     if local is None or local.empty:
-        st.info("Aucune donnée Météo-France PNT en base pour l'instant.")
+        empty_state("Aucune donnée Météo-France PNT en base pour l'instant.")
         return
 
     # ------------------------------------- A. Météogramme déterministe --
@@ -146,7 +147,7 @@ def page_meteofrance(runs, sig):
                   if not local[(local["model"] == m)
                                & (local["kind"] == "deterministic")].empty]
     if not det_models:
-        st.info("Aucun run déterministe AROME-PI/IFS disponible.")
+        empty_state("Aucun run déterministe AROME-PI/IFS disponible.")
     else:
         model = st.radio("Modèle", det_models, horizontal=True, key="mf_det_model")
         site = _site_selector("mf_det_site")
@@ -159,7 +160,7 @@ def page_meteofrance(runs, sig):
                        "horaires à venir. Pluie et neige en mm équivalent eau.")
             st.plotly_chart(fig, width="stretch")
         else:
-            st.info("Pas d'échéance à venir dans le dernier run de ce modèle.")
+            empty_state("Pas d'échéance à venir dans le dernier run de ce modèle.")
 
     # ------------------------------- B. Dispersion des ensembles régionaux --
     st.subheader("Ensembles régionaux — dispersion des membres")
@@ -194,7 +195,7 @@ def page_meteofrance(runs, sig):
         if not table.empty:
             st.dataframe(table, width="stretch", hide_index=True)
     if not any_regional:
-        st.info("Aucun ensemble régional Météo-France n'est actuellement en base.")
+        empty_state("Aucun ensemble régional Météo-France n'est actuellement en base.")
 
     # ------------------------------------------- C. Frise type de précip --
     st.subheader("Type de précipitation AROME-PI")
@@ -207,5 +208,5 @@ def page_meteofrance(runs, sig):
                    "4.201, à valider in situ sur un premier épisode précipitant) "
                    "— le code brut est lisible au survol.")
     else:
-        st.info("Type de précipitation AROME-PI indisponible (aucun run récent "
+        empty_state("Type de précipitation AROME-PI indisponible (aucun run récent "
                 "ou aucune échéance à venir).")

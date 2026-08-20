@@ -22,6 +22,7 @@ from ..data.runsets import latest_complete_run_sub, latest_run_sub, previous_run
 from ..domains.neige import logic
 from ..domains.neige.charts import fan_chart, medians_chart
 from core.stats.ensemble import model_data, super_ensemble
+from core.ui.components import empty_state, page_header
 
 # Variables inspectables par site (libellé, unité) — mêmes colonnes que la
 # config ; une variable absente du pool se dégrade en silence.
@@ -84,9 +85,9 @@ def _export_table(sub_site, prev_site, var):
 
 
 def page_explore(runs, sig):
-    st.title("Explorer un run — Megève")
+    page_header("Explorer un run — Megève", eyebrow="Analyse")
     if runs.empty:
-        st.info("Aucun run en base pour l'instant.")
+        empty_state("Aucun run en base pour l'instant.")
         return
 
     options = ["Dernier run (le plus frais)", "Dernier run à horizon plein"] \
@@ -94,7 +95,7 @@ def page_explore(runs, sig):
     choice = st.selectbox("Run à explorer", options)
     sub = _run_pool(sig, runs, choice)
     if sub.empty:
-        st.info("Pool vide pour cette sélection.")
+        empty_state("Pool vide pour cette sélection.")
         return
     cycles = ", ".join(f"{m} {run_label_text(rd)}"
                        for m, rd in sub.groupby("model")["run_date"].max().items())
@@ -110,7 +111,7 @@ def page_explore(runs, sig):
     var_options = [(col, label, unit) for col, label, unit in _VARS[site_code]
                    if sub_site[col].notna().any()]
     if not var_options:
-        st.info("Aucune variable exploitable à ce point dans ce pool.")
+        empty_state("Aucune variable exploitable à ce point dans ce pool.")
         return
     col, label, unit = var_options[st.selectbox(
         "Variable", range(len(var_options)),

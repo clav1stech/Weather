@@ -47,6 +47,7 @@ FONT_MONO = '"SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospa
 #                                neige en intensité d'épisode
 #   warm / cold / neutral      : signe d'une anomalie (au-dessus, en dessous, nul)
 #   ok / warn / danger         : statut d'exploitation (données fraîches, partielles, absentes)
+#   danger_soft                : aplat d'alerte (fond d'une ligne de tableau signalée)
 _LIGHT = {
     "bg": "#F7F8FA",
     "surface": "#FFFFFF",
@@ -68,6 +69,7 @@ _LIGHT = {
     "ok": "#1E8449",
     "warn": "#B9770E",
     "danger": "#C0392B",
+    "danger_soft": "rgba(192,57,43,0.10)",
     "shadow": "0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.10)",
 }
 
@@ -92,6 +94,7 @@ _DARK = {
     "ok": "#52BE80",
     "warn": "#E5A93C",
     "danger": "#E8776F",
+    "danger_soft": "rgba(232,119,111,0.16)",
     "shadow": "0 1px 2px rgba(0,0,0,0.30), 0 1px 3px rgba(0,0,0,0.40)",
 }
 

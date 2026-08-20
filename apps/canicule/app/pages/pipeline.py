@@ -29,6 +29,7 @@ from app.data.legacy_import import import_legacy_run, legacy_import_candidates
 from app.data.presence import legacy_signature
 from app.runtime import IS_LOCAL
 from app.services import github_dispatch, pipeline_auth
+from core.ui.components import empty_state, page_header, table_style
 from core.ui.pipeline import (
     execute as _core_execute,
     render_execution_results,
@@ -220,7 +221,7 @@ def _render_cross_check():
     log_sig = cross_check_log_signature()
     log = load_cross_check_log(log_sig)
     if log.empty:
-        st.info("Aucun contrôle croisé enregistré pour l'instant. Lance le double run à un "
+        empty_state("Aucun contrôle croisé enregistré pour l'instant. Lance le double run à un "
                "créneau favorable (10:15 ou 22:15 UTC) pour en générer un.")
     else:
         latest_check = log["checked_at"].max()
@@ -231,8 +232,9 @@ def _render_cross_check():
             n=("diff", "size"), mean_abs=("diff", lambda s: s.abs().mean()),
             max_abs=("diff", lambda s: s.abs().max()), n_flag=("flag", "sum")).reset_index()
         summary.columns = ["Modèle", "Métrique", "N", "Écart moyen abs.", "Écart max abs.", "Flags"]
-        st.dataframe(summary.style.format({"Écart moyen abs.": "{:.2f}", "Écart max abs.": "{:.2f}"}),
-                    width="stretch", hide_index=True)
+        st.dataframe(table_style(summary, formats={"Écart moyen abs.": "{:.2f}",
+                                                   "Écart max abs.": "{:.2f}"}),
+                     width="stretch", hide_index=True)
 
         if int(latest["flag"].sum()):
             st.warning(f"{int(latest['flag'].sum())} échéance(s) au-delà du seuil sur le "
@@ -243,11 +245,10 @@ def _render_cross_check():
             # Rétro-compat : un log antérieur au format lead-aware n'a ni lead_h ni tol.
             show = latest[[c for c in detail_cols if c in latest.columns]].sort_values(
                 "diff", key=lambda s: s.abs(), ascending=False)
-            styler = show.style.apply(
-                lambda r: ["background-color:#fdecea;color:#611a15" if r["flag"] else ""
-                           for _ in r], axis=1
-            ).format({"legacy_value": "{:.1f}", "openmeteo_value": "{:.1f}",
-                      "diff": "{:+.2f}", "tol": "{:.2f}"})
+            styler = table_style(
+                show, alerte=lambda r: bool(r["flag"]),
+                formats={"legacy_value": "{:.1f}", "openmeteo_value": "{:.1f}",
+                         "diff": "{:+.2f}", "tol": "{:.2f}"})
             st.dataframe(styler, width="stretch", height=400, hide_index=True)
 
         with st.expander("Historique complet (tous contrôles)"):
@@ -265,7 +266,7 @@ def page_run(runs, sig):
     collecte passe par les scripts en local et par le job CI (mot de passe) en
     ligne ; l'import legacy, seule écriture directe dans le parquet, reste
     strictement local."""
-    st.title("Lancer le pipeline")
+    page_header("Lancer le pipeline", eyebrow="Données")
 
     now_utc = datetime.now(ZoneInfo("UTC"))
     missing = run_dual._missing_legacy_slots(now_utc)

@@ -31,7 +31,7 @@ from app.domains.observations.charts import (
 from app.domains.observations.logic import (
     OBS_CARTE_ALERTE_H, ecart_icu_series, obs_est_perimee,
     tableau_ecarts_convergence, verdict_icu_nocturne, vintage_comparison_series)
-from core.ui.components import empty_state, kpi_card
+from core.ui.components import empty_state, kpi_card, page_header
 
 
 def _cols_cartes():
@@ -201,7 +201,7 @@ def _section_convergence_prevision():
                "limite stable — l'observé n'est jamais lissé.")
     vdf = load_vintages(vintages_signature())
     if vdf.empty:
-        st.info("Le flux de prévision 15 min vient d'être mis en place — "
+        empty_state("Le flux de prévision 15 min vient d'être mis en place — "
                 "l'historique des révisions se constitue (il faut ~24 h de recul "
                 "pour comparer tous les reculs). Revenez dans quelques heures.")
         return
@@ -222,7 +222,7 @@ def _section_convergence_prevision():
 
     series = vintage_comparison_series(vdf, obs_ref if not obs_ref.empty else None)
     if series.empty:
-        st.info("Pas encore assez de recul dans l'historique de prévision pour "
+        empty_state("Pas encore assez de recul dans l'historique de prévision pour "
                 "tracer la convergence — revenez dans quelques heures.")
         return
     # Observé restreint à la fenêtre couverte par les séries de prévision.
@@ -262,7 +262,7 @@ def _section_convergence_prevision():
 
 
 def page_observations(runs, sig):
-    st.title("Observations en direct")
+    page_header("Observations en direct", eyebrow="Suivi")
     obs_sig = obs_signature()
     base = load_obs(obs_sig)
 
@@ -289,7 +289,7 @@ def page_observations(runs, sig):
             "**température**, seule variable mesurée partout.")
 
     if base.empty:
-        st.info("La base d'observations n'est pas encore alimentée — le flux "
+        empty_state("La base d'observations n'est pas encore alimentée — le flux "
                 "démarre avec la première exécution du pipeline "
                 "(fetch_observations.py, cron horaire). Revenez dans une heure.")
         return
@@ -342,7 +342,7 @@ def page_observations(runs, sig):
                          horizontal=True, label_visibility="collapsed")
     dfw = obs_window(obs_sig, fenetre_h)
     if dfw.empty or dfw["t"].notna().sum() == 0:
-        st.info("Pas assez d'observations sur la fenêtre pour comparer les stations.")
+        empty_state("Pas assez d'observations sur la fenêtre pour comparer les stations.")
     else:
         # Le flux horaire consolidé accuse structurellement quelques heures de
         # retard sur le temps réel (délai de publication du paquet horaire côté

@@ -17,10 +17,11 @@ from app.ui.charts import (
     divergence_chart, fan_chart, models_median_chart, spaghetti_chart, spread_chart,
     z500_median_chart)
 from app.ui.components import complete_runs_caption
+from core.ui.components import empty_state, page_header, table_style
 
 
 def page_explore(runs, sig):
-    st.title("Explorer une prévision (run)")
+    page_header("Explorer une prévision (run)", eyebrow="Analyse")
     st.caption(
         "Vue détaillée d'un run sous plusieurs angles : panache de dispersion, "
         "scénarios individuels, comparaison des modèles, divergence, incertitude et "
@@ -68,7 +69,7 @@ def page_explore(runs, sig):
         if syn is not None and not syn.empty:
             st.plotly_chart(fan_chart(syn, f"Super-ensemble — {run_label}"), width="stretch")
         else:
-            st.info("Aucune donnée exploitable dans ce run.")
+            empty_state("Aucune donnée exploitable dans ce run.")
 
     with tab_spag:
         if present:
@@ -78,7 +79,7 @@ def page_explore(runs, sig):
                 stats, members, det = loaded
                 st.plotly_chart(spaghetti_chart(members, stats, det, model), width="stretch")
         else:
-            st.info("Aucun modèle dans ce run.")
+            empty_state("Aucun modèle dans ce run.")
 
     with tab_cmp:
         if present:
@@ -89,13 +90,13 @@ def page_explore(runs, sig):
                            "complète (tous les modèles du run présents).")
                 st.plotly_chart(divergence_chart(div, cutoff), width="stretch")
         else:
-            st.info("Comparaison indisponible.")
+            empty_state("Comparaison indisponible.")
 
     with tab_unc:
         if syn is not None and not syn.empty:
             st.plotly_chart(spread_chart(syn), width="stretch")
         else:
-            st.info("Pas de données d'incertitude.")
+            empty_state("Pas de données d'incertitude.")
 
     with tab_z500:
         # Vue technique : médiane d'ensemble seule (jamais de spaghetti Z500) —
@@ -104,7 +105,7 @@ def page_explore(runs, sig):
         # de z500 et runs importés du legacy (Météociel ne publie pas Z500).
         med = var_median(sub, "z500")
         if med is None or med.empty:
-            st.info("Géopotentiel 500 hPa indisponible pour ce run (donnée collectée "
+            empty_state("Géopotentiel 500 hPa indisponible pour ce run (donnée collectée "
                     "uniquement par le pipeline Open-Meteo, à partir de son ajout à "
                     "la base — jamais présente sur les runs importés du legacy).")
         else:
@@ -141,13 +142,10 @@ def page_explore(runs, sig):
             num_cols = raw.select_dtypes(include="number").columns
             raw[num_cols] = raw[num_cols].round(2)
         if raw is None or raw.empty:
-            st.info("Table indisponible.")
+            empty_state("Table indisponible.")
         else:
             num_cols = raw.select_dtypes(include="number").columns
-            styler = (raw.style.background_gradient(cmap="RdYlBu_r", subset=list(num_cols),
-                                                    axis=None)
-                      .set_properties(subset=list(num_cols), color="#1a2330")
-                      .format(precision=1)
+            styler = (table_style(raw, gradient=list(num_cols))
                       if len(num_cols) else raw)
             st.dataframe(styler, width="stretch", height=520)
             st.download_button("Télécharger (CSV)",

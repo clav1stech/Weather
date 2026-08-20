@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Graphiques propres au domaine canicule : ligne de flottaison (seuils +
-normale), calendrier du risque, heatmap de tendance, barres de confiance."""
+"""Rendus propres au domaine canicule : ligne de flottaison (seuils +
+normale), cases du calendrier du risque, heatmap de tendance, barres de
+confiance. Le calendrier n'est plus une figure Plotly mais une grille de
+cartes (cf. cases_calendrier_risques)."""
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -8,8 +10,8 @@ import plotly.graph_objects as go
 from app.stats.climato import clim_normal
 from app.ui.theme import _ink, _rgba
 from app.domains.heatwave.logic import (
-    TREND_STRONG_C, _canicule_label, _confiance_label, _tendance_label,
-    incertitude_txtn)
+    PROB_CANICULE_QUASI, PROB_RISQUE_MARQUE, PROB_RISQUE_MODERE, TREND_STRONG_C,
+    _canicule_label, _confiance_label, _tendance_label, incertitude_txtn)
 from core.ui.plotly_theme import apply_layout
 
 
@@ -39,66 +41,62 @@ def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
                         y_title="Température à 850 hPa (°C)")
 
 
-CANICULE_SCALE = [
-    [0.00, "#2ECC71"], [0.10, "#A9DC76"], [0.25, "#F1C40F"],
-    [0.40, "#E67E22"], [0.50, "#E74C3C"], [1.00, "#C0392B"],
-]
+def _niveau_risque(prob):
+    """Probabilité de canicule → niveau 0-3 de l'échelle de risque partagée
+    (core/ui/tokens). Mêmes paliers que les libellés de `_canicule_label` : la
+    couleur et le mot dits d'une case ne peuvent pas diverger."""
+    if prob >= PROB_CANICULE_QUASI:
+        return 3
+    if prob >= PROB_RISQUE_MARQUE:
+        return 2
+    if prob >= PROB_RISQUE_MODERE:
+        return 1
+    return 0
 
 
-def calendrier_risques(jours, seuil, txtn=None):
-    """Calendrier du risque : couleur pilotée par la probabilité T850 UNIQUEMENT.
-    `txtn` (DataFrame _TXTN_COLS, cf. app/data/t2m.py) est un simple appui
-    d'affichage : la Tx haute résolution en texte dans les cases couvertes
-    (J → J+6), rien sur les autres. La case est volontairement MINIMALE —
-    couleur du risque + Tx seule — pour rester lisible sur un viewport mobile
-    (~375 px : ~16 cases de ~20 px, toute info supplémentaire se superpose) ;
-    le détail (Tn, modèle, fiabilité — source unique au-delà de J+3 ou forte
-    divergence MF/ICON) vit au survol/tap. txtn None/vide → figure strictement
-    identique à l'affichage sans ce flux (absence = cas normal)."""
-    texts = [
-        f"{d:%a %d %b}<br>{_canicule_label(p)}"
-        f"<br>Médiane : {m:.1f} °C · P90 : {p90:.1f} °C"
-        f"<br>P(≥ {seuil:.0f} °C) : {p * 100:.0f} %"
-        for d, p, m, p90 in zip(jours["date"], jours["prob"], jours["Médiane"], jours["P90"])
-    ]
-    heat = dict(
-        x=jours["date"], y=["Risque canicule"], z=[jours["prob"].tolist()],
-        colorscale=CANICULE_SCALE, zmin=0.0, zmax=1.0, xgap=3, ygap=0,
-        text=[texts], hovertemplate="%{text}<extra></extra>",
-        colorbar=dict(title="P(canicule)", tickformat=".0%", thickness=12, len=0.9))
-    if txtn is not None and not txtn.empty:
-        by_day = {pd.Timestamp(r.date).normalize(): r for r in txtn.itertuples()}
-        cells, hovers = [], []
-        for d, hover in zip(jours["date"], texts):
-            r = by_day.get(pd.Timestamp(d).normalize())
-            if r is None:
-                cells.append("")
-                hovers.append(hover)
-                continue
-            _, _, fiab_phrase = incertitude_txtn(
+def cases_calendrier_risques(jours, seuil, txtn=None):
+    """Cases du calendrier du risque, prêtes pour core/ui/components.risk_calendar.
+
+    La COULEUR d'une case est pilotée par la probabilité T850 UNIQUEMENT
+    (invariant). `txtn` (DataFrame _TXTN_COLS, cf. app/data/t2m.py) est un
+    simple appui d'affichage : la Tx haute résolution en chiffre dans les cases
+    couvertes (J → J+6), rien sur les autres — jamais un critère de risque, et
+    la fiabilité passe par un glyphe (`≈`) plus l'infobulle, jamais par la
+    teinte. txtn None/vide → calendrier strictement identique à l'affichage
+    sans ce flux (absence = cas normal).
+
+    Grille de cartes plutôt qu'une heatmap d'une seule ligne : les cases se
+    replient en écran étroit au lieu de se comprimer à ~20 px, ce qui laisse
+    enfin la place d'écrire une valeur ET un libellé dans chacune."""
+    by_day = ({pd.Timestamp(r.date).normalize(): r for r in txtn.itertuples()}
+              if txtn is not None and not txtn.empty else {})
+    cases = []
+    for d, prob, med, p90 in zip(jours["date"], jours["prob"],
+                                 jours["Médiane"], jours["P90"]):
+        aide = (f"{d:%a %d %b} — {_canicule_label(prob)}"
+                f" · Médiane {med:.1f} °C · P90 {p90:.1f} °C"
+                f" · P(≥ {seuil:.0f} °C) {prob * 100:.0f} %")
+        case = {"date": f"{d:%a %d %b}", "niveau": _niveau_risque(prob),
+                "sub": f"{prob * 100:.0f} % de risque"}
+        r = by_day.get(pd.Timestamp(d).normalize())
+        if r is not None:
+            glyphe, reserve, fiab_phrase = incertitude_txtn(
                 r.ecart_tx, r.ecart_tn, r.solo, r.model, r.model_alt)
-            # Case compacte : la Tx seule, sans flèche, glyphe ni « ° » (sur
-            # ~375 px une case fait ~20 px — chaque signe de plus fait se
-            # toucher les cases voisines ; la légende dit l'unité). Une Tn nue
-            # serait indistinguable d'une Tx, une Tx absente laisse la case
-            # vide (la couleur du risque reste, le survol porte le reste).
-            cells.append(f"{r.tx:.0f}" if pd.notna(r.tx) else "")
-            sol = " · ".join(p for p in (
+            if pd.notna(r.tx):
+                case["valeur"] = f"{r.tx:.0f} °C"
+            sol = " · ".join(part for part in (
                 f"max {r.tx:.1f} °C" if pd.notna(r.tx) else "",
-                f"min {r.tn:.1f} °C" if pd.notna(r.tn) else "") if p)
+                f"min {r.tn:.1f} °C" if pd.notna(r.tn) else "") if part)
             if sol:
-                hover += (f"<br>Au sol : {sol} ({r.model}, haute résolution)"
-                          f"<br>Fiabilité : {fiab_phrase}")
-            hovers.append(hover)
-        # Le hover migre vers customdata pour libérer `text` (affiché en case).
-        # Pas de couleur de police imposée : Plotly contraste automatiquement
-        # le texte selon la teinte de chaque case (vert clair → texte sombre).
-        heat.update(text=[cells], texttemplate="%{text}", textfont=dict(size=11),
-                    customdata=[hovers], hovertemplate="%{customdata}<extra></extra>")
-    fig = go.Figure(go.Heatmap(**heat))
-    return apply_layout(fig, height="strip", legend=None, hovermode="closest",
-                        xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
-                        yaxis=dict(visible=False))
+                aide += (f" · Au sol : {sol} ({r.model}, haute résolution)"
+                         f" · Fiabilité : {fiab_phrase}")
+            # Réserve marquée par un glyphe, jamais par la couleur de la case
+            # (glyphe non vide = source unique ou forte divergence).
+            if glyphe:
+                case["flag"] = f"{glyphe} {reserve}"
+        case["aide"] = aide
+        cases.append(case)
+    return cases
 
 
 def tendance_heatmap(tend):

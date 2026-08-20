@@ -18,7 +18,8 @@ def complete_runs_caption(sources):
     return " · ".join(parts)
 
 
-def _kpi_card(label, value, help_txt="", value_point=None, valid_time=None, sub=""):
+def _kpi_card(label, value, help_txt="", value_point=None, valid_time=None,
+              sub="", into=None):
     """ADAPTATEUR de la carte KPI partagée (core/ui/components.kpi_html) : ne
     reste ici que ce qui dépend de la config canicule — l'anomalie vs la normale
     climatique saisonnière (cosinus) à l'échéance affichée, quand value_point et
@@ -26,7 +27,9 @@ def _kpi_card(label, value, help_txt="", value_point=None, valid_time=None, sub=
     contrairement à help_txt qui n'apparaît qu'au survol.
 
     Signature historique conservée (contrat des pages et du harnais de rendu) :
-    la fonction retourne du HTML, l'appelant l'affiche dans sa colonne."""
+    sans `into`, la fonction RETOURNE le HTML ; avec `into` (colonne, expander),
+    elle l'affiche directement — les pages n'ont ainsi plus à manipuler de HTML
+    brut."""
     delta = delta_niveau = None
     if value_point is not None and valid_time is not None:
         ecart = value_point - float(clim_normal(pd.Timestamp(valid_time)))
@@ -39,5 +42,9 @@ def _kpi_card(label, value, help_txt="", value_point=None, valid_time=None, sub=
         else:
             delta_niveau, signe = "neutral", "±"
         delta = f"({signe}{abs(ecart):.1f} °C norm.)"
-    return kpi_html(label, value, delta=delta, delta_niveau=delta_niveau or "neutral",
+    html = kpi_html(label, value, delta=delta, delta_niveau=delta_niveau or "neutral",
                     sub=sub or None, aide=help_txt or None)
+    if into is None:
+        return html
+    into.markdown(html, unsafe_allow_html=True)
+    return None

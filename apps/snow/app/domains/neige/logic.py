@@ -39,12 +39,19 @@ def upcoming(sub, now=None):
     return sub[sub["valid_time"] >= now]
 
 
+def niveau_neige(cumul_cm):
+    """Palier d'intensité d'un cumul journalier, en INDICE 0-3 (bornes
+    SC.PALIERS_NEIGE_CM). Sert à la fois au libellé et à la teinte de l'échelle
+    de risque partagée (core/ui/tokens) : mot et couleur ne peuvent donc pas
+    diverger. Cumul absent → 0 (rien à signaler), jamais une erreur."""
+    if cumul_cm is None or np.isnan(cumul_cm):
+        return 0
+    return int(np.searchsorted(SC.PALIERS_NEIGE_CM, cumul_cm, side="right"))
+
+
 def palier_neige(cumul_cm):
     """Libellé du palier d'intensité d'un cumul journalier."""
-    if cumul_cm is None or np.isnan(cumul_cm):
-        return _PALIER_LABELS[0]
-    idx = int(np.searchsorted(SC.PALIERS_NEIGE_CM, cumul_cm, side="right"))
-    return _PALIER_LABELS[idx]
+    return _PALIER_LABELS[niveau_neige(cumul_cm)]
 
 
 def daily_snowfall(sub_site):

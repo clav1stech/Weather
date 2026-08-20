@@ -14,6 +14,7 @@ from app.data.db import run_label_text
 from app.data.presence import (
     _missing_by_run, _nearest_om_run, legacy_presence, legacy_signature,
     openmeteo_presence)
+from core.ui.components import empty_state, page_header, table_style
 from core.ui.plotly_theme import apply_layout
 
 
@@ -69,7 +70,7 @@ def _build_matrices(pres, run_order, models, missing_by_key):
 
 
 def page_diagnostic(runs, sig):
-    st.title("Contrôle de présence des modèles")
+    page_header("Contrôle de présence des modèles", eyebrow="Données")
     st.caption(
         "Vue de fiabilisation du **double run** (Open-Meteo vs legacy/Météociel) : "
         "pour chaque run, quel modèle est présent, **jusqu'à quelle échéance** et avec "
@@ -119,7 +120,7 @@ def page_diagnostic(runs, sig):
         f"{pd.Timestamp(C.PIPELINE_LIVE_SINCE):%d/%m}, cycles 6Z/18Z de même). Avant cette "
         "bascule, la base est rétro-remplie depuis les xlsx Météociel (migrate.py).")
     if om.empty:
-        st.info("Base Open-Meteo vide.")
+        empty_state("Base Open-Meteo vide.")
     else:
         om_disp = om.copy()
         om_disp["run_key"] = om_disp["run_date"].map(run_label_text)
@@ -142,7 +143,7 @@ def page_diagnostic(runs, sig):
     st.caption("Runs scrapés sur Météociel (0Z/12Z uniquement). run_date = celui déclaré "
                "dans l'en-tête du xlsx ; en cas de re-scrape, seul le plus récent est retenu.")
     if lg_raw.empty:
-        st.info("Aucun fichier legacy exploitable dans " + C.LEGACY_FORECASTS_DIR + ".")
+        empty_state("Aucun fichier legacy exploitable dans " + C.LEGACY_FORECASTS_DIR + ".")
         lg = lg_raw
     else:
         # Dédup : un même (run_date, modèle) peut avoir été scrapé plusieurs jours →
@@ -185,7 +186,7 @@ def page_diagnostic(runs, sig):
         "légitimement aucun équivalent legacy et ne sont pas confrontés.")
     lg_live = lg[lg["run_date"] >= live] if not lg.empty else lg
     if om.empty or lg_live.empty:
-        st.info(f"Aucun run legacy à partir du {live:%d/%m/%Y} à confronter "
+        empty_state(f"Aucun run legacy à partir du {live:%d/%m/%Y} à confronter "
                 "(ou base Open-Meteo vide).")
     else:
         rows = []
@@ -224,9 +225,8 @@ def page_diagnostic(runs, sig):
         else:
             st.success("Tous les runs legacy s'alignent proprement sur un run Open-Meteo "
                        "(cycle et horizon cohérents).")
-        styler = comp.style.apply(
-            lambda r: ["background-color:#fdecea;color:#611a15" if r["Alerte"] else ""
-                       for _ in r], axis=1
-        ).format({"Δ cycle (h)": "{:.1f}", "Horizon OM (j)": "{:.1f}",
-                  "Horizon legacy (j)": "{:.1f}", "Membres OM": "{:.0f}"}, na_rep="—")
+        styler = table_style(
+            comp, alerte=lambda r: bool(r["Alerte"]), na_rep="—",
+            formats={"Δ cycle (h)": "{:.1f}", "Horizon OM (j)": "{:.1f}",
+                     "Horizon legacy (j)": "{:.1f}", "Membres OM": "{:.0f}"})
         st.dataframe(styler, width="stretch", height=460, hide_index=True)

@@ -18,14 +18,9 @@ Usage (depuis la racine du projet) :
     python tools/ui_snapshot.py capture neige     # dashboard neige
     python tools/ui_snapshot.py check neige
 
-NAVIGATION : les apps utilisent `st.navigation(position="top")` avec des pages
-construites à partir de CALLABLES (functools.partial), pas de fichiers. Ni
-`AppTest.switch_page` (qui exige un script sur disque) ni `query_params` ne
-permettent alors de changer de page. Streamlit identifie une page par le hash
-de son `url_path` : on pose donc directement ce hash sur l'AppTest, en le
-calculant avec le même slug que la navigation (core.ui.nav.page_slug) — c'est
-le seul point de couplage du harnais avec l'interne de Streamlit, et il est
-vérifié à chaque rendu (une page non atteinte n'afficherait pas son titre).
+NAVIGATION : les pages sont atteintes via core/testing/apptest_nav.aller_a
+(hash de l'url_path — ni switch_page ni query_params ne savent viser une page
+construite à partir d'un callable ; détail et justification dans ce module).
 
 Limites : à rejouer dans la même base de données ET la même heure « ronde »
 (les KPI dépendent de l'instant courant — la première échéance « à venir »
@@ -48,9 +43,8 @@ sys.path.insert(0, os.path.join(ROOT, "apps", "canicule"))
 os.environ["WEATHER_LOCAL"] = "1"  # inclut la page « Lancer le pipeline »
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
-from streamlit.util import calc_hash  # noqa: E402
 
-from core.ui.nav import page_slug  # noqa: E402
+from core.testing.apptest_nav import aller_a  # noqa: E402
 
 # Registre des apps couvertes. `explore` = libellé de la page dont il faut
 # aussi rejouer le premier run archivé (exercer run_slice et les tableaux).
@@ -101,19 +95,11 @@ def _df_hash(df):
     return hashlib.sha256(_norm(csv).encode("utf-8")).hexdigest()
 
 
-def _aller_a(at, page):
-    """Sélectionne une page de la barre de navigation du haut. Streamlit dérive
-    l'identité d'une page du hash de son url_path : le poser sur l'AppTest
-    équivaut à cliquer l'onglet (cf. note de navigation en tête de module)."""
-    at._page_hash = calc_hash(page_slug(page))
-    return at
-
-
 def snapshot_page(app, page):
     conf = APPS[app]
     at = AppTest.from_file(os.path.join(ROOT, conf["entry"]), default_timeout=600)
     at.run()
-    _aller_a(at, page).run()
+    aller_a(at, page).run()
     assert not at.exception, f"Exception sur la page {page} : {at.exception[0].value}"
     snap = {
         "title": _texts(at.title),

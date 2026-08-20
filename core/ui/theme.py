@@ -33,10 +33,15 @@ def _is_dark():
 
 
 def _plotly_template():
-    """Template Plotly cohérent avec le thème courant. Template ET couleurs d'encre
-    (cf. _ink) partagent _is_dark() : même si la détection ne colle pas exactement à
-    la page, le graphique reste lisible car ses fonds et traits restent cohérents."""
-    return "plotly_dark" if _is_dark() else "plotly_white"
+    """Template Plotly du thème courant — nom historique, conservé pour les
+    imports existants. La définition vit désormais dans core/ui/plotly_theme
+    (templates `weather_light`/`weather_dark` dérivés des jetons) ; toute
+    nouvelle figure passe par `apply_layout`, jamais par ce nom.
+
+    Import différé : plotly_theme importe ce module, un import en tête créerait
+    un cycle."""
+    from core.ui.plotly_theme import template_name
+    return template_name()
 
 
 def _ink(dark=None):

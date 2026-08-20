@@ -8,7 +8,8 @@ import plotly.graph_objects as go
 import config as C
 from app.stats.climato import clim_z500_normal
 from app.stats.ensemble import model_data
-from app.ui.theme import _ink, _plotly_template, _rgba
+from app.ui.theme import _ink, _rgba
+from core.ui.plotly_theme import apply_layout
 
 
 def _band(fig, x, lo, hi, color, name, opacity=0.18):
@@ -28,11 +29,9 @@ def fan_chart(syn, title):
     _band(fig, x, syn["P25"], syn["P75"], base, "P25–P75 (50 %)", 0.28)
     fig.add_trace(go.Scatter(x=x, y=syn["Médiane"], mode="lines", name="Médiane",
                              line=dict(color="#E74C3C", width=3)))
-    fig.update_layout(title=title, height=480, hovermode="x unified",
-                      xaxis_title="Échéance (date de validité)", yaxis_title="Température (°C)",
-                      legend=dict(orientation="h", y=1.08), template=_plotly_template(),
-                      margin=dict(t=70, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, title=title, height="tall",
+                        x_title="Échéance (date de validité)",
+                        y_title="Température (°C)")
 
 
 def spaghetti_chart(members, stats, det, model):
@@ -49,12 +48,10 @@ def spaghetti_chart(members, stats, det, model):
     if det is not None:
         fig.add_trace(go.Scatter(x=det.index, y=det.values, mode="lines",
                                  name="Contrôle", line=dict(color=_ink(), width=2, dash="dash")))
-    fig.update_layout(
-        title=f"Spaghetti des membres — {model} ({members.shape[1]} scénarios)",
-        height=480, hovermode="x unified", template=_plotly_template(),
-        xaxis_title="Échéance (date de validité)", yaxis_title="Température (°C)",
-        legend=dict(orientation="h", y=1.08), margin=dict(t=70, l=10, r=10, b=10))
-    return fig
+    return apply_layout(
+        fig, title=f"Spaghetti des membres — {model} ({members.shape[1]} scénarios)",
+        height="tall", x_title="Échéance (date de validité)",
+        y_title="Température (°C)")
 
 
 def models_median_chart(sub, models, cutoff=None):
@@ -77,11 +74,9 @@ def models_median_chart(sub, models, cutoff=None):
             fig.add_trace(go.Scatter(x=d.index, y=d.values, mode="lines",
                                      name=f"{model} contrôle",
                                      line=dict(color=c, width=1.6, dash="dot")))
-    fig.update_layout(title="Comparaison des modèles — médiane, dispersion & contrôle",
-                      height=480, hovermode="x unified", template=_plotly_template(),
-                      xaxis_title="Échéance (date de validité)", yaxis_title="Température (°C)",
-                      legend=dict(orientation="h", y=1.1), margin=dict(t=80, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, title="Comparaison des modèles — médiane, dispersion & contrôle",
+                        height="tall", x_title="Échéance (date de validité)",
+                        y_title="Température (°C)")
 
 
 def divergence_chart(div, cutoff=None):
@@ -98,11 +93,9 @@ def divergence_chart(div, cutoff=None):
                   annotation_text="forte (≥4 °C)", annotation_position="top left")
     fig.add_hline(y=1.5, line=dict(color="#1976D2", width=1, dash="dot"),
                   annotation_text="faible (≤1.5 °C)", annotation_position="bottom left")
-    fig.update_layout(title="Divergence inter-modèles (écart des médianes)",
-                      height=340, template=_plotly_template(), hovermode="x unified",
-                      xaxis_title="Échéance", yaxis_title="Écart chaud−froid (°C)",
-                      margin=dict(t=70, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, title="Divergence inter-modèles (écart des médianes)",
+                        height="compact", legend=None, x_title="Échéance",
+                        y_title="Écart chaud−froid (°C)")
 
 
 def z500_median_chart(med, titre):
@@ -122,12 +115,9 @@ def z500_median_chart(med, titre):
         customdata=med["n_membres"],
         hovertemplate="%{x|%a %d %b · %Hh}<br>Médiane : %{y:.0f} m "
                       "(%{customdata} membres)<extra></extra>"))
-    fig.update_layout(title=titre, height=340, hovermode="x unified",
-                      template=_plotly_template(), xaxis_title="Échéance (date de validité)",
-                      yaxis_title="Géopotentiel 500 hPa (m)",
-                      legend=dict(orientation="h", y=1.12),
-                      margin=dict(t=70, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, title=titre, height="compact",
+                        x_title="Échéance (date de validité)",
+                        y_title="Géopotentiel 500 hPa (m)")
 
 
 def spread_chart(syn):
@@ -137,9 +127,6 @@ def spread_chart(syn):
                          marker_color=_rgba("#2980B9", 0.55)))
     fig.add_trace(go.Scatter(x=syn["valid_time"], y=syn["Ecart-type"], name="Écart-type",
                              yaxis="y2", line=dict(color="#C0392B", width=2.5)))
-    fig.update_layout(title="Incertitude de la prévision selon l'échéance",
-                      height=360, template=_plotly_template(), hovermode="x unified",
-                      xaxis_title="Échéance", yaxis_title="Spread (°C)",
-                      yaxis2=dict(title="Écart-type (°C)", overlaying="y", side="right"),
-                      legend=dict(orientation="h", y=1.15), margin=dict(t=70, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, title="Incertitude de la prévision selon l'échéance",
+                        height="compact", x_title="Échéance", y_title="Spread (°C)",
+                        yaxis2=dict(title="Écart-type (°C)", overlaying="y", side="right"))

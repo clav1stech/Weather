@@ -14,7 +14,7 @@ from app.data.db import run_label_text
 from app.data.presence import (
     _missing_by_run, _nearest_om_run, legacy_presence, legacy_signature,
     openmeteo_presence)
-from app.ui.theme import _plotly_template
+from core.ui.plotly_theme import apply_layout
 
 
 def _cell_text(lead_days, members):
@@ -43,10 +43,10 @@ def _presence_heatmap(mat, txt, missing, title, height):
             if bool(missing.iloc[i, j]):
                 fig.add_annotation(x=model, y=run, text="✗", showarrow=False,
                                    font=dict(color="#C0392B", size=16, family="Arial Black"))
-    fig.update_layout(title=title, height=height, template=_plotly_template(),
-                      xaxis=dict(side="top"), yaxis=dict(autorange="reversed"),
-                      margin=dict(t=90, l=10, r=10, b=10))
-    return fig
+    # Hauteur calculée par l'appelant (une ligne par modèle) : hors registre.
+    return apply_layout(fig, title=title, height=height, legend=None,
+                        hovermode="closest", xaxis=dict(side="top"),
+                        yaxis=dict(autorange="reversed"))
 
 
 def _build_matrices(pres, run_order, models, missing_by_key):

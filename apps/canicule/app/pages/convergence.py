@@ -15,7 +15,8 @@ from app.data.db import _run_utc_naive, utc_cycle
 from app.data.presence import openmeteo_presence
 from app.data.runsets import (
     _convergence_runs, convergence_long, main_labels_expected_at)
-from app.ui.theme import _ink, _plotly_template, _rgba
+from app.ui.theme import _ink, _rgba
+from core.ui.plotly_theme import apply_layout
 
 
 def page_convergence(runs, sig):
@@ -129,9 +130,8 @@ def page_convergence(runs, sig):
             fig.add_trace(go.Bar(x=delta.index, y=delta.values, offsetgroup=i,
                                  name="Δ vs " + _run_tick(pr), marker_color=colors))
         fig.add_hline(y=0, line_color=_ink(), line_width=1.5)
-        fig.update_layout(height=380, template=_plotly_template(), hovermode="x unified",
-                          barmode="group", xaxis_title="Date prévue", yaxis_title="Révision (°C)",
-                          legend=dict(orientation="h", y=1.12), margin=dict(t=30, l=10, r=10, b=10))
+        apply_layout(fig, height="standard", barmode="group",
+                     x_title="Date prévue", y_title="Révision (°C)")
         st.plotly_chart(fig, width="stretch")
     else:
         st.info("Pas de run antérieur comparable.")
@@ -191,8 +191,9 @@ def page_convergence(runs, sig):
         fig.update_yaxes(title_text="Temp. prévue (°C)", col=1)
         for cpos in range(1, ncols + 1):
             fig.update_xaxes(title_text="Jours avant l'échéance", row=nrows, col=cpos)
-        fig.update_layout(height=240 * nrows, template=_plotly_template(),
-                          margin=dict(t=40, l=10, r=10, b=10))
+        # Hauteur proportionnelle au nombre de rangées : hors registre CHART_H,
+        # une grille de sous-graphiques n'a pas de hauteur fixe.
+        apply_layout(fig, height=240 * nrows, legend=None, hovermode="closest")
         st.plotly_chart(fig, width="stretch")
 
     st.markdown("---")
@@ -221,7 +222,8 @@ def page_convergence(runs, sig):
             colorscale="RdBu_r", zmid=0, zmin=-abs_max, zmax=abs_max,
             colorbar=dict(title="Révision (°C)"),
             hovertemplate="Run %{x}<br>Cible %{y}<br>Révision : %{z:+.1f} °C<extra></extra>"))
-        heat.update_layout(height=max(300, 26 * len(delta_pivot.index) + 120),
-                           template=_plotly_template(), xaxis_title="Run", yaxis_title="Date prévue",
-                           margin=dict(t=10, l=10, r=10, b=10))
+        # Une ligne par date cible : la hauteur suit le nombre de lignes.
+        apply_layout(heat, height=max(300, 26 * len(delta_pivot.index) + 120),
+                     legend=None, hovermode="closest",
+                     x_title="Run", y_title="Date prévue")
         st.plotly_chart(heat, width="stretch")

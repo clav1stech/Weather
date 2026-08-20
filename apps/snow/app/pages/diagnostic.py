@@ -8,7 +8,7 @@ import streamlit as st
 from apps.snow import snow_config as SC
 from apps.snow.app.data.db import load_db
 from apps.snow.app.data.quality import quality_report
-from apps.snow.app.ui.theme import _plotly_template
+from core.ui.plotly_theme import apply_layout
 
 
 def _quality_heatmap(history):
@@ -33,11 +33,11 @@ def _quality_heatmap(history):
         colorbar=dict(title="Part horizon", tickformat=".0%"),
         hovertemplate="Run %{y}<br>Modèle %{x}<br>%{text}<extra></extra>",
     ))
-    fig.update_layout(template=_plotly_template(), xaxis=dict(side="top"),
-                      yaxis=dict(autorange="reversed"),
-                      height=max(360, min(900, 28 * len(order) + 130)),
-                      margin=dict(t=80, l=10, r=10, b=10))
-    return fig
+    # Une ligne par run affiché : hauteur bornée, hors registre CHART_H.
+    return apply_layout(
+        fig, height=max(360, min(900, 28 * len(order) + 130)),
+        legend=None, hovermode="closest", xaxis=dict(side="top"),
+        yaxis=dict(autorange="reversed"))
 
 
 def page_diagnostic(runs, sig):

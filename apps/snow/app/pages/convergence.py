@@ -17,7 +17,8 @@ import streamlit as st
 from apps.snow import snow_config as SC
 from ..data.db import run_label_text
 from ..data.runsets import mean_runs, mean_runs_all
-from ..ui.theme import _ink, _plotly_template, _rgba
+from ..ui.theme import _ink, _rgba
+from core.ui.plotly_theme import apply_layout
 
 N_RUNS = 8   # valeur initiale du nombre de runs mean superposés / comparés
 ALL_MODELS = "Tous modèles"
@@ -114,11 +115,7 @@ def _convergence_chart(piv, base_color, unit, spread_piv=None,
             x=piv.index, y=piv[rd], name=run_label_text(rd),
             line=dict(color=_rgba(base_color, alpha),
                       width=2.4 if recent else 1.2))
-    fig.update_layout(template=_plotly_template(), height=380,
-                      margin=dict(l=10, r=10, t=30, b=10),
-                      yaxis=dict(title=unit),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02))
-    return fig
+    return apply_layout(fig, height="standard", yaxis=dict(title=unit))
 
 
 def _revision_pivot(piv, *, freq="6h", now=None):
@@ -152,14 +149,12 @@ def _revision_heatmap(delta, unit):
         hovertemplate=("Run %{x}<br>Échéance %{y}<br>Révision : "
                        f"%{{z:+.2f}} {unit}<extra></extra>"),
     ))
-    fig.update_layout(
-        template=_plotly_template(),
-        height=min(850, max(360, 16 * len(delta.index) + 140)),
-        margin=dict(l=10, r=10, t=20, b=10),
-        xaxis_title="Run", yaxis_title="Échéance (pas de 6 h)",
-        yaxis=dict(autorange="reversed"),
-    )
-    return fig
+    # Une ligne par échéance : hauteur bornée, hors registre CHART_H.
+    return apply_layout(
+        fig, height=min(850, max(360, 16 * len(delta.index) + 140)),
+        legend=None, hovermode="closest",
+        x_title="Run", y_title="Échéance (pas de 6 h)",
+        yaxis=dict(autorange="reversed"))
 
 
 def _revisions_table(piv):

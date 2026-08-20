@@ -6,7 +6,8 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from apps.snow import snow_config as SC
-from ...ui.theme import _ink, _plotly_template, _rgba
+from ...ui.theme import _ink, _rgba
+from core.ui.plotly_theme import apply_layout
 from core.stats.ensemble import model_data, model_medians, super_ensemble
 
 
@@ -81,20 +82,15 @@ def hourly_vertical_weather_chart(profile):
                                   end.normalize(), freq="D"):
         fig.add_vline(x=boundary, line_color=_ink(), line_width=0.8,
                       line_dash="dot", opacity=0.35)
-    fig.update_layout(
-        template=_plotly_template(), height=360,
-        margin=dict(l=10, r=10, t=15, b=90),
+    return apply_layout(
+        fig, height="standard", legend="bottom", hovermode="closest", bottom=90,
         xaxis=dict(tickmode="array", tickvals=ticks,
                    ticktext=[f"{t:%a %d}<br>{t:%Hh}" for t in ticks],
                    range=[profile["valid_time"].min(), profile["valid_time"].max()]),
         yaxis=dict(title="Altitude", tickmode="array",
                    tickvals=sorted(profile["altitude_m"].unique()),
                    ticktext=[f"{a:.0f} m" for a in sorted(profile["altitude_m"].unique())],
-                   range=[1020, 2080]),
-        legend=dict(orientation="h", yanchor="top", y=-0.20,
-                    xanchor="left", x=0),
-    )
-    return fig
+                   range=[1020, 2080]))
 
 
 # Style partagé des catégories de type de temps (couleur + libellé court
@@ -147,13 +143,11 @@ def weather_type_strip_chart(daily):
     ))
     ticks = [f"J+{int(j)}<br>{d:%a %d}"
              for d, j in zip(daily["date"], daily["jour"])]
-    fig.update_layout(
-        template=_plotly_template(), height=150, bargap=0.12,
-        margin=dict(l=10, r=10, t=10, b=45), showlegend=False,
+    return apply_layout(
+        fig, height="strip", legend=None, hovermode="closest", bottom=45,
+        bargap=0.12,
         xaxis=dict(tickmode="array", tickvals=daily["date"], ticktext=ticks),
-        yaxis=dict(visible=False, range=[0, 1], fixedrange=True),
-    )
-    return fig
+        yaxis=dict(visible=False, range=[0, 1], fixedrange=True))
 
 
 def weather_type_chart(daily, hd_reference=None):
@@ -210,17 +204,12 @@ def weather_type_chart(daily, hd_reference=None):
         )
     ticks = [f"J+{int(j)}<br>{d:%a %d}"
              for d, j in zip(daily["date"], daily["jour"])]
-    fig.update_layout(
-        template=_plotly_template(), height=420, barmode="stack",
-        margin=dict(l=10, r=10, t=25, b=100),
+    return apply_layout(
+        fig, height="tall", legend="bottom", bottom=100, barmode="stack",
         xaxis=dict(tickmode="array", tickvals=daily["date"], ticktext=ticks),
         yaxis=dict(title="Part des membres (%)", range=[0, 100]),
         yaxis2=dict(overlaying="y", range=[0, 1.12], visible=False,
-                    fixedrange=True),
-        legend=dict(orientation="h", yanchor="top", y=-0.20,
-                    xanchor="left", x=0),
-    )
-    return fig
+                    fixedrange=True))
 
 
 def daily_snow_chart(daily, site_code):
@@ -236,16 +225,11 @@ def daily_snow_chart(daily, site_code):
     fig.add_scatter(x=daily["date"], y=daily["prob"] * 100, name="Proba ≥ 1 cm (%)",
                     yaxis="y2", mode="lines+markers",
                     line=dict(color=_ink(), width=1.5, dash="dot"))
-    fig.update_layout(
-        template=_plotly_template(), height=380,
-        margin=dict(l=10, r=10, t=25, b=90),
+    return apply_layout(
+        fig, height="standard", legend="bottom", bottom=90,
         yaxis=dict(title="cm / jour", rangemode="tozero"),
         yaxis2=dict(title="%", overlaying="y", side="right", range=[0, 100],
-                    showgrid=False),
-        legend=dict(orientation="h", yanchor="top", y=-0.20,
-                    xanchor="left", x=0),
-    )
-    return fig
+                    showgrid=False))
 
 
 def lpn_chart(lpn):
@@ -265,12 +249,8 @@ def lpn_chart(lpn):
                       line_color=SC.SITE_COLORS[site["code"]],
                       annotation_text=f"{site['nom']} ({site['alt']} m)",
                       annotation_position="top left")
-    fig.update_layout(template=_plotly_template(), height=400,
-                      margin=dict(l=10, r=10, t=25, b=90),
-                      yaxis=dict(title="altitude (m)"),
-                      legend=dict(orientation="h", yanchor="top", y=-0.20,
-                                  xanchor="left", x=0))
-    return fig
+    return apply_layout(fig, height="standard", legend="bottom", bottom=90,
+                        yaxis=dict(title="altitude (m)"))
 
 
 def medians_chart(sub, var, title, unit, seuils_h=None):
@@ -301,13 +281,8 @@ def medians_chart(sub, var, title, unit, seuils_h=None):
     for label, y in (seuils_h or {}).items():
         fig.add_hline(y=y, line_dash="dot", line_color=_ink(),
                       annotation_text=label, annotation_position="bottom right")
-    fig.update_layout(template=_plotly_template(), height=390,
-                      title=dict(text=title, x=0.01, xanchor="left", y=0.98),
-                      margin=dict(l=10, r=10, t=75, b=85),
-                      yaxis=dict(title=unit),
-                      legend=dict(orientation="h", yanchor="top", y=-0.20,
-                                  xanchor="left", x=0))
-    return fig
+    return apply_layout(fig, title=title, height="standard", legend="bottom",
+                        bottom=85, yaxis=dict(title=unit))
 
 
 def fan_chart(sub, var, title, unit, seuil=0.0):
@@ -330,13 +305,8 @@ def fan_chart(sub, var, title, unit, seuil=0.0):
                         name=f"{lo}–{hi}")
     fig.add_scatter(x=se["valid_time"], y=se["Médiane"], name="Médiane",
                     line=dict(color="#2E86C1", width=2.2))
-    fig.update_layout(template=_plotly_template(), height=420,
-                      title=dict(text=title, x=0.01, xanchor="left", y=0.98),
-                      margin=dict(l=10, r=10, t=75, b=90),
-                      yaxis=dict(title=unit),
-                      legend=dict(orientation="h", yanchor="top", y=-0.20,
-                                  xanchor="left", x=0))
-    return fig
+    return apply_layout(fig, title=title, height="tall", legend="bottom",
+                        bottom=90, yaxis=dict(title=unit))
 
 
 # Couleurs de phase pour les vues Météo-France PNT (mêmes teintes que le reste
@@ -366,13 +336,11 @@ def mf_meteogram(series, title):
                     line=dict(color=_ink(), width=1.6, dash="dot"),
                     hovertemplate="%{x|%a %d %b · %Hh}<br>T2m %{y:+.1f} °C"
                                   "<extra></extra>")
-    fig.update_layout(
-        template=_plotly_template(), height=390, barmode="stack",
-        title=dict(text=title, x=0.01, xanchor="left", y=0.98),
-        margin=dict(l=10, r=10, t=55, b=85),
+    apply_layout(
+        fig, title=title, height="standard", legend="bottom", bottom=85,
+        barmode="stack",
         yaxis=dict(title="mm éq. eau", rangemode="tozero"),
-        yaxis2=dict(title="°C", overlaying="y", side="right", showgrid=False),
-        legend=dict(orientation="h", yanchor="top", y=-0.18, x=0))
+        yaxis2=dict(title="°C", overlaying="y", side="right", showgrid=False))
     return fig
 
 
@@ -392,11 +360,8 @@ def mf_member_box(dist, value_col, unit, title, seuils_h=None):
     for label, y in (seuils_h or {}).items():
         fig.add_hline(y=y, line_dash="dot", line_color=_ink(),
                       annotation_text=label, annotation_position="top left")
-    fig.update_layout(template=_plotly_template(), height=390, showlegend=False,
-                      title=dict(text=title, x=0.01, xanchor="left", y=0.98),
-                      margin=dict(l=10, r=10, t=55, b=45),
-                      yaxis=dict(title=unit, rangemode="tozero"))
-    return fig
+    return apply_layout(fig, title=title, height="standard", legend=None,
+                        bottom=45, yaxis=dict(title=unit, rangemode="tozero"))
 
 
 def ptype_strip(frise):
@@ -412,9 +377,7 @@ def ptype_strip(frise):
         customdata=np.stack([frise["label"], frise["code"]], axis=-1),
         hovertemplate="%{x|%a %d %b · %Hh}<br>%{customdata[0]}"
                       "<br>code ptype %{customdata[1]:.0f}<extra></extra>"))
-    fig.update_layout(
-        template=_plotly_template(), height=120, bargap=0.1, showlegend=False,
-        margin=dict(l=10, r=10, t=10, b=35),
-        xaxis=dict(title=None),
+    return apply_layout(
+        fig, height="strip", legend=None, hovermode="closest", bottom=35,
+        bargap=0.1, xaxis=dict(title=None),
         yaxis=dict(visible=False, range=[0, 1], fixedrange=True))
-    return fig

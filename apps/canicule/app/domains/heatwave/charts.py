@@ -6,10 +6,11 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from app.stats.climato import clim_normal
-from app.ui.theme import _ink, _plotly_template, _rgba
+from app.ui.theme import _ink, _rgba
 from app.domains.heatwave.logic import (
     TREND_STRONG_C, _canicule_label, _confiance_label, _tendance_label,
     incertitude_txtn)
+from core.ui.plotly_theme import apply_layout
 
 
 def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
@@ -34,10 +35,8 @@ def ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule, titre):
     fig.add_hline(y=seuil_canicule, line=dict(color="#E74C3C", width=2, dash="dash"),
                   annotation_text=f"Canicule — {seuil_canicule:.0f} °C",
                   annotation_position="top left", annotation_font=dict(color="#C0392B", size=12))
-    fig.update_layout(title=titre, height=440, hovermode="x unified", template=_plotly_template(),
-                      xaxis_title=None, yaxis_title="Température à 850 hPa (°C)",
-                      legend=dict(orientation="h", y=1.08), margin=dict(t=70, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, title=titre, height="tall",
+                        y_title="Température à 850 hPa (°C)")
 
 
 CANICULE_SCALE = [
@@ -97,10 +96,9 @@ def calendrier_risques(jours, seuil, txtn=None):
         heat.update(text=[cells], texttemplate="%{text}", textfont=dict(size=11),
                     customdata=[hovers], hovertemplate="%{customdata}<extra></extra>")
     fig = go.Figure(go.Heatmap(**heat))
-    fig.update_layout(height=150, template=_plotly_template(),
-                      xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
-                      yaxis=dict(visible=False), margin=dict(t=10, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, height="strip", legend=None, hovermode="closest",
+                        xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
+                        yaxis=dict(visible=False))
 
 
 def tendance_heatmap(tend):
@@ -119,10 +117,9 @@ def tendance_heatmap(tend):
         text=[arrows], texttemplate="%{text}", textfont=dict(size=16),
         customdata=[hovers], hovertemplate="%{customdata}<extra></extra>",
         showscale=False))
-    fig.update_layout(height=150, template=_plotly_template(),
-                      xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
-                      yaxis=dict(visible=False), margin=dict(t=10, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, height="strip", legend=None, hovermode="closest",
+                        xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
+                        yaxis=dict(visible=False))
 
 
 def confiance_chart(daily, seuil_chaleur, seuil_canicule):
@@ -153,9 +150,6 @@ def confiance_chart(daily, seuil_chaleur, seuil_canicule):
     fig.add_hline(y=seuil_canicule, line=dict(color="#E74C3C", width=1.5, dash="dash"),
                   annotation_text=f"Canicule — {seuil_canicule:.0f} °C",
                   annotation_position="top left", annotation_font=dict(color="#C0392B", size=11))
-    fig.update_layout(height=400, hovermode="x unified", template=_plotly_template(),
-                      xaxis=dict(title=None, tickformat="%a %d/%m", type="date"),
-                      yaxis_title="Température à 850 hPa (°C)",
-                      legend=dict(orientation="h", y=1.12), barmode="overlay",
-                      margin=dict(t=40, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, height="standard", y_title="Température à 850 hPa (°C)",
+                        barmode="overlay",
+                        xaxis=dict(title=None, tickformat="%a %d/%m", type="date"))

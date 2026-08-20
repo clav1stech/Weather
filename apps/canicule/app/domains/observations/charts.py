@@ -7,8 +7,9 @@ import pandas as pd
 import plotly.graph_objects as go
 
 import config as C
-from app.ui.theme import _ink, _plotly_template, _rgba
+from app.ui.theme import _ink, _rgba
 from app.domains.observations.logic import NUIT_DEBUT_H, NUIT_FIN_H, lisser_prevision
+from core.ui.plotly_theme import apply_layout
 
 
 def _bandes_nocturnes(fig, t_min, t_max):
@@ -75,12 +76,8 @@ def comparaison_stations(dfw, titre, complement_6m=None):
         t_max_global = max(t_max_global, g6["valid_time"].max())
     if fig.data:
         _bandes_nocturnes(fig, dfw["valid_time"].min(), t_max_global)
-    fig.update_layout(title=titre, height=430, hovermode="x unified",
-                      template=_plotly_template(), xaxis_title=None,
-                      yaxis_title="Température observée (°C)",
-                      legend=dict(orientation="h", y=1.08),
-                      margin=dict(t=70, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, title=titre, height="tall",
+                        y_title="Température observée (°C)")
 
 
 def ecart_icu_chart(ecarts):
@@ -96,10 +93,8 @@ def ecart_icu_chart(ecarts):
                       "%{y:+.1f} °C<extra></extra>"))
     _bandes_nocturnes(fig, ecarts["valid_time"].min(), ecarts["valid_time"].max())
     fig.add_hline(y=0, line=dict(color=_ink(), width=1))
-    fig.update_layout(height=260, template=_plotly_template(), xaxis_title=None,
-                      yaxis_title="Écart urbain − aéré (°C)", showlegend=False,
-                      margin=dict(t=20, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, height="compact", legend=None,
+                        y_title="Écart urbain − aéré (°C)")
 
 
 # Teinte unique des courbes de prévision (ambre), distincte du bleu Montsouris
@@ -162,9 +157,5 @@ def vintage_comparison_chart(obs_df, vintage_series_df, titre):
             xs += [vintage_series_df["valid_time"].min(),
                    vintage_series_df["valid_time"].max()]
         _bandes_nocturnes(fig, min(xs), max(xs))
-    fig.update_layout(title=titre, height=430, hovermode="x unified",
-                      template=_plotly_template(), xaxis_title=None,
-                      yaxis_title="Température (°C)",
-                      legend=dict(orientation="h", y=1.08),
-                      margin=dict(t=70, l=10, r=10, b=10))
-    return fig
+    return apply_layout(fig, title=titre, height="tall",
+                        y_title="Température (°C)")

@@ -6,7 +6,7 @@ pour la variable tracée est simplement absente du graphe (NaN structurel)."""
 import plotly.graph_objects as go
 
 from apps.snow import snow_config as SC
-from ...ui.theme import _plotly_template
+from core.ui.plotly_theme import apply_layout
 
 
 def _nom_long(station):
@@ -31,8 +31,5 @@ def stations_chart(window, var, titre, unit):
     if var == "t":
         fig.add_hline(y=0, line_dash="dot", line_color="#5DADE2",
                       annotation_text="0 °C", annotation_position="bottom right")
-    fig.update_layout(template=_plotly_template(), height=360, title=titre,
-                      margin=dict(l=10, r=10, t=40, b=10),
-                      yaxis=dict(title=unit),
-                      legend=dict(orientation="h", yanchor="bottom", y=1.02))
-    return fig
+    return apply_layout(fig, title=titre, height="standard",
+                        yaxis=dict(title=unit))

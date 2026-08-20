@@ -1,5 +1,44 @@
 # Changelog
 
+## [3.2.0-rc.1] - 2026-08-20
+Refonte de l'interface : design system partagé, navigation en barre du haut.
+
+Les deux dashboards partageaient douze lignes de CSS pour tout habillage, trois
+mécaniques de KPI concurrentes et une vingtaine de couleurs écrites en dur au
+fil des pages : le rendu restait celui de Streamlit par défaut. Je pose un
+design system unique dans `core/ui/`, consommé par le canicule et par la neige.
+`tokens.py` devient la source de vérité des couleurs sémantiques, des rayons,
+de l'échelle d'espacement et des hauteurs de graphique, en deux palettes
+complètes claire et sombre ; `design.py` en dérive la feuille de style, exposée
+en variables CSS et en classes, si bien que les composants n'écrivent plus
+aucun style inline. `.streamlit/config.toml` habille en plus les widgets
+eux-mêmes, ce que le CSS injecté n'atteint pas.
+
+La navigation quitte le bouton radio de la barre latérale pour une barre
+d'onglets en haut de page, groupée par intention de lecture, et la barre
+latérale devient un panneau de contexte : état des données, fraîcheur,
+rafraîchissement, sources. Le contrat des pages (`page(runs, sig)`) est
+inchangé — les domaines et les pages transverses n'ont pas bougé.
+
+`components.py` factorise en-tête de page, bandeau de statut, carte KPI, badge,
+calendrier, état vide et habillage de tableau. Le calendrier du risque quitte la
+heatmap Plotly d'une seule ligne pour une grille de cartes qui se replie sur
+écran étroit ; sa couleur reste pilotée par la seule probabilité T850, la
+fiabilité Tx/Tn restant un glyphe. Les bandeaux de statut remplacent la grille
+de métriques en tête des pages métier plutôt que de s'y ajouter, et rendent
+visible le détail qui vivait en infobulle. `plotly_theme.py` enregistre enfin
+des gabarits clair et sombre et unifie marges, légendes et hauteurs, jusque-là
+divergentes d'un graphique à l'autre.
+
+Le harnais de rendu couvre désormais les deux apps, avec sa propre référence
+côté neige, et compare les tableaux stylés sur leurs valeurs. Il navigue par le
+hash d'URL des pages, isolé dans `core/testing/apptest_nav.py` : ni
+`switch_page`, qui exige un script sur disque, ni les paramètres d'URL ne
+savent piloter une navigation construite sur des callables. Non-régression
+vérifiée : 35 sorties de calcul strictement identiques, quatorze pages rendues
+sans écart de valeur.
+
+
 ## [3.1.12] - 2026-08-20
 Interfaces canicule et neige : libellés sans pictogrammes.
 

@@ -16,7 +16,9 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 CHANGELOG_PATH = BASE_DIR / "CHANGELOG.md"
 HEADER = "# Changelog\n"
-VERSION_RE = re.compile(r"^v(\d+\.\d+\.\d+)\s*[–-]\s*(.+)$")
+# Le suffixe de pré-version (« v3.2.0-rc.1 ») fait partie de la version :
+# une release candidate a sa propre entrée, distincte de la version finale.
+VERSION_RE = re.compile(r"^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\s*[–-]\s*(.+)$")
 COMMIT_SEP = "\x1f"  # séparateur improbable dans un message de commit
 ENTRY_SEP = "\x1e"
 
@@ -24,7 +26,8 @@ ENTRY_SEP = "\x1e"
 def _existing_versions() -> set[str]:
     if not CHANGELOG_PATH.exists():
         return set()
-    return set(re.findall(r"^## \[(\d+\.\d+\.\d+)\]", CHANGELOG_PATH.read_text(), re.MULTILINE))
+    return set(re.findall(r"^## \[(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\]",
+                          CHANGELOG_PATH.read_text(), re.MULTILINE))
 
 
 def _commits() -> list[tuple[str, str, str, str]]:

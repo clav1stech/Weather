@@ -47,7 +47,10 @@ BACKUP_KEEP = 15
 def _get_version(relative_path, variable, fallback):
     entrypoint = project_dir / relative_path
     with open(entrypoint, "r", encoding="utf-8") as f:
-        match = re.search(rf'{variable}\s*=\s*"(\d+)\.(\d+)\.(\d+)"', f.read())
+        # Le suffixe de pré-version (« 3.2.0-rc.1 ») est accepté puis ignoré :
+        # le nom des archives reste en X.Y.Z. Sans cette tolérance, une branche
+        # en release candidate retomberait silencieusement sur le fallback.
+        match = re.search(rf'{variable}\s*=\s*"(\d+)\.(\d+)\.(\d+)[^"]*"', f.read())
         if match:
             return int(match.group(1)), int(match.group(2)), int(match.group(3))
         return fallback

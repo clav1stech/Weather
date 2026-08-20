@@ -1,0 +1,60 @@
+# Thème natif Streamlit — habille les WIDGETS eux-mêmes (boutons, onglets,
+# champs, tableaux), ce que le CSS injecté ne peut pas atteindre proprement.
+# Les valeurs reprennent celles de core/ui/tokens.py : les deux fichiers
+# décrivent la même palette, l'un pour Streamlit, l'autre pour nos composants.
+# Toute modification de couleur se fait DANS LES DEUX.
+#
+# Ce fichier vaut pour les deux apps (Streamlit lit .streamlit/ du dossier de
+# lancement, qui est la racine du monorepo dans tous les cas : Streamlit Cloud,
+# lanceurs locaux et harnais pointent sur meteo_app.py / snow_app.py à la racine).
+
+[theme]
+base = "light"
+font = "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif"
+codeFont = "SF Mono, JetBrains Mono, ui-monospace, Menlo, Consolas, monospace"
+baseFontSize = 15
+baseRadius = "0.75rem"      # 12px — RADIUS["md"] de tokens.py
+buttonRadius = "0.5rem"
+showWidgetBorder = true
+showSidebarBorder = true
+linkUnderline = false
+# Titres légèrement resserrés : la densité d'information prime sur l'emphase,
+# les tailles par défaut de Streamlit mangent trop de hauteur d'écran.
+headingFontSizes = ["1.9rem", "1.45rem", "1.15rem", "1rem", "0.95rem", "0.9rem"]
+headingFontWeights = [700, 650, 600]
+metricValueFontSize = "1.85rem"
+metricValueFontWeight = 600
+
+[theme.light]
+primaryColor = "#1F618D"
+backgroundColor = "#F7F8FA"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1B2733"
+linkColor = "#1F618D"
+borderColor = "rgba(100,116,139,0.20)"
+dataframeBorderColor = "rgba(100,116,139,0.20)"
+dataframeHeaderBackgroundColor = "#EFF2F6"
+codeBackgroundColor = "#EFF2F6"
+
+[theme.light.sidebar]
+# Sidebar = panneau de contexte : un fond plus soutenu que la page la détache
+# sans la transformer en menu (la navigation vit en haut de page).
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#EFF2F6"
+borderColor = "rgba(100,116,139,0.20)"
+
+[theme.dark]
+primaryColor = "#5DADE2"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#171B23"
+textColor = "#E6E9EE"
+linkColor = "#5DADE2"
+borderColor = "rgba(148,163,184,0.20)"
+dataframeBorderColor = "rgba(148,163,184,0.20)"
+dataframeHeaderBackgroundColor = "#1F242E"
+codeBackgroundColor = "#1F242E"
+
+[theme.dark.sidebar]
+backgroundColor = "#131720"
+secondaryBackgroundColor = "#1F242E"
+borderColor = "rgba(148,163,184,0.20)"

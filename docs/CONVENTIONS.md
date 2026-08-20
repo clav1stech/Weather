@@ -27,6 +27,10 @@ sont dans `CLAUDE.md`, la carte des modules dans `docs/CODEMAP.md`.
   `core/stats/`, liaison config dans l'adaptateur `app/stats/`.
 - **Graphique générique** → `app/ui/charts.py` ; **propre à un domaine** →
   `app/domains/<nom>/charts.py`.
+- **Élément d'interface réutilisable** (en-tête, bandeau, carte, badge,
+  calendrier, tableau) → `core/ui/components.py` ; **couleur, mesure, hauteur
+  de graphique** → `core/ui/tokens.py` ; **règle de mise en forme** →
+  `core/ui/design.py`. Une page n'invente ni l'un ni l'autre.
 - **Nouvelle page** : transverse → `app/pages/` + routage `meteo_app.py` ;
   métier → dans son domaine + registre `app/domains/__init__.py`.
 - Contrat page : `page_xxx(runs, sig)`.
@@ -44,6 +48,35 @@ sont dans `CLAUDE.md`, la carte des modules dans `docs/CODEMAP.md`.
 - Le dashboard n'importe du pipeline que `Forecast.persist`/`load_existing`,
   `validate_cross_pipeline` (helpers lecture xlsx) et `run_dual` (constantes
   de créneaux) — ne pas élargir cette surface.
+
+## Interface (design system `core/ui/`)
+- **Plus aucun style inline dans les pages ni dans les composants.** Le rendu
+  passe par les composants de `core/ui/components.py`, qui ne posent que des
+  classes `wx-*` définies dans `core/ui/design.py`. Seule exception admise :
+  une variable CSS portant une DONNÉE (teinte d'un niveau de risque, couleur
+  d'un jour de calendrier) — jamais une règle de mise en forme.
+- **Toute couleur vient des jetons** (`core/ui/tokens.py`, deux jeux clair et
+  sombre aux mêmes clés). Aucun `#RRGGBB` d'interface en dur dans une page ;
+  les couleurs MÉTIER (modèle, station, altitude) restent, elles, dans
+  `config.py` / `snow_config.py` et arrivent en paramètres — `core/` reste
+  config-agnostique.
+- **Une figure ne fixe ni sa hauteur, ni ses marges, ni sa légende** : elle
+  appelle `core.ui.plotly_theme.apply_layout` avec une clé du registre
+  `CHART_H` (`strip`/`compact`/`standard`/`tall`). Une hauteur proportionnelle
+  au nombre de lignes reste explicite et commentée.
+- **Une couleur = un seul signal.** La teinte d'un bandeau ou d'une case de
+  calendrier ne porte qu'un critère (probabilité T850, palier d'intensité
+  neige) ; toute réserve ou nuance passe par un glyphe, un sous-titre ou
+  l'infobulle — jamais par la couleur.
+- **Absence de données ≠ alerte** : un flux annexe absent s'affiche avec
+  `empty_state` (encart discret), jamais avec `st.warning`/`st.error`. Les
+  `st.info` restent réservés aux messages OPÉRATIONNELS (cooldown, action à
+  faire).
+- **Navigation** : `st.navigation(position="top")` via
+  `core.ui.nav.build_navigation`, sections Suivi / Analyse / Données ; la
+  sidebar (`context_panel`) ne porte que l'état des données. Le contrat de page
+  `page_xxx(runs, sig)` est inchangé — les arguments sont figés par
+  `functools.partial` sur chaque `st.Page`.
 
 ## Streamlit & cache
 - Fonctions coûteuses : `@st.cache_data(show_spinner=False)` avec la
@@ -63,11 +96,17 @@ sont dans `CLAUDE.md`, la carte des modules dans `docs/CODEMAP.md`.
 
 ## Non-régression (obligatoire pour tout refactor / factorisation)
 1. `python tools/check_non_regression.py capture` puis
-   `python tools/ui_snapshot.py capture` AVANT de toucher au code ;
+   `python tools/ui_snapshot.py capture` (et `… capture neige` si le chantier
+   touche le dashboard neige) AVANT de toucher au code ;
 2. modifier ;
 3. les deux `… check` doivent être 100 % verts APRÈS (mêmes données, même
    heure « pleine »). Un changement de comportement VOULU se justifie dans le
    message de PR/commit, puis on re-capture.
+
+Sous AppTest, une page de `st.navigation` construite à partir d'un callable ne
+s'atteint ni par `switch_page` ni par `query_params` : passer par
+`core.testing.apptest_nav.aller_a` (hash de l'`url_path`), jamais par un
+widget de navigation.
 
 ## Git
 - Ne jamais committer sans demande explicite de l'utilisateur.

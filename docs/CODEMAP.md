@@ -40,7 +40,8 @@ sous-systèmes indépendants, reliés uniquement par `config.py` et le parquet :
 ┌── DASHBOARD (package app/ dans apps/canicule/, refactorable librement) ─┐
 │ meteo_app.py           point d'entrée Streamlit À LA RACINE (Streamlit  │
 │                        Cloud, lanceurs et harnais UI y pointent) :      │
-│                        set_page_config, sidebar, routage — RIEN d'autre │
+│                        set_page_config, feuille de style, navigation    │
+│                        haute et panneau de contexte — RIEN d'autre      │
 │                        + expose apps/canicule/ sur sys.path (`import    │
 │                        app` inchangé partout)                           │
 │ app/runtime.py         IS_LOCAL, LOCAL_TZ, VAR, user_tz                 │
@@ -55,7 +56,14 @@ sous-systèmes indépendants, reliés uniquement par `config.py` et le parquet :
 ┌── CORE (racine, mutualisé entre apps, CONFIG-AGNOSTIQUE) ───────────────┐
 │ core/stats/            ensemble.py (stats paramétrées var/seuil/labels) │
 │                        climato.py (formule cosinus)                     │
-│ core/ui/               thème partagé + exécution locale/rendu des logs  │
+│ core/ui/               DESIGN SYSTEM partagé : tokens.py (palette       │
+│                        sémantique clair/sombre, échelle de risque,      │
+│                        mesures), design.py (feuille de style `wx-*`),   │
+│                        components.py (en-tête, bandeau, carte KPI,      │
+│                        badge, calendrier, état vide, tableaux),         │
+│                        nav.py (navigation haute + panneau de contexte), │
+│                        plotly_theme.py (templates + apply_layout),      │
+│                        theme.py (clair/sombre), auth.py, pipeline.py    │
 │ core/services/         cooldown.py, github_dispatch.py, openmeteo.py    │
 │                        (client API générique : fetch_json, multi-points,│
 │                        Metadata API, repli horloge)                     │
@@ -65,7 +73,9 @@ sous-systèmes indépendants, reliés uniquement par `config.py` et le parquet :
 │                        runs d'ensemble (fraîcheur empirique, portée     │
 │                        contiguë, anti-régression, fusion (run, modèle)) │
 │                        — consommée par apps/snow/pipeline/              │
-│ core/testing/          harnais de non-régression (wrappers dans tools/) │
+│ core/testing/          harnais de non-régression, PARAMÉTRÉS PAR APP    │
+│                        (wrappers dans tools/) + apptest_nav.py          │
+│                        (navigation AppTest, partagée avec tests/)       │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -125,7 +135,7 @@ et `app/services/cooldown.py` sont de purs ré-exports de `core/`.
 
 | Module | Responsabilité | Fonctions clés |
 |---|---|---|
-| `meteo_app.py` | entrée : page config, sidebar, routage, `APP_VERSION` | `main` |
+| `meteo_app.py` | entrée : page config, feuille de style, navigation haute, panneau de contexte, `APP_VERSION` | `main` |
 | `app/runtime.py` | contexte : local/cloud, fuseaux, variable principale | `IS_LOCAL`, `LOCAL_TZ`, `VAR`, `user_tz` |
 | `app/data/db.py` | lecture parquet, conversion TZ, liste des runs | `load_db`, `list_runs`, `run_slice`, `utc_cycle`, `run_label_text` |
 | `app/data/runsets.py` | POLITIQUES de sélection de runs (3, volontairement distinctes) + backfill convergence | `latest_complete_run_sub`, `latest_run_sub`, `previous_runs_sub`, `completed_pooled_sub`, `trend_daily_medians`, `main_labels_expected_at`, `latest_refresh_status` |
@@ -137,9 +147,9 @@ et `app/services/cooldown.py` sont de purs ré-exports de `core/`.
 | `app/stats/ensemble.py` | stats génériques tolérantes NaN sur un pool de membres | `super_ensemble`, `model_data`, `model_medians`, `divergence`, `daily_aggregate`, `daily_risk`, `var_median` |
 | `app/stats/tables.py` | tables d'export larges (onglet 🧾) | `enriched_super_table`, `model_table` |
 | `app/stats/climato.py` | normale saisonnière cosinus (ajustable en session) | `clim_normal`, `clim_params`, `clim_z500_normal` |
-| `app/ui/theme.py` | thème clair/sombre, CSS global, couleurs | `_plotly_template`, `_ink`, `_rgba`, `GLOBAL_CSS` |
+| `app/ui/theme.py` | ré-export du thème partagé (couleurs, feuille de style) | `stylesheet`, `_plotly_template`, `_ink`, `_rgba`, `GLOBAL_CSS` (alias historique) |
 | `app/ui/charts.py` | graphiques Plotly génériques | `fan_chart`, `spaghetti_chart`, `models_median_chart`, `divergence_chart`, `spread_chart`, `z500_median_chart` |
-| `app/ui/components.py` | composants Streamlit réutilisables | `_kpi_card`, `complete_runs_caption` |
+| `app/ui/components.py` | ADAPTATEUR de la carte KPI partagée (y lie la climato) + légende des runs | `_kpi_card`, `complete_runs_caption` |
 | `app/domains/__init__.py` | REGISTRE des domaines (navigation) | `DOMAIN_PAGES` |
 | `app/domains/heatwave/` | domaine canicule : `logic.py` (paliers/labels), `charts.py`, `page.py` | `page_grand_public`, `tendance_recente`, `signal_synoptique` |
 | `app/domains/observations/` | domaine observations MF : ICU inter-stations, prévu vs observé | `page_observations`, `ecart_icu_series`, `comparaison_prevu_observe` |
@@ -155,6 +165,39 @@ et `app/services/cooldown.py` sont de purs ré-exports de `core/`.
 (config-agnostique : les réglages arrivent en paramètres via les adaptateurs) ;
 `pages`/`domains` n'importent jamais entre eux ; le pipeline racine n'importe
 jamais `core/`.
+
+## Design system (core/ui/) — commun aux deux apps
+
+Une seule source de vérité visuelle, config-agnostique comme tout `core/` :
+aucune couleur métier (modèle, station, altitude) n'y entre, elles restent
+dans `config.py` / `snow_config.py` et arrivent en paramètres.
+
+| Module | Rôle | Points d'entrée |
+|---|---|---|
+| `core/ui/tokens.py` | palette SÉMANTIQUE (deux jeux clair/sombre à clés identiques), échelle de risque `risk_0..3`, espacements, rayons, hauteurs de graphique | `tokens`, `risk_color`, `anomaly_color`, `SPACE`, `RADIUS`, `CHART_H` |
+| `core/ui/design.py` | feuille de style générée depuis les jetons (variables `--wx-*`, classes `wx-*`) | `stylesheet` |
+| `core/ui/components.py` | composants rendus à partir des seules classes `wx-*` | `page_header`, `status_banner`, `kpi_card`/`kpi_html`/`kpi_row`, `badge`, `risk_calendar`, `empty_state`, `table_style` |
+| `core/ui/nav.py` | registre sectionné de pages (barre du HAUT) + panneau de contexte de la sidebar | `build_navigation`, `context_panel`, `page_slug` |
+| `core/ui/plotly_theme.py` | templates `weather_light`/`weather_dark` + gabarit unique de mise en page des figures | `apply_layout`, `template_name` |
+
+Règles :
+- **Aucun style inline dans les pages.** Un composant pose une classe `wx-*` ;
+  la seule exception est une variable CSS portant une DONNÉE (teinte d'un
+  niveau, couleur d'un jour de calendrier), jamais une règle de mise en forme.
+- **Aucune hauteur ni marge de figure au cas par cas** : `apply_layout` avec
+  une clé du registre `CHART_H` (`strip`/`compact`/`standard`/`tall`) ; les
+  hauteurs proportionnelles (une ligne par run) restent explicites, commentées.
+- **Une couleur = un signal.** La teinte d'une case de calendrier ou d'un
+  bandeau ne porte qu'un seul critère (probabilité T850 côté canicule, palier
+  d'intensité côté neige) ; toute réserve passe par un glyphe ou l'infobulle.
+- **Navigation** : `st.navigation(position="top")`, sections
+  Suivi / Analyse / Données. Le contrat des pages ne change pas —
+  `page_xxx(runs, sig)`, arguments figés par `functools.partial` sur chaque
+  `st.Page` (qui n'accepte qu'un callable sans argument). La sidebar ne porte
+  plus que l'état des données.
+- Sous AppTest, une page construite à partir d'un callable ne s'atteint ni par
+  `switch_page` ni par `query_params` : passer par
+  `core/testing/apptest_nav.aller_a` (hash de l'`url_path`).
 
 ## Flux de données (dashboard)
 
@@ -220,8 +263,10 @@ le code vit dans `core/testing/`, les commandes passent par les wrappers
 ```
 python tools/check_non_regression.py capture   # AVANT une modification : fige la référence
 python tools/check_non_regression.py check     # APRÈS : 35+ sorties de calcul identiques ?
-python tools/ui_snapshot.py capture            # idem pour le RENDU des 6 pages (AppTest)
+python tools/ui_snapshot.py capture            # idem pour le RENDU des pages (AppTest)
 python tools/ui_snapshot.py check
+python tools/ui_snapshot.py capture neige     # même harnais sur le dashboard neige
+python tools/ui_snapshot.py check neige
 ```
 
 Les références (`tools/golden/*.json`) dépendent du contenu de la base au

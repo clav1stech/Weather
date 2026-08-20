@@ -20,12 +20,12 @@ PROB_RISQUE_MODERE = 0.10
 
 def _canicule_label(prob):
     if prob >= PROB_CANICULE_QUASI:
-        return "🔴 Canicule quasi-certaine"
+        return "Canicule quasi-certaine"
     if prob >= PROB_RISQUE_MARQUE:
-        return "🟠 Risque marqué"
+        return "Risque marqué"
     if prob >= PROB_RISQUE_MODERE:
-        return "🟡 Risque modéré"
-    return "🟢 Pas de signal de canicule"
+        return "Risque modéré"
+    return "Pas de signal de canicule"
 
 
 def episode_chaleur(jours, seuil_chaleur, seuil_prob=PROB_CANICULE_QUASI, depuis=None):
@@ -105,14 +105,14 @@ def tendance_recente(trend, window_h=TREND_WINDOW_H):
 def _tendance_label(delta):
     """(flèche, libellé vulgarisé) d'une révision — jamais de valeur brute."""
     if delta >= TREND_STRONG_C:
-        return "⬆", "nette révision à la hausse"
+        return "↑", "nette révision à la hausse"
     if delta >= TREND_STABLE_C:
         return "↗", "légère révision à la hausse"
     if delta <= -TREND_STRONG_C:
-        return "⬇", "nette révision à la baisse"
+        return "↓", "nette révision à la baisse"
     if delta <= -TREND_STABLE_C:
         return "↘", "légère révision à la baisse"
-    return "＝", "prévision stable"
+    return "=", "prévision stable"
 
 
 # ── Contexte synoptique Z500 (appui du signal T850, jamais un critère de risque) ──
@@ -148,7 +148,7 @@ def anomalie_z500_journaliere(sub):
 
 def signal_synoptique(sub, today, fenetre_j=Z500_FENETRE_J):
     """Signal qualitatif grand public du régime d'altitude sur les prochains
-    jours : (icône, libellé court, phrase d'appui) ou None si Z500 inexploitable
+    jours : (libellé court, phrase d'appui) ou None si Z500 inexploitable
     (rien à afficher — le message T850 reste seul, strictement inchangé).
 
     Deux portes d'entrée symétriques par régime : anomalie MOYENNE de la fenêtre
@@ -165,16 +165,16 @@ def signal_synoptique(sub, today, fenetre_j=Z500_FENETRE_J):
     n_dorsale = int((win["anom"] >= Z500_ANOM_DORSALE_M).sum())
     n_talweg = int((win["anom"] <= Z500_ANOM_TALWEG_M).sum())
     if anom_moy >= Z500_ANOM_DORSALE_M or n_dorsale >= Z500_JOURS_PERSISTANCE:
-        return ("🔆", "favorable au maintien de la chaleur",
+        return ("favorable au maintien de la chaleur",
                 "En altitude, les modèles voient une **dorsale anticyclonique** — une "
                 "configuration qui installe la chaleur et la fait durer. Si un épisode "
                 "chaud se dessine ci-dessous, ce contexte le rend plus solide.")
     if anom_moy <= Z500_ANOM_TALWEG_M or n_talweg >= Z500_JOURS_PERSISTANCE:
-        return ("🌬️", "peu propice à une chaleur durable",
+        return ("peu propice à une chaleur durable",
                 "La circulation d'altitude reste de type **perturbé** : même si des "
                 "journées chaudes apparaissent ci-dessous, ce contexte ne favorise pas "
                 "leur installation dans la durée.")
-    return ("⚖️", "neutre",
+    return ("neutre",
             "Pas de configuration d'altitude marquée : ni blocage qui entretiendrait "
             "la chaleur, ni régime perturbé qui la balaierait — le signal ci-dessous "
             "se suffit à lui-même.")
@@ -189,10 +189,10 @@ CONF_SPREAD_FAIBLE_C = 6.0
 
 def _confiance_label(spread):
     if spread < CONF_SPREAD_BON_C:
-        return "🟢 bonne (scénarios groupés)", "#2ECC71"
+        return "bonne (scénarios groupés)", "#2ECC71"
     if spread < CONF_SPREAD_FAIBLE_C:
-        return "🟡 moyenne (scénarios partagés)", "#F1C40F"
-    return "🟠 faible (scénarios très dispersés)", "#E67E22"
+        return "moyenne (scénarios partagés)", "#F1C40F"
+    return "faible (scénarios très dispersés)", "#E67E22"
 
 
 # ── Incertitude du Tx/Tn haute résolution (appui d'affichage, pas un critère) ──

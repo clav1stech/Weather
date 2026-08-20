@@ -73,7 +73,7 @@ def _render_remote_launcher():
     derrière mot de passe et cooldown. Le cooldown est vérifié AVANT tout appel
     réseau (garde-fou, pas un confort d'UX) et n'est consommé qu'après un
     déclenchement réussi."""
-    st.subheader("▶️ Déclencher une collecte")
+    st.subheader("Déclencher une collecte")
     st.caption("La collecte est exécutée par l'intégration continue (le job "
                "GitHub Actions habituel), jamais par ce dashboard : les "
                "données sont écrites exactement comme lors d'un passage "
@@ -91,19 +91,19 @@ def _render_remote_launcher():
 
     autorise, restant = github_dispatch.can_trigger()
     if not autorise:
-        st.info(f"⏳ Déclenchement possible dans {int(restant // 60)} min "
+        st.info(f"Déclenchement possible dans {int(restant // 60)} min "
                 f"{int(restant % 60)} s (limite anti-abus partagée).")
         return
 
-    if st.button(f"🚀 Lancer — {label}", type="primary"):
+    if st.button(f"Lancer — {label}", type="primary"):
         with st.spinner("Demande envoyée à l'intégration continue…"):
             ok, msg = github_dispatch.trigger_workflow(target)
         if ok:
             github_dispatch.record_trigger()  # jamais avant : un échec ne consomme pas
-            st.success(f"✅ {msg} Le job tourne côté CI ; rafraîchissez dans "
+            st.success(f"{msg} Le job tourne côté CI ; rafraîchissez dans "
                        "une à deux minutes.")
         else:
-            st.error(f"❌ {msg}")
+            st.error(msg)
 
 
 def _render_local_launcher():
@@ -111,26 +111,26 @@ def _render_local_launcher():
     sous-processus, comportement historique inchangé."""
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.subheader("① Open-Meteo seul")
+        st.subheader("1. Open-Meteo seul")
         st.caption("`Forecast.py` : interroge l'API, détecte le cycle par modèle, met à jour "
                   "`data/database_paris.parquet`. ~10-30 s.")
-        if st.button("▶️ Lancer Forecast.py", type="secondary"):
+        if st.button("Lancer Forecast.py", type="secondary"):
             st.session_state["pipeline_results"] = _execute(
                 [("Pipeline Open-Meteo", "Forecast.py", 300)])
 
     with col2:
-        st.subheader("② Double run + contrôle croisé")
+        st.subheader("2. Double run + contrôle croisé")
         st.caption("`run_dual.py` : Open-Meteo, puis (si créneau favorable) scrape Météociel "
                   "+ comparaison ECMWF/AIFS/GEFS échéance par échéance. ~30-90 s.")
-        if st.button("🔁 Lancer le double run", type="primary"):
+        if st.button("Lancer le double run", type="primary"):
             st.session_state["pipeline_results"] = _execute(
                 [("Double run", "run_dual.py", 600)])
 
     with col3:
-        st.subheader("③ Tx/Tn haute résolution")
+        st.subheader("3. Tx/Tn haute résolution")
         st.caption("`forecast_t2m_hd.py` : API Forecast standard (Météo-France/DWD ICON), "
                   "met à jour `data/database_paris_t2m.parquet` (flux annexe, 4 j). ~5-15 s.")
-        if st.button("🌡️ Lancer Tx/Tn HD", type="secondary"):
+        if st.button("Lancer Tx/Tn HD", type="secondary"):
             st.session_state["pipeline_results"] = _execute(
                 [("Pipeline Tx/Tn HD", "forecast_t2m_hd.py", 300)])
 
@@ -141,20 +141,20 @@ def _render_local_launcher():
     # sans consommer les appels API des deux autres.
     _FLUX_OBS = [
         ("Observations Météo-France", "fetch_observations.py", 60,
-         "🛰️ Obs horaires seules"),
+         "Obs horaires seules"),
         ("Observations 6 min", "fetch_observations_6m.py", 60,
-         "⏱️ Obs 6 min seules"),
+         "Obs 6 min seules"),
         ("Prévision Montsouris (vintages 15 min)", "fetch_montsouris_vintages.py", 60,
-         "🔭 Vintages seuls"),
+         "Vintages seuls"),
     ]
     with col4:
-        st.subheader("④ Observations + vintages")
+        st.subheader("4. Observations + vintages")
         st.caption("`fetch_observations.py` (paquet horaire Météo-France, "
                   "4 stations), `fetch_observations_6m.py` (infra-horaire 6 min, "
                   "4 stations) puis `fetch_montsouris_vintages.py` (Open-Meteo "
                   "minutely_15, prévision Montsouris 15 min) — flux annexes "
                   "indépendants, à la suite. ~15-30 s.")
-        if st.button("📡 Lancer obs + 6 min + vintages", type="secondary"):
+        if st.button("Lancer obs + 6 min + vintages", type="secondary"):
             st.session_state["pipeline_results"] = _execute(
                 [(label, script, timeout) for label, script, timeout, _ in _FLUX_OBS])
         st.caption("Ou un seul flux, isolément :")
@@ -172,7 +172,7 @@ def _render_legacy_import(sig):
     """Import ciblé legacy → parquet. LOCAL UNIQUEMENT : seule fonction de la
     page qui écrit dans les données, jamais exposée en ligne."""
     st.markdown("---")
-    st.subheader("🩹 Import ciblé depuis le legacy")
+    st.subheader("Import ciblé depuis le legacy")
     st.caption("Comble une **absence avérée** du parquet Open-Meteo depuis un xlsx "
                "Météociel (même principe que `migrate.py`, mais un seul couple "
                "run × modèle à la fois). Ne liste que les couples présents en "
@@ -194,7 +194,7 @@ def _render_legacy_import(sig):
                               cands.to_dict("records"), format_func=_cand_label)
         confirm = st.checkbox("Je confirme l'import de ce run dans le parquet "
                               "(sauvegarde datée créée automatiquement avant écriture).")
-        if st.button("📥 Importer ce run", type="primary", disabled=not confirm):
+        if st.button("Importer ce run", type="primary", disabled=not confirm):
             with st.spinner("Import en cours…"):
                 try:
                     ok, msg = import_legacy_run(choice["file"], choice["model"],
@@ -202,18 +202,18 @@ def _render_legacy_import(sig):
                 except Exception as e:  # noqa: BLE001
                     ok, msg = False, f"Erreur inattendue : {e}"
             if ok:
-                st.success(f"✅ {msg}")
+                st.success(msg)
                 st.cache_data.clear()
             else:
-                st.error(f"❌ {msg}")
+                st.error(msg)
 
 
 def _render_cross_check():
     """Historique du contrôle croisé — lecture seule, visible de tous."""
     st.markdown("---")
-    st.subheader("🔍 Historique du contrôle croisé")
+    st.subheader("Historique du contrôle croisé")
     st.caption("Comparaison **médiane d'ensemble** (ECMWF/AIFS/GEFS) entre Open-Meteo et "
-              "Météociel, échéance par échéance. Seuil de signalement (⚠️) élargi avec "
+              "Météociel, échéance par échéance. Seuil de signalement élargi avec "
               f"l'échéance, de {C.CROSS_CHECK_TOLERANCE_BASE_C:.1f} à "
               f"{C.CROSS_CHECK_TOLERANCE_CAP_C:.1f} °C (un bug pipeline ressort à courte "
               "échéance ; à longue échéance deux ensembles distincts divergent légitimement).")
@@ -235,9 +235,9 @@ def _render_cross_check():
                     width="stretch", hide_index=True)
 
         if int(latest["flag"].sum()):
-            st.warning(f"⚠️ {int(latest['flag'].sum())} échéance(s) au-delà du seuil sur le "
+            st.warning(f"{int(latest['flag'].sum())} échéance(s) au-delà du seuil sur le "
                       "dernier contrôle — détail ci-dessous.")
-        with st.expander("📋 Détail du dernier contrôle"):
+        with st.expander("Détail du dernier contrôle"):
             detail_cols = ["model", "metric", "valid_time", "lead_h", "legacy_value",
                            "openmeteo_value", "diff", "tol", "flag"]
             # Rétro-compat : un log antérieur au format lead-aware n'a ni lead_h ni tol.
@@ -250,9 +250,9 @@ def _render_cross_check():
                       "diff": "{:+.2f}", "tol": "{:.2f}"})
             st.dataframe(styler, width="stretch", height=400, hide_index=True)
 
-        with st.expander("📜 Historique complet (tous contrôles)"):
+        with st.expander("Historique complet (tous contrôles)"):
             st.dataframe(log, width="stretch", height=400, hide_index=True)
-            st.download_button("⬇️ Télécharger l'historique (CSV)",
+            st.download_button("Télécharger l'historique (CSV)",
                                log.to_csv(index=False).encode("utf-8-sig"),
                                file_name="cross_check_log.csv", mime="text/csv")
 
@@ -265,16 +265,16 @@ def page_run(runs, sig):
     collecte passe par les scripts en local et par le job CI (mot de passe) en
     ligne ; l'import legacy, seule écriture directe dans le parquet, reste
     strictement local."""
-    st.title("🚀 Lancer le pipeline")
+    st.title("Lancer le pipeline")
 
     now_utc = datetime.now(ZoneInfo("UTC"))
     missing = run_dual._missing_legacy_slots(now_utc)
     st.caption(f"Heure UTC actuelle : **{now_utc:%H:%M}**")
     if missing:
-        st.info(f"📥 À rattraper côté Météociel : **{', '.join(missing)}** (publié mais pas "
+        st.info(f"À rattraper côté Météociel : **{', '.join(missing)}** (publié mais pas "
                 "encore en stock) — le double run le scrapera.")
     else:
-        st.success("✅ Stock legacy à jour : rien à rattraper pour l'instant.")
+        st.success("Stock legacy à jour : rien à rattraper pour l'instant.")
 
     if IS_LOCAL:
         _render_local_launcher()

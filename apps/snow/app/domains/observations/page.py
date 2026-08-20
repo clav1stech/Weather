@@ -27,16 +27,16 @@ def _carte_station(col, station, obs):
         valeur = f"{t:.1f} °C" if pd.notna(t) else "n/d"
         extras = []
         if pd.notna(obs.get("hneige")):
-            extras.append(f"❄ {obs['hneige']:.0f} cm au sol")
+            extras.append(f"{obs['hneige']:.0f} cm au sol")
         if pd.notna(obs.get("raf")):
-            extras.append(f"💨 raf {obs['raf'] * 3.6:.0f} km/h")
+            extras.append(f"raf {obs['raf'] * 3.6:.0f} km/h")
         elif pd.notna(obs.get("vent_ff")):
-            extras.append(f"💨 {obs['vent_ff'] * 3.6:.0f} km/h")
+            extras.append(f"vent {obs['vent_ff'] * 3.6:.0f} km/h")
         if pd.notna(obs.get("humidite")):
             extras.append(f"{obs['humidite']:.0f} %")
         horodatage = f"{obs['valid_time']:%H:%M}"
         if logic.est_perimee(obs["valid_time"]):
-            horodatage = f"⚠️ ancienne ({obs['valid_time']:%d %b %H:%M})"
+            horodatage = f"obs ancienne ({obs['valid_time']:%d %b %H:%M})"
         st.metric(f"{station['nom']} · {station['alt']} m", valeur,
                   " · ".join(extras) or horodatage, delta_color="off")
         if extras:
@@ -44,7 +44,7 @@ def _carte_station(col, station, obs):
 
 
 def page_observations(runs, sig):
-    st.title("🌡️ Observations — Alpes du Nord")
+    st.title("Observations — Alpes du Nord")
     obs_sig = obs_signature()
     latest = latest_obs(obs_sig)
     if latest.empty:
@@ -80,7 +80,7 @@ def page_observations(runs, sig):
         détail = " (inversion probable)" if grad < 3.0 else ""
         signaux.append(f"gradient observé **{grad:.1f} °C/1000 m**{détail}")
     if signaux:
-        st.caption("🌍 " + " · ".join(signaux))
+        st.caption(" · ".join(signaux))
 
     # ------------------------------------------------------- Graphiques --
     fenetre = obs_window(obs_sig, SC.OBS_FENETRE_GRAPHE_H)

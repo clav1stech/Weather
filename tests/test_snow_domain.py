@@ -131,15 +131,15 @@ def test_signal_affichable_ecarte_les_traces_isolees_sans_modifier_daily():
 
 def test_paliers_neige_encadrent_les_bornes_1_5_20():
     # Bornes validées : petite chute [1,5), vraie chute [5,20), grosse chute [20,+).
-    assert logic.palier_neige(0.9)[0] == "—"
-    assert logic.palier_neige(2.0)[0] == "petite chute"
-    assert logic.palier_neige(12.0)[0] == "vraie chute"
-    assert logic.palier_neige(22.0)[0] == "grosse chute"
+    assert logic.palier_neige(0.9) == "—"
+    assert logic.palier_neige(2.0) == "petite chute"
+    assert logic.palier_neige(12.0) == "vraie chute"
+    assert logic.palier_neige(22.0) == "grosse chute"
     # Bornes exactes (side="right" : la borne elle-même appartient au palier
     # inférieur, cf. np.searchsorted dans logic.palier_neige).
-    assert logic.palier_neige(1.0)[0] == "petite chute"
-    assert logic.palier_neige(5.0)[0] == "vraie chute"
-    assert logic.palier_neige(20.0)[0] == "grosse chute"
+    assert logic.palier_neige(1.0) == "petite chute"
+    assert logic.palier_neige(5.0) == "vraie chute"
+    assert logic.palier_neige(20.0) == "grosse chute"
 
 
 def test_lpn_series_neige_au_sommet_pluie_au_village():

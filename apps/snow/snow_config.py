@@ -511,13 +511,13 @@ GITHUB_DISPATCH_STATE_PATH = os.path.join(
 # Sous-ensemble VOLONTAIRE des targets du workflow — les rollovers et les flux
 # canicule n'ont rien à faire dans cette page.
 PIPELINE_DISPATCH_TARGETS = [
-    ("🏔️ Toutes les collectes neige", "snow",
+    ("Toutes les collectes neige", "snow",
      "Ensemble, ensembles régionaux Météo-France et maille fine, à la suite."),
-    ("🌍 Ensemble + régionaux Météo-France", "snow-ensemble",
+    ("Ensemble + régionaux Météo-France", "snow-ensemble",
      "ECMWF/AIFS/GEFS (membres et moyennes), PE-AROME et PE-ARPEGE."),
-    ("🏔️ Maille fine (AROME-PI/IFS, HD)", "snow-hd",
+    ("Maille fine (AROME-PI/IFS, HD)", "snow-hd",
      "Très courte échéance locale : AROME-PI, AROME-IFS, AROME HD + ICON-D2."),
-    ("🛰️ Observations Alpes du Nord", "snow-obs",
+    ("Observations Alpes du Nord", "snow-obs",
      "Paquet horaire des stations du département 74."),
 ]
 

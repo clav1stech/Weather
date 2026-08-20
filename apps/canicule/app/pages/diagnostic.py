@@ -69,7 +69,7 @@ def _build_matrices(pres, run_order, models, missing_by_key):
 
 
 def page_diagnostic(runs, sig):
-    st.title("🩺 Contrôle de présence des modèles")
+    st.title("Contrôle de présence des modèles")
     st.caption(
         "Vue de fiabilisation du **double run** (Open-Meteo vs legacy/Météociel) : "
         "pour chaque run, quel modèle est présent, **jusqu'à quelle échéance** et avec "
@@ -85,7 +85,7 @@ def page_diagnostic(runs, sig):
         return
 
     # ── Synthèse des anomalies (Open-Meteo) ────────────────────────────────── #
-    st.subheader("⚠️ Anomalies détectées (Open-Meteo)")
+    st.subheader("Anomalies détectées (Open-Meteo)")
     alerts = []
     om_missing = _missing_by_run(om) if not om.empty else {}
     if not om.empty:
@@ -94,23 +94,23 @@ def page_diagnostic(runs, sig):
         for run_date in sorted(om["run_date"].unique(), reverse=True):
             attendus = sorted(om_missing.get(run_date, set()))
             if attendus:
-                alerts.append(f"🔴 **{run_label_text(run_date)}** — modèle(s) attendu(s) "
+                alerts.append(f"**{run_label_text(run_date)}** — modèle(s) attendu(s) "
                               f"absent(s) : **{', '.join(attendus)}**.")
         # Horizon quasi nul / négatif : la fenêtre réellement fraîche est vide ou
         # avant le cycle (souvent une queue entièrement NaN-ifiée par mask_stale_tail).
         for _, r in om[om["lead_h"] <= 24].iterrows():
-            alerts.append(f"🟠 **{run_label_text(r['run_date'])} · {r['model']}** — horizon "
+            alerts.append(f"**{run_label_text(r['run_date'])} · {r['model']}** — horizon "
                           f"anormalement court ({r['lead_h']:.0f} h de données fraîches "
                           "seulement). Run partiel/tronqué ou queue masquée ?")
     if alerts:
         st.markdown("\n\n".join(alerts))
     else:
-        st.success("✅ Aucun modèle attendu manquant et aucun horizon anormalement court "
+        st.success("Aucun modèle attendu manquant et aucun horizon anormalement court "
                    "sur les runs Open-Meteo archivés.")
 
     # ── Matrice Open-Meteo ─────────────────────────────────────────────────── #
     st.markdown("---")
-    st.subheader("🛰️ Open-Meteo — présence & horizon par run")
+    st.subheader("Open-Meteo — présence & horizon par run")
     st.caption(
         "Chaque case : **horizon post-cycle** (dernière échéance non-NaN ≥ cycle − cycle) "
         "en jours et **nombre de membres**. Couleur = horizon. ✗ rouge = attendu mais absent "
@@ -138,7 +138,7 @@ def page_diagnostic(runs, sig):
 
     # ── Matrice legacy / Météociel ─────────────────────────────────────────── #
     st.markdown("---")
-    st.subheader("📄 Legacy / Météociel — présence & horizon par run")
+    st.subheader("Legacy / Météociel — présence & horizon par run")
     st.caption("Runs scrapés sur Météociel (0Z/12Z uniquement). run_date = celui déclaré "
                "dans l'en-tête du xlsx ; en cas de re-scrape, seul le plus récent est retenu.")
     if lg_raw.empty:
@@ -172,12 +172,12 @@ def page_diagnostic(runs, sig):
 
     # ── Confrontation Open-Meteo ↔ legacy ──────────────────────────────────── #
     st.markdown("---")
-    st.subheader("🔀 Confrontation Open-Meteo ↔ legacy (runs alignés)")
+    st.subheader("Confrontation Open-Meteo ↔ legacy (runs alignés)")
     live = pd.Timestamp(C.PIPELINE_LIVE_SINCE)
     st.caption(
         "Pour chaque run legacy, on cherche le run Open-Meteo du **même modèle** au cycle "
-        "le plus proche (±12 h) et on confronte cycle, horizon et membres. Un ⚠️ signale "
-        "une incohérence à investiguer : cycles désalignés "
+        "le plus proche (±12 h) et on confronte cycle, horizon et membres. La colonne "
+        "« Alerte » signale une incohérence à investiguer : cycles désalignés "
         f"(> {C.CROSS_CHECK_RUN_ALIGN_TOL_H} h), écart d'horizon > 1 j, ou run Open-Meteo "
         f"introuvable côté modèle. Limitée aux runs **à partir du {live:%d/%m/%Y}** : avant, "
         "la base Open-Meteo est rétro-remplie depuis les xlsx Météociel (comparaison "
@@ -214,15 +214,15 @@ def page_diagnostic(runs, sig):
                 "Horizon legacy (j)": round(lead_lg, 1) if not pd.isna(lead_lg) else np.nan,
                 "Membres OM": (int(om_row["n_members"]) if om_row is not None else np.nan),
                 "Membres legacy": int(lr["n_members"]),
-                "Alerte": " · ".join(f"⚠️ {f}" for f in flags),
+                "Alerte": " · ".join(flags),
             })
         comp = (pd.DataFrame(rows).sort_values(["_sort", "Modèle"], ascending=[False, True])
                 .drop(columns="_sort"))
         n_flag = int((comp["Alerte"] != "").sum())
         if n_flag:
-            st.warning(f"⚠️ {n_flag} ligne(s) présentent une incohérence — voir colonne « Alerte ».")
+            st.warning(f"{n_flag} ligne(s) présentent une incohérence — voir colonne « Alerte ».")
         else:
-            st.success("✅ Tous les runs legacy s'alignent proprement sur un run Open-Meteo "
+            st.success("Tous les runs legacy s'alignent proprement sur un run Open-Meteo "
                        "(cycle et horizon cohérents).")
         styler = comp.style.apply(
             lambda r: ["background-color:#fdecea;color:#611a15" if r["Alerte"] else ""

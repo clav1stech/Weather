@@ -55,7 +55,7 @@ def test_hourly_hd_chart_reste_borne_aux_altitudes_et_masque_lpn_iso0():
         })
     fig = hourly_vertical_weather_chart(pd.DataFrame(rows))
     traces = {trace.name: trace for trace in fig.data}
-    assert "🌧️ Pluie" in traces and "❄️ Neige" in traces
+    assert "Pluie" in traces and "Neige" in traces
     assert not any("LPN" in name or "Iso 0" in name for name in traces)
     assert fig.layout.yaxis.range[1] <= 2100
     assert fig.layout.legend.y < 0
@@ -75,7 +75,7 @@ def test_hourly_chart_periode_seche_rendue_en_rails_sans_marqueurs():
     assert len(line_traces) == 4                 # un rail par altitude
     assert not marker_traces                     # aucun cercle « sec » par heure
     named = [t for t in line_traces if t.showlegend]
-    assert len(named) == 1 and named[0].name == "☀️ Temps sec"
+    assert len(named) == 1 and named[0].name == "Temps sec"
 
 
 def test_hourly_chart_affiche_explicitement_la_phase_mixte_arome_pi():
@@ -87,11 +87,11 @@ def test_hourly_chart_affiche_explicitement_la_phase_mixte_arome_pi():
     }
     fig = hourly_vertical_weather_chart(pd.DataFrame([row]))
     traces = {trace.name: trace for trace in fig.data}
-    assert "🌦️ Pluie/neige" in traces
-    mixte = traces["🌦️ Pluie/neige"]
+    assert "Pluie/neige" in traces
+    mixte = traces["Pluie/neige"]
     assert "Source : AROME-PI" in mixte.hovertext[0]
-    assert "❄️ 0.9 cm" in mixte.hovertext[0]
-    assert "🌧️ 1.1 mm" in mixte.hovertext[0]
+    assert "neige 0.9 cm" in mixte.hovertext[0]
+    assert "pluie 1.1 mm" in mixte.hovertext[0]
 
 
 def test_bilan_hd_quotidien_affiche_mm_et_cm_par_altitude():
@@ -101,8 +101,8 @@ def test_bilan_hd_quotidien_affiche_mm_et_cm_par_altitude():
         "pluie_mm": [4.2, 0.0], "neige_cm": [0.0, 7.5],
     })
     table = _hd_daily_table(summary)
-    assert table.loc["1100 m"].iloc[0] == "🌧️ 4.2 mm"
-    assert table.loc["1600 m"].iloc[0] == "❄️ 7.5 cm"
+    assert table.loc["1100 m"].iloc[0] == "pluie 4.2 mm"
+    assert table.loc["1600 m"].iloc[0] == "neige 7.5 cm"
 
 
 def test_weather_type_chart_est_empile_a_100_pourcent():
@@ -121,15 +121,16 @@ def test_weather_type_chart_est_empile_a_100_pourcent():
     bars = [trace for trace in fig.data if trace.type == "bar"]
     assert sum(float(trace.y[0]) for trace in bars) == 100.0
     assert {trace.name for trace in bars} == {
-        "❄️ Neigeux", "🌧️ Pluvieux (≥ 2 mm)",
-        "☀️ Sec / ensoleillé", "🌦️ Trace / mixte / incertain"}
-    assert {trace.text[0] for trace in bars} == {"❄️", "🌧️", "☀️", "🌦️"}
+        "Neigeux", "Pluvieux (≥ 2 mm)",
+        "Sec / ensoleillé", "Trace / mixte / incertain"}
+    # Barres empilées sans étiquette : la légende et le survol portent le sens.
+    assert {trace.text[0] for trace in bars} == {""}
     hd_trace = [trace for trace in fig.data if trace.type == "scatter"][0]
-    assert hd_trace.text[0] == "HD ☀️"
+    assert hd_trace.text[0] == "HD sec"
     assert "pluie 0.0 mm" in hd_trace.hovertext[0]
 
 
-def test_weather_type_strip_expose_dominant_couleur_emoji_et_pourcentages():
+def test_weather_type_strip_expose_dominant_couleur_libelle_et_pourcentages():
     daily = pd.DataFrame({
         "date": pd.to_datetime(["2026-01-10", "2026-01-11", "2026-01-12"]),
         "jour": [0, 1, 2],
@@ -146,7 +147,7 @@ def test_weather_type_strip_expose_dominant_couleur_emoji_et_pourcentages():
     bar = bars[0]
     # Catégorie dominante par jour : neige, neige (1er argmax sur égalité), sec.
     assert list(bar.marker.color) == ["#5DADE2", "#5DADE2", "#F4D03F"]
-    assert list(bar.text) == ["❄️", "❄️", "☀️"]
+    assert list(bar.text) == ["Neige", "Neige", "Sec"]
     # Accord fort (J0) → tuile plus opaque que l'égalité 25 % (J1).
     assert bar.marker.opacity[0] > bar.marker.opacity[1]
     # Les proportions restent lisibles au survol de chaque tuile.

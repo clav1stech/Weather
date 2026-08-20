@@ -103,7 +103,7 @@ def test_meteogram_empile_pluie_neige_et_trace_t2m_sur_axe_droit():
     fig = mf_meteogram(series, "AROME-PI")
     assert fig.layout.barmode == "stack"
     bars = [t for t in fig.data if t.type == "bar"]
-    assert {t.name for t in bars} == {"❄️ Neige", "🌧️ Pluie"}
+    assert {t.name for t in bars} == {"Neige", "Pluie"}
     t2m = [t for t in fig.data if t.type == "scatter"][0]
     assert t2m.yaxis == "y2"
 
@@ -128,7 +128,7 @@ def test_ptype_strip_couleur_par_categorie_et_code_au_survol():
     frise = pd.DataFrame({
         "valid_time": [NOW + pd.Timedelta(hours=h) for h in (1, 2)],
         "code": [0.0, 5.0], "categorie": ["sec", "neige"],
-        "label": ["☀️ Pas de précipitation", "❄️ Neige"],
+        "label": ["Pas de précipitation", "Neige"],
     })
     fig = ptype_strip(frise)
     bar = [t for t in fig.data if t.type == "bar"][0]
@@ -140,5 +140,5 @@ if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
             fn()
-            print(f"✅ {name}")
+            print(f"OK {name}")
     print("Tous les tests Maille fine Météo-France passent.")

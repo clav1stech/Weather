@@ -113,13 +113,13 @@ CATEGORIES = ("neigeux", "pluvieux", "sec", "mixte")
 # survol pour lever tout doute ; un code hors table est rendu « autre »,
 # JAMAIS assimilé silencieusement à du sec. (catégorie, libellé)
 PTYPE_LABELS = {
-    0: ("sec", "☀️ Pas de précipitation"),
-    1: ("pluie", "🌧️ Pluie"),
-    3: ("pluie", "🌧️ Pluie verglaçante"),
-    5: ("neige", "❄️ Neige"),
-    6: ("mixte", "🌦️ Neige mouillée"),
-    7: ("mixte", "🌦️ Pluie et neige mêlées"),
-    8: ("mixte", "🌦️ Granules de glace"),
+    0: ("sec", "Pas de précipitation"),
+    1: ("pluie", "Pluie"),
+    3: ("pluie", "Pluie verglaçante"),
+    5: ("neige", "Neige"),
+    6: ("mixte", "Neige mouillée"),
+    7: ("mixte", "Pluie et neige mêlées"),
+    8: ("mixte", "Granules de glace"),
 }
 
 # Pondération réservée au TYPE DE TEMPS LOCAL (précipitation + phase).
@@ -651,7 +651,7 @@ def classify_ptype(code):
         key = int(round(float(code)))
     except (TypeError, ValueError):
         return None
-    return PTYPE_LABELS.get(key, ("autre", f"❔ Code {key}"))
+    return PTYPE_LABELS.get(key, ("autre", f"Code {key}"))
 
 
 def _precip_weighted(group, column):

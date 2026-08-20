@@ -23,7 +23,7 @@ from app.ui.components import _kpi_card, complete_runs_caption
 
 
 def page_overview(runs, sig):
-    st.title("🌡️ Dashboard Météo — Prévisions d'ensemble (Paris)")
+    st.title("Dashboard Météo — Prévisions d'ensemble (Paris)")
     if runs.empty:
         st.warning("Base vide. Lancez le pipeline `Forecast.py` pour la remplir.")
         return
@@ -48,12 +48,12 @@ def page_overview(runs, sig):
         refresh_txt = (f" · rafraîchi le {refreshed_at.strftime('%d/%m/%Y à %Hh%M')}"
                        if refreshed_at is not None else "")
     if missing:
-        statut_txt = f"partiel ⚠️ (aucun run pour {', '.join(missing)})"
+        statut_txt = f"partiel (aucun run pour {', '.join(missing)})"
     elif partial:
-        statut_txt = (f"horizon réduit ⚠️ pour {', '.join(partial)} "
+        statut_txt = (f"horizon réduit pour {', '.join(partial)} "
                       "(pas de run à horizon plein récent)")
     else:
-        statut_txt = "complet ✅"
+        statut_txt = "complet"
     st.caption(f"Super-ensemble des **derniers runs complets** par modèle · "
                f"{len(runs)} prévisions (runs) archivées · températures à 850 hPa"
                f"{refresh_txt} · {statut_txt}")
@@ -189,7 +189,7 @@ def page_overview(runs, sig):
     # retenu pour T850 (ex. run T850 tout juste rafraîchi sans z500 encore).
     med_z500 = var_median(latest_z500_sub(sig, as_of), "z500")
     if med_z500 is not None and not med_z500.empty:
-        with st.expander("🌀 Contexte synoptique — géopotentiel 500 hPa (médiane)"):
+        with st.expander("Contexte synoptique — géopotentiel 500 hPa (médiane)"):
             st.caption("Médiane du super-ensemble du géopotentiel à 500 hPa (m). "
                        "Au-dessus de la normale = dorsale/blocage anticyclonique "
                        "(favorise chaleur durable) ; en dessous = talweg. "

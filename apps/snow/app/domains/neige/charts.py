@@ -21,18 +21,18 @@ def hourly_vertical_weather_chart(profile):
     altitudes = sorted(profile["altitude_m"].unique())
     xmin, xmax = profile["valid_time"].min(), profile["valid_time"].max()
     # Rails d'altitude = état sec/calme de fond, dessinés d'abord (sous les
-    # marqueurs). Un seul figure en légende, avec l'emoji ☀️ déjà en usage.
+    # marqueurs). Un seul figure en légende.
     rail_color = _rgba(_ink(), 0.20)
     for i, alt in enumerate(altitudes):
         fig.add_scatter(x=[xmin, xmax], y=[alt, alt], mode="lines",
                         line=dict(color=rail_color, width=1.4),
-                        name="☀️ Temps sec", legendgroup="sec",
+                        name="Temps sec", legendgroup="sec",
                         showlegend=(i == 0), hoverinfo="skip")
 
     styles = {
-        "neige": ("❄️ Neige", "diamond", "#5DADE2"),
-        "pluie": ("🌧️ Pluie", "circle", "#2471A3"),
-        "mixte": ("🌦️ Pluie/neige", "square", "#8E44AD"),
+        "neige": ("Neige", "diamond", "#5DADE2"),
+        "pluie": ("Pluie", "circle", "#2471A3"),
+        "mixte": ("Pluie/neige", "square", "#8E44AD"),
     }
     for phase_name, (label, symbol, color) in styles.items():
         points = profile[profile["phase"] == phase_name]
@@ -52,17 +52,17 @@ def hourly_vertical_weather_chart(profile):
                     points["quantite"], points["unite"], points["t2m_c"],
                     sources, snow_values, rain_values):
                 if phase_name == "mixte":
-                    amount = f"❄️ {snow:.1f} cm · 🌧️ {rain:.1f} mm"
+                    amount = f"neige {snow:.1f} cm · pluie {rain:.1f} mm"
                 else:
                     amount = f"{q:.1f} {unit}"
                     # AROME-PI peut diagnostiquer une phase dominante avec une
                     # faible composante opposée : elle reste visible au survol.
                     if phase_name == "neige" and pd.notna(rain) \
                             and rain >= 0.1:
-                        amount += f" · 🌧️ {rain:.1f} mm"
+                        amount += f" · pluie {rain:.1f} mm"
                     if phase_name == "pluie" and pd.notna(snow) \
                             and snow >= 0.1:
-                        amount += f" · ❄️ {snow:.1f} cm"
+                        amount += f" · neige {snow:.1f} cm"
                 hover.append(
                     f"<b>{pd.Timestamp(vt):%a %d %b · %Hh}</b><br>"
                     f"{alt:.0f} m · {label}<br>{amount}"
@@ -97,13 +97,13 @@ def hourly_vertical_weather_chart(profile):
     return fig
 
 
-# Style partagé des catégories de type de temps (couleur + emoji déjà en usage
-# dans le projet — aucun nouveau pictogramme). Ordre = ordre d'empilement.
+# Style partagé des catégories de type de temps (couleur + libellé court
+# porté dans la tuile). Ordre = ordre d'empilement.
 _WEATHER_STYLE = {
-    "neigeux": ("#5DADE2", "❄️", "neige"),
-    "pluvieux": ("#2874A6", "🌧️", "pluie"),
-    "sec": ("#F4D03F", "☀️", "sec"),
-    "mixte": ("#AAB7B8", "🌦️", "mixte"),
+    "neigeux": ("#5DADE2", "Neige", "neige"),
+    "pluvieux": ("#2874A6", "Pluie", "pluie"),
+    "sec": ("#F4D03F", "Sec", "sec"),
+    "mixte": ("#AAB7B8", "Mixte", "mixte"),
 }
 # Opacité minimale d'une tuile de la frise : quand les membres s'accordent peu
 # (part dominante faible, cas fréquent à longue échéance), la tuile pâlit vers
@@ -113,7 +113,7 @@ _STRIP_OPACITY_FLOOR = 0.35
 
 
 def weather_type_strip_chart(daily):
-    """Frise J0→J+15 : une tuile/jour, catégorie DOMINANTE (couleur + emoji),
+    """Frise J0→J+15 : une tuile/jour, catégorie DOMINANTE (couleur + libellé),
     opacité = accord des membres. Le détail des proportions (%) se lit au survol
     de chaque tuile. ``daily`` = weather_type.ensemble_daily_weather_types."""
     cats = list(_WEATHER_STYLE)
@@ -126,7 +126,7 @@ def weather_type_strip_chart(daily):
     dom_share = np.nan_to_num(dom_share, nan=0.0)
 
     colors = [_WEATHER_STYLE[c][0] for c in dominant]
-    emojis = [_WEATHER_STYLE[c][1] for c in dominant]
+    labels = [_WEATHER_STYLE[c][1] for c in dominant]
     opacity = _STRIP_OPACITY_FLOOR + (1.0 - _STRIP_OPACITY_FLOOR) * dom_share
     customdata = np.column_stack([
         daily["jour"], shares["neigeux"], shares["pluvieux"],
@@ -136,13 +136,13 @@ def weather_type_strip_chart(daily):
         x=daily["date"], y=[1] * len(daily),
         marker=dict(color=colors, opacity=opacity,
                     line=dict(color=_ink(), width=0.4)),
-        text=emojis, textposition="inside", insidetextanchor="middle",
-        textfont=dict(size=20), customdata=customdata,
+        text=labels, textposition="inside", insidetextanchor="middle",
+        textfont=dict(size=12), customdata=customdata,
         hovertemplate=("J+%{customdata[0]} · %{x|%a %d %b}<br>"
-                       "❄️ neige %{customdata[1]:.0f} %<br>"
-                       "🌧️ pluie %{customdata[2]:.0f} %<br>"
-                       "☀️ sec %{customdata[3]:.0f} %<br>"
-                       "🌦️ mixte %{customdata[4]:.0f} %<br>"
+                       "neige %{customdata[1]:.0f} %<br>"
+                       "pluie %{customdata[2]:.0f} %<br>"
+                       "sec %{customdata[3]:.0f} %<br>"
+                       "mixte %{customdata[4]:.0f} %<br>"
                        "%{customdata[5]:.0f} membres classés<extra></extra>"),
     ))
     ticks = [f"J+{int(j)}<br>{d:%a %d}"
@@ -159,14 +159,16 @@ def weather_type_strip_chart(daily):
 def weather_type_chart(daily, hd_reference=None):
     """Proportions pondérées, contextualisées par le scénario HD à 48 h."""
     styles = {
-        "neigeux": ("❄️ Neigeux", "#5DADE2", "❄️"),
-        "pluvieux": ("🌧️ Pluvieux (≥ 2 mm)", "#2874A6", "🌧️"),
-        "sec": ("☀️ Sec / ensoleillé", "#F4D03F", "☀️"),
-        "mixte": ("🌦️ Trace / mixte / incertain", "#AAB7B8", "🌦️"),
+        "neigeux": ("Neigeux", "#5DADE2"),
+        "pluvieux": ("Pluvieux (≥ 2 mm)", "#2874A6"),
+        "sec": ("Sec / ensoleillé", "#F4D03F"),
+        "mixte": ("Trace / mixte / incertain", "#AAB7B8"),
     }
     fig = go.Figure()
-    for category, (label, color, emoji) in styles.items():
-        text = [emoji if value > 0 else "" for value in daily[category]]
+    for category, (label, color) in styles.items():
+        # Barres empilées : la part de chaque catégorie se lit à la hauteur, la
+        # légende et le survol donnent le reste — pas d'étiquette dans la barre.
+        text = ["" for _ in daily[category]]
         fig.add_bar(
             x=daily["date"], y=daily[category], name=label,
             marker_color=color, text=text, textposition="inside",
@@ -179,16 +181,16 @@ def weather_type_chart(daily, hd_reference=None):
         )
     if hd_reference is not None and not hd_reference.empty:
         hd_styles = {
-            "neigeux": ("❄️", "neige"),
-            "pluvieux": ("🌧️", "pluie"),
-            "sec": ("☀️", "sec"),
-            "mixte": ("🌦️", "trace ou phase mixte"),
+            "neigeux": ("neige", "neige"),
+            "pluvieux": ("pluie", "pluie"),
+            "sec": ("sec", "sec"),
+            "mixte": ("mixte", "trace ou phase mixte"),
         }
         text, hover = [], []
         for row in hd_reference.itertuples(index=False):
-            emoji, label = hd_styles[row.categorie]
+            court, label = hd_styles[row.categorie]
             suffix = "*" if row.partiel else ""
-            text.append(f"HD {emoji}{suffix}")
+            text.append(f"HD {court}{suffix}")
             coverage = (f"couverture partielle ({int(row.heures_hd)} h)"
                         if row.partiel else "journée couverte 24 h")
             hover.append(
@@ -351,15 +353,15 @@ def mf_meteogram(series, title):
             or not series[["pluie_mm", "neige_mm", "t2m_c"]].notna().any(axis=None):
         return None
     fig = go.Figure()
-    fig.add_bar(x=series["valid_time"], y=series["neige_mm"], name="❄️ Neige",
+    fig.add_bar(x=series["valid_time"], y=series["neige_mm"], name="Neige",
                 marker_color="#5DADE2",
                 hovertemplate="%{x|%a %d %b · %Hh}<br>neige %{y:.1f} mm éq."
                               "<extra></extra>")
-    fig.add_bar(x=series["valid_time"], y=series["pluie_mm"], name="🌧️ Pluie",
+    fig.add_bar(x=series["valid_time"], y=series["pluie_mm"], name="Pluie",
                 marker_color="#2874A6",
                 hovertemplate="%{x|%a %d %b · %Hh}<br>pluie %{y:.1f} mm"
                               "<extra></extra>")
-    fig.add_scatter(x=series["valid_time"], y=series["t2m_c"], name="🌡️ T2m",
+    fig.add_scatter(x=series["valid_time"], y=series["t2m_c"], name="T2m",
                     yaxis="y2", mode="lines",
                     line=dict(color=_ink(), width=1.6, dash="dot"),
                     hovertemplate="%{x|%a %d %b · %Hh}<br>T2m %{y:+.1f} °C"

@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.1.12] - 2026-08-20
+Interfaces canicule et neige : libellés sans pictogrammes.
+
+Je retire les emojis des titres, boutons, onglets, expanders et messages de
+statut des deux dashboards : la couleur des blocs Streamlit porte déjà le
+niveau d'un succès ou d'une alerte, et un pictogramme en tête de titre n'ajoute
+rien à la lecture. Là où l'emoji portait seul l'information, il est remplacé
+par du texte plutôt que supprimé : cumuls de la maille fine (« neige 4 cm ·
+pluie 1 mm »), tuiles de la frise des types de temps (libellé court à la place
+du symbole), repère HD au-dessus des barres, renvois aux couleurs des
+graphiques (« en rouge » plutôt que le rond de couleur). `palier_neige` et
+`signal_synoptique` ne renvoient plus d'icône, seulement leur libellé. Les
+croix et coches des matrices de présence restent : ce sont des marqueurs de
+tableau, pas de la décoration.
+
 ## [3.1.11] - 2026-08-20
 Bouton « Rafraîchir » : les caches se vident réellement, dashboards figés
 jusqu'au reboot corrigés.

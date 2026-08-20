@@ -41,11 +41,11 @@ def _hd_daily_table(summary):
     def _label(row):
         parts = []
         if row["pluie_mm"] >= weather_type.PRECIP_BRUIT_MM_HEURE:
-            parts.append(f"🌧️ {row['pluie_mm']:.1f} mm")
+            parts.append(f"pluie {row['pluie_mm']:.1f} mm")
         if row["neige_cm"] >= (weather_type.PRECIP_BRUIT_MM_HEURE
                                * weather_type.RATIO_NEIGE_CM_PAR_MM):
-            parts.append(f"❄️ {row['neige_cm']:.1f} cm")
-        return " · ".join(parts) if parts else "☀️ sec"
+            parts.append(f"neige {row['neige_cm']:.1f} cm")
+        return " · ".join(parts) if parts else "sec"
 
     display["bilan"] = display.apply(_label, axis=1)
     table = display.pivot(index="altitude_m", columns="date", values="bilan")
@@ -60,9 +60,9 @@ def _tuile_prochaine_neige(daily_sommet):
     """Tuile héros : le prochain jour à neige (mot + cm + % conservés)."""
     chute = _kpi_prochaine_chute(daily_sommet)
     if chute is not None:
-        palier, icone = logic.palier_neige(chute["attendu"])
+        palier = logic.palier_neige(chute["attendu"])
         st.metric("Prochaine neige (sommet)", f"{chute['date']:%a %d %b}",
-                  f"{icone} {palier} · ~{chute['attendu']:.0f} cm · "
+                  f"{palier} · ~{chute['attendu']:.0f} cm · "
                   f"{chute['prob'] * 100:.0f} %", delta_color="off")
     else:
         st.metric("Prochaine neige (sommet)", "aucune",
@@ -101,7 +101,7 @@ def _tuile_changement_temps(weather, bascule):
 
 
 def page_neige(runs, sig):
-    st.title("🏔️ Vue d'ensemble neige — Megève")
+    st.title("Vue d'ensemble neige — Megève")
     sub, flags = latest_complete_run_sub(sig)
     if sub.empty:
         st.info("Aucune donnée d'ensemble disponible pour l'instant — le "
@@ -141,7 +141,7 @@ def page_neige(runs, sig):
                        for m, rd in sub.groupby("model")["run_date"].max().items())
     st.caption(f"Dernier run à horizon plein par modèle : {cycles}")
     for label, motif in flags.items():
-        st.caption(f"⚠️ {label} : {motif} (aucun run à horizon plein disponible)")
+        st.caption(f"{label} : {motif} (aucun run à horizon plein disponible)")
 
     # ---------------------------- B. Les 2 prochains jours (maille fine) --
     st.subheader("Prochaines 48 heures")
@@ -171,7 +171,7 @@ def page_neige(runs, sig):
         if hd and "cumul_cm" in hd:
             iso_txt = (f" · iso 0° min {hd['iso0_min_m']:.0f} m"
                        if "iso0_min_m" in hd else "")
-            st.caption(f"🔬 Maille fine ({hd['source']}, 48 h) : "
+            st.caption(f"Maille fine ({hd['source']}, 48 h) : "
                        f"{hd['cumul_cm']:.1f} cm au sommet{iso_txt}")
         with st.expander("Sources de la prévision"):
             st.markdown("**Bilan quotidien sur la fenêtre affichée**")
@@ -179,20 +179,20 @@ def page_neige(runs, sig):
             if pi_profile.available:
                 pi_run = pd.to_datetime(pi_df["run_date"]).max()
                 st.caption(
-                    f"🏔️ AROME-PI {run_label_text(pi_run)} prioritaire sur ses "
+                    f"AROME-PI {run_label_text(pi_run)} prioritaire sur ses "
                     "six heures : phase issue directement des cumuls total/neige. "
                     "AROME-IFS prend ensuite le relais lorsqu'il est disponible.")
             else:
-                st.caption(f"⚠️ {pi_profile.reason} Aucune priorité PI cachée.")
+                st.caption(f"{pi_profile.reason} Aucune priorité PI cachée.")
             if ifs_profile.available:
                 ifs_run = pd.to_datetime(ifs_df["run_date"]).max()
                 st.caption(
-                    f"🇫🇷 AROME-IFS {run_label_text(ifs_run)} prioritaire jusqu'à "
+                    f"AROME-IFS {run_label_text(ifs_run)} prioritaire jusqu'à "
                     "son H+45 hors heures PI : cumuls total/neige directs. "
                     "AROME France/ICON-D2 via Open-Meteo ne comblent que les "
                     "heures absentes, sans double comptage.")
             else:
-                st.caption(f"⚠️ {ifs_profile.reason} Repli explicite sur AROME "
+                st.caption(f"{ifs_profile.reason} Repli explicite sur AROME "
                            "France/ICON-D2 via Open-Meteo.")
             st.caption(f"La phase utilise toujours la LPN (iso 0 °C − "
                        f"{weather_type.LPN_MARGE_HD_M:.0f} m), sans tracer LPN/iso 0 "
@@ -223,11 +223,11 @@ def page_neige(runs, sig):
                        "neige impossible à elle seule ; pluie seulement lors d'un "
                        "redoux t850 franc, sinon la zone douteuse reste mixte.")
             if weather.regional_reason:
-                st.caption(f"⚠️ {weather.regional_reason}")
+                st.caption(weather.regional_reason)
             if weather.daily["pe_arome"].any():
                 pe_run = pe_arome["run_date"].max()
                 st.caption(
-                    f"🏔️ PE-AROME {run_label_text(pe_run)} : 25 membres, "
+                    f"PE-AROME {run_label_text(pe_run)} : 25 membres, "
                     "cumuls glissants 0–24 h et 24–48 h. La phase vient directement "
                     "des cumuls neige/total du modèle régional, sans veto "
                     "t850/épaisseur.")
@@ -237,13 +237,13 @@ def page_neige(runs, sig):
                 if not global_only.empty:
                     labels = ", ".join(
                         f"J+{int(day)}" for day in global_only["jour"].unique())
-                    st.caption(f"⚠️ {labels} : PE-AROME hors couverture ; "
+                    st.caption(f"{labels} : PE-AROME hors couverture ; "
                                "PE-ARPEGE prend le relais s'il couvre le jour, "
                                "sinon pondération globale explicite.")
             if weather.daily["pe_arpege"].any():
                 arpege_run = pe_arpege["run_date"].max()
                 st.caption(
-                    f"🗺️ PE-ARPEGE {run_label_text(arpege_run)} : 35 membres, "
+                    f"PE-ARPEGE {run_label_text(arpege_run)} : 35 membres, "
                     "cumuls glissants H24/H48/H72/H96. Il prend 50 % du type "
                     "de temps local uniquement quand PE-AROME ne couvre plus "
                     "la journée ; total/neige sont lus directement.")
@@ -264,7 +264,7 @@ def page_neige(runs, sig):
                     weather.daily["jour"] > last_regional_day]
                 if not global_tail.empty:
                     st.caption(
-                        f"🌍 Après J+{last_regional_day}, la couverture "
+                        f"Après J+{last_regional_day}, la couverture "
                         "régionale est terminée : retour à 100 % aux ensembles "
                         "ECMWF/AIFS/GEFS. Les médianes t850, épaisseur et "
                         "pression (page Explorer) décrivent alors surtout la "
@@ -272,18 +272,18 @@ def page_neige(runs, sig):
                         "locale précise.")
             else:
                 st.caption(
-                    "🌍 Aucun jour n'est actuellement couvert par un ensemble "
+                    "Aucun jour n'est actuellement couvert par un ensemble "
                     "régional : la classification est 100 % ECMWF/AIFS/GEFS ; "
                     "elle renseigne mieux la masse d'air que les quantités locales.")
             if not hd_reference.empty:
-                st.caption("HD ☀️/🌧️/❄️ au-dessus des premières barres = "
+                st.caption("Le repère « HD » au-dessus des premières barres = "
                            "scénario maille fine indépendant au village ; * = "
                            "journée civile partiellement couverte par la fenêtre "
                            "glissante de 48 h. Un désaccord HD/ensemble est conservé "
                            "et rendu visible, jamais moyenné silencieusement.")
             if weather.daily["n_non_classes"].gt(0).any():
                 maximum = int(weather.daily["n_non_classes"].max())
-                st.caption(f"⚠️ Jusqu'à {maximum} membre(s) non classé(s) selon "
+                st.caption(f"Jusqu'à {maximum} membre(s) non classé(s) selon "
                            "le jour car leur précipitation est inconnue ; ils sont "
                            "exclus du dénominateur, jamais assimilés à du sec.")
     else:
@@ -296,8 +296,8 @@ def page_neige(runs, sig):
                         width="stretch")
         jours = logic.jours_a_neige(daily_sommet)
         if jours is not None and not jours.empty:
-            lignes = [f"**{r['date']:%a %d %b}** {logic.palier_neige(r['attendu'])[1]} "
-                      f"{logic.palier_neige(r['attendu'])[0]} "
+            lignes = [f"**{r['date']:%a %d %b}** "
+                      f"{logic.palier_neige(r['attendu'])} "
                       f"(~{r['attendu']:.0f} cm · {r['prob'] * 100:.0f} %)"
                       for _, r in jours.iterrows()]
             st.markdown(" · ".join(lignes))
@@ -307,12 +307,12 @@ def page_neige(runs, sig):
         traces = daily_sommet[(daily_sommet["prob"] > 0)
                               | (daily_sommet["attendu"] > 0)]
         if traces.empty:
-            st.info("🌤️ Aucun signal de neige sur l'horizon visible.")
+            st.info("Aucun signal de neige sur l'horizon visible.")
         else:
             douceur = (f"La température médiane au sommet est d'environ "
                         f"{t2m_sommet_48h:.0f} °C sur 48 h. "
                         if t2m_sommet_48h is not None else "")
-            st.info("🌤️ Aucun signal de neige crédible sur l'horizon visible. "
+            st.info("Aucun signal de neige crédible sur l'horizon visible. "
                     + douceur
                     + f"Les sorties isolées restent sous {traces['prob'].max() * 100:.1f} % "
                     f"de probabilité et {traces['attendu'].max():.2f} cm de cumul "
@@ -330,7 +330,7 @@ def page_neige(runs, sig):
     ctx = logic.contexte_synoptique(village)
     with st.expander("Contexte synoptique et masse d'air"):
         if ctx:
-            st.caption(f"🗺️ {ctx}")
+            st.caption(ctx)
         st.caption("Médianes détaillées par modèle (T850, pression, épaisseur "
                    "1000–500 hPa, avec repères de seuil neige) : page "
                    "**Explorer un run**, variable au choix.")

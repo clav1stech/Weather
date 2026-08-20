@@ -52,7 +52,7 @@ def gate() -> bool:
     """Champ de saisie tant que la session n'est pas déverrouillée."""
     attendu, diagnostic = _expected()
     return _core.gate(
-        attendu, SESSION_KEY, label="🔒 Mot de passe", diagnostic=diagnostic,
+        attendu, SESSION_KEY, label="Mot de passe", diagnostic=diagnostic,
         help_text="Requis pour déclencher une collecte. Consultation libre sans mot de passe.")
 
 

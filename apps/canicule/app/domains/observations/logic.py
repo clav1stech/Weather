@@ -224,12 +224,12 @@ def obs_est_perimee(valid_time_local, now_local, seuil_h=OBS_PERIMEE_H):
 def _label_icu(ecart_c):
     """Palier qualitatif d'un écart ICU (°C)."""
     if ecart_c >= ICU_FORT_C:
-        return "🔴 fort"
+        return "fort"
     if ecart_c >= ICU_MARQUE_C:
-        return "🟠 marqué"
+        return "marqué"
     if ecart_c > -ICU_MARQUE_C:
-        return "⚪ faible"
-    return "🔵 inversé"
+        return "faible"
+    return "inversé"
 
 
 def ecart_icu_series(dfw):

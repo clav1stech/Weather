@@ -40,7 +40,7 @@ def execute(entries, *, base_dir, runner=run_script):
                     base_dir, os.path.join(base_dir, script), timeout=timeout)
                 out.append((label, code, output or "(aucune sortie)"))
             except subprocess.TimeoutExpired:
-                out.append((label, None, f"⏱️ Délai dépassé ({timeout} s)."))
+                out.append((label, None, f"Délai dépassé ({timeout} s)."))
             except Exception as exc:  # noqa: BLE001 — erreur affichée dans l'UI
                 out.append((label, None, f"Erreur : {exc}"))
     st.cache_data.clear()
@@ -51,13 +51,13 @@ def render_execution_results(results):
     """Rend le déroulé d'exécution en pleine largeur sous les boutons."""
     if not results:
         return
-    st.markdown("#### 📄 Déroulé de la dernière exécution")
+    st.markdown("#### Déroulé de la dernière exécution")
     for label, code, output in results:
         if code == 0:
-            st.success(f"✅ {label} : terminé.")
+            st.success(f"{label} : terminé.")
         elif code is None:
-            st.error(f"❌ {label} : {output}")
+            st.error(f"{label} : {output}")
             continue
         else:
-            st.error(f"❌ {label} : code de sortie {code}.")
+            st.error(f"{label} : code de sortie {code}.")
         st.code(output)

@@ -128,7 +128,7 @@ def _site_selector(key):
 
 
 def page_meteofrance(runs, sig):
-    st.title("🇫🇷 Maille fine Météo-France — Megève")
+    st.title("Maille fine Météo-France — Megève")
     st.caption("Sources PNT Météo-France en lecture directe : haute résolution "
                "court terme (AROME-PI/IFS) et dimension probabiliste locale "
                "(PE-AROME/PE-ARPEGE). Complément des vues combinées, jamais "
@@ -175,14 +175,14 @@ def page_meteofrance(runs, sig):
     any_regional = False
     for label, members, taille in regional:
         if members is None or members.empty:
-            st.caption(f"⚪ {label} indisponible ({taille}) — cas normal si le "
+            st.caption(f"{label} indisponible ({taille}) — cas normal si le "
                        "cycle n'est pas encore collecté.")
             continue
         any_regional = True
         site = _site_selector(f"mf_ens_site_{label}")
         dist = _member_windows(members, site)
         if dist.empty:
-            st.caption(f"⚪ {label} : aucune valeur exploitable à ce point.")
+            st.caption(f"{label} : aucune valeur exploitable à ce point.")
             continue
         run = pd.to_datetime(members["run_date"]).max()
         fig = mf_member_box(dist, "neige_cm", "cm",

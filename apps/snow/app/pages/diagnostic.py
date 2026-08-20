@@ -41,7 +41,7 @@ def _quality_heatmap(history):
 
 
 def page_diagnostic(runs, sig):
-    st.title("🩺 Contrôle des runs neige")
+    st.title("Contrôle des runs neige")
     st.caption("État opérationnel des flux membres et mean/spread : fraîcheur "
                "empirique, portée contiguë, complétude et cycles attendus. "
                "Les calculs emploient les mêmes fonctions et seuils que le "
@@ -60,10 +60,10 @@ def page_diagnostic(runs, sig):
     c2.metric("Derniers runs partiels", partial)
     c3.metric(f"Cycles manquants ({SC.RUN_QUALITY_LOOKBACK_DAYS} j)", missing)
     if late or partial or missing:
-        st.warning("⚠️ Une ou plusieurs anomalies demandent vérification dans "
+        st.warning("Une ou plusieurs anomalies demandent vérification dans "
                    "les tableaux ci-dessous.")
     else:
-        st.success("✅ Tous les flux attendus sont à jour et leurs derniers runs "
+        st.success("Tous les flux attendus sont à jour et leurs derniers runs "
                    "ont une portée contiguë complète.")
 
     st.subheader("Synthèse par modèle et par flux")
@@ -93,7 +93,7 @@ def page_diagnostic(runs, sig):
                "considérés manquants. Aucun contrôle croisé legacy n'existe pour "
                "la neige : la comparaison porte ici sur la publication réelle.")
     if anomalies.empty:
-        st.success("✅ Aucun cycle attendu manquant ni cycle hors configuration.")
+        st.success("Aucun cycle attendu manquant ni cycle hors configuration.")
     else:
         show = anomalies.copy()
         show["Cycle UTC"] = pd.to_datetime(show["Cycle UTC"]).dt.strftime("%d/%m/%Y %HZ")

@@ -406,15 +406,15 @@ PIPELINE_PASSWORD_SECRET = "PIPELINE_PASSWORD"
 # workflow, aide). Sous-ensemble VOLONTAIRE des targets du workflow — le
 # scrape legacy et les rollovers n'ont rien à faire dans une page publique.
 PIPELINE_DISPATCH_TARGETS = [
-    ("🌡️ Prévisions d'ensemble (Open-Meteo)", "api",
+    ("Prévisions d'ensemble (Open-Meteo)", "api",
      "Interroge l'API Ensemble et met à jour la base principale."),
-    ("🌡️ Tx/Tn haute résolution", "t2m",
+    ("Tx/Tn haute résolution", "t2m",
      "Flux annexe Météo-France/DWD ICON (7 jours)."),
-    ("🛰️ Observations Météo-France (horaires)", "obs",
+    ("Observations Météo-France (horaires)", "obs",
      "Paquet horaire des 4 stations parisiennes."),
-    ("⏱️ Observations 6 min", "obs6m",
+    ("Observations 6 min", "obs6m",
      "Flux infra-horaire des cartes temps réel."),
-    ("🔭 Prévision Montsouris (vintages 15 min)", "vintages",
+    ("Prévision Montsouris (vintages 15 min)", "vintages",
      "Flux annexe minutely_15 au point de Montsouris."),
 ]
 

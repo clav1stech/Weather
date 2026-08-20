@@ -20,7 +20,6 @@ EPAISSEUR_NEIGE_M = weather_type.EPAISSEUR_NEIGE_M
 
 # Libellés des paliers d'intensité (bornes dans SC.PALIERS_NEIGE_CM).
 _PALIER_LABELS = ["—", "petite chute", "vraie chute", "grosse chute"]
-_PALIER_ICONS = ["", "🌨️", "❄️", "❄️❄️"]
 
 
 def regime_for_lead(days_ahead):
@@ -41,11 +40,11 @@ def upcoming(sub, now=None):
 
 
 def palier_neige(cumul_cm):
-    """(libellé, icône) du palier d'intensité d'un cumul journalier."""
+    """Libellé du palier d'intensité d'un cumul journalier."""
     if cumul_cm is None or np.isnan(cumul_cm):
-        return _PALIER_LABELS[0], _PALIER_ICONS[0]
+        return _PALIER_LABELS[0]
     idx = int(np.searchsorted(SC.PALIERS_NEIGE_CM, cumul_cm, side="right"))
-    return _PALIER_LABELS[idx], _PALIER_ICONS[idx]
+    return _PALIER_LABELS[idx]
 
 
 def daily_snowfall(sub_site):

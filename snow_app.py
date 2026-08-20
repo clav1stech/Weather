@@ -37,7 +37,7 @@ from core.version import SHARED_VERSION
 SNOW_APP_VERSION = SHARED_VERSION
 
 st.set_page_config(page_title="Dashboard Neige — Megève",
-                   page_icon="🏔️", layout="wide")
+                   layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 # « Lancer le pipeline » est visible PARTOUT : la page adapte elle-même ses
@@ -58,17 +58,17 @@ def main():
 
     renderers = dict(DOMAIN_PAGES + CORE_PAGES)
 
-    st.sidebar.title("🏔️ Navigation")
+    st.sidebar.title("Navigation")
     page = st.sidebar.radio("Aller à", list(renderers))
     st.sidebar.markdown("---")
     if not runs.empty:
         st.sidebar.caption(f"Dernière : {runs.iloc[0]['label']}")
         refreshed_at, complete, missing = latest_refresh_status(runs, sig)
         if complete:
-            st.sidebar.caption("✅ Tous les modèles attendus à ce run présents")
+            st.sidebar.caption("Tous les modèles attendus à ce run présents")
         else:
-            st.sidebar.caption(f"⚠️ Données partielles — manque : {', '.join(missing)}")
-    if st.sidebar.button("🔄 Rafraîchir"):
+            st.sidebar.caption(f"Données partielles — manque : {', '.join(missing)}")
+    if st.sidebar.button("Rafraîchir"):
         # Les trois caches, dans cet ordre : le magasin externe (métadonnées du
         # release, mémoïsées avec un TTL taillé pour le rythme automatique), les
         # calculs (cache_data) et la base elle-même (cache_resource, que
@@ -80,17 +80,17 @@ def main():
         st.rerun()
     st.sidebar.markdown("---")
     st.sidebar.markdown("<small><b>Modèles et sources</b><br>"
-                        "🇫🇷 <b>Météo-France PNT</b><br>"
+                        "<b>Météo-France PNT</b><br>"
                         "AROME-PI (H+1–H+6)<br>"
                         "AROME-IFS (H+1–H+45)<br>"
                         "PE-AROME · 25 membres (H+48)<br>"
                         "PE-ARPEGE · 35 membres (H+96)<br><br>"
-                        "🌐 <b>Open-Meteo</b><br>"
+                        "<b>Open-Meteo</b><br>"
                         "AROME France (source MF) · ICON-D2 (48 h)<br>"
                         "ECMWF ENS · AIFS · GEFS (J+15)<br><br>"
-                        "🛰️ <b>Observations</b><br>"
+                        "<b>Observations</b><br>"
                         "API Météo-France · stations 74<br><br>"
-                        "🕐 Actualisation automatique toutes les 2 h<br>"
+                        "Actualisation automatique toutes les 2 h<br>"
                         f"Version {SNOW_APP_VERSION}</small>",
                         unsafe_allow_html=True)
 

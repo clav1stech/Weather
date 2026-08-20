@@ -26,7 +26,7 @@ from app.domains.heatwave.logic import (
 
 
 def page_grand_public(runs, sig):
-    st.title("🌞 Indicateur de canicule")
+    st.title("Indicateur de canicule")
     if runs.empty:
         st.warning("Base vide.")
         return
@@ -34,7 +34,7 @@ def page_grand_public(runs, sig):
     st.caption("Super-ensemble des **derniers runs complets** par modèle · "
                f"{complete_runs_caption(sources)}")
 
-    with st.expander("❓ Comment lire cet indicateur — la température à 850 hPa (T850)"):
+    with st.expander("Comment lire cet indicateur — la température à 850 hPa (T850)"):
         st.markdown(
             "**Pourquoi « 850 hPa » ?** Cet indicateur ne suit pas la température au sol, "
             "mais la **température de l'air vers 1 500 m d'altitude** (niveau de pression "
@@ -48,7 +48,7 @@ def page_grand_public(runs, sig):
             "- **≈ 14–15 °C à 850 hPa → ~30 °C au sol** : chaleur notable.\n"
             "- **≈ 18–20 °C à 850 hPa → ~35 °C au sol** : canicule exceptionnelle.\n\n"
             "En clair, **au-delà de ~18 °C de T850, le signal doit alerter.**\n\n"
-            "**⚠️ Le « +15 °C » n'est qu'un ordre de grandeur.** Pour une même T850, la "
+            "**Le « +15 °C » n'est qu'un ordre de grandeur.** Pour une même T850, la "
             "température réelle au sol (T2m) peut varier de plusieurs degrés. "
             "Ce qui creuse l'écart :\n"
             "- **Ensoleillement et durée du jour** : ciel clair et journées longues → le sol "
@@ -63,7 +63,7 @@ def page_grand_public(runs, sig):
             "La T850 indique le *potentiel* de chaleur ; ces facteurs décident jusqu'où il "
             "se réalise au sol.")
 
-    with st.expander("📡 D'où viennent ces prévisions ? (modèles, runs, super-ensemble)"):
+    with st.expander("D'où viennent ces prévisions ? (modèles, runs, super-ensemble)"):
         n_main = len(C.MAIN_LABELS)
         models_bullets = "\n".join(f"- **{m['label']}** — {m['desc']}." for m in C.MODELS)
         st.markdown(
@@ -94,7 +94,7 @@ def page_grand_public(runs, sig):
             "**un seul modèle** détaillé scénario par scénario (onglet **Spaghetti**), ou la "
             "**comparaison des médianes** de chaque modèle (onglet **Modèles**).")
 
-    with st.expander("⚙️ Réglages avancés"):
+    with st.expander("Réglages avancés"):
         col_a, col_b = st.columns(2)
         seuil_chaleur = col_a.number_input("Seuil chaleur (°C @850)", 10.0, 25.0,
                                            float(C.SEUIL_CHALEUR_850), 0.5)
@@ -149,22 +149,22 @@ def page_grand_public(runs, sig):
         chauds = avenir[avenir["Médiane"] >= seuil_chaleur]
         pic_av = avenir.loc[avenir["prob"].idxmax()] if not avenir.empty else None
         if pic_av is not None and pic_av["prob"] >= PROB_RISQUE_MARQUE:
-            c1.metric("Statut canicule", "🟠 Risque à surveiller",
+            c1.metric("Statut canicule", "Risque à surveiller",
                       help=f"Pas de canicule probable (≥ {PROB_CANICULE_QUASI:.0%}) à ce "
                            f"stade, mais le risque monte à {pic_av['prob']:.0%} "
                            f"le {pic_av['date']:%a %d %b}.")
         elif pic_av is not None and pic_av["prob"] >= PROB_RISQUE_MODERE:
-            c1.metric("Statut canicule", "🟡 Signal faible",
+            c1.metric("Statut canicule", "Signal faible",
                       help=f"Quelques scénarios voient une canicule (jusqu'à "
                            f"{pic_av['prob']:.0%} le {pic_av['date']:%a %d %b}) — "
                            f"minoritaires, à suivre.")
         elif not chauds.empty:
-            c1.metric("Statut canicule", "🌡️ Chaleur sans canicule",
+            c1.metric("Statut canicule", "Chaleur sans canicule",
                       help=f"Pas de canicule en vue, mais de la chaleur notable "
                            f"(≥ {seuil_chaleur:.0f} °C @850) est prévue autour du "
                            f"{chauds.iloc[0]['date']:%a %d %b}.")
         else:
-            c1.metric("Statut canicule", "🟢 Aucune en vue")
+            c1.metric("Statut canicule", "Aucune en vue")
         # 2e carte adaptée au niveau d'alerte : jours à surveiller (risque marqué),
         # sinon jours de chaleur notable, sinon rien à quantifier.
         n_watch = int((avenir["prob"] >= PROB_RISQUE_MARQUE).sum()) if not avenir.empty else 0
@@ -185,7 +185,7 @@ def page_grand_public(runs, sig):
         # (aujourd'hui ∈ high_set), définition inchangée.
         if today in high_set:
             ep_cours = episode_chaleur(jours, seuil_chaleur, depuis=today)
-            c1.metric("Statut canicule", "🔴 En cours",
+            c1.metric("Statut canicule", "En cours",
                       help=f"Au moins jusqu'au {ep_cours['fin']:%a %d %b}")
         else:
             prochaine = next((d for d in high_dates if d > today), high_dates[0])
@@ -209,28 +209,28 @@ def page_grand_public(runs, sig):
 
     # ── Contexte atmosphérique (Z500) — appui discret du message T850 ─────────
     # Signal qualitatif uniquement : la valeur brute du géopotentiel ne parle
-    # qu'aux spécialistes (lecture technique : Explorer un run → onglet 🌀 Z500).
+    # qu'aux spécialistes (lecture technique : Explorer un run → onglet Z500).
     # Pool DÉDIÉ (latest_z500_sub) plutôt que `sub` : chaque modèle apporte sa
     # dernière valeur z500 connue, quitte à remonter à un run plus ancien que
     # celui retenu pour T850. None (z500 absent de toute la base, ex. runs
     # legacy) → rien d'affiché, le message principal reste strictement identique.
     signal = signal_synoptique(latest_z500_sub(sig), today)
     if signal is not None:
-        icone, libelle, phrase = signal
-        st.markdown(f"{icone} **Configuration atmosphérique : {libelle}.** {phrase}")
+        libelle, phrase = signal
+        st.markdown(f"**Configuration atmosphérique : {libelle}.** {phrase}")
         st.caption("Lecture de la circulation d'altitude (géopotentiel 500 hPa) sur les "
                    f"{len(C.MODELS)} modèles combinés — un éclairage en appui de "
                    "l'indicateur principal ci-dessus, pas un critère de risque "
                    "supplémentaire.")
 
-    st.subheader("📈 Évolution de la chaleur prévue")
+    st.subheader("Évolution de la chaleur prévue")
     st.caption("Courbe foncée = médiane ; bande rouge = P10–P90 ; pointillés bleus = "
                "normale climatique saisonnière ; orange/rouge = seuils d'alerte.")
     st.plotly_chart(ligne_de_flottaison(syn, seuil_chaleur, seuil_canicule,
                                         "Température à 850 hPa — tendance et incertitude"),
                     width="stretch")
 
-    st.subheader("🗓️ Calendrier du risque de canicule")
+    st.subheader("Calendrier du risque de canicule")
     # Tx/Tn haute résolution (flux annexe, parquet séparé — cf. app/data/t2m.py) :
     # appui d'affichage en lecture seule sur ~4 jours, jamais un critère de
     # risque. On ne garde que les jours du calendrier (≥ aujourd'hui) ; absence
@@ -249,13 +249,13 @@ def page_grand_public(runs, sig):
     st.plotly_chart(calendrier_risques(jours, seuil_canicule, txtn), width="stretch")
 
     # ── Tendance récente des runs (vulgarisé, en un coup d'œil) ──────────────
-    st.subheader("🧭 Les modèles changent-ils d'avis ?")
+    st.subheader("Les modèles changent-ils d'avis ?")
     st.markdown(
         "Les modèles recalculent la prévision plusieurs fois par jour. La ligne ci-dessous "
         "compare les **calculs des ~3 derniers jours** : pour chaque jour à venir, elle dit "
-        "si la prévision a été **revue à la hausse** (🔴, l'épisode se confirme ou "
-        "s'intensifie), **à la baisse** (🔵, il se dégonfle) ou si elle est **stable** "
-        "(⚪, prévision mûre, plus fiable).")
+        "si la prévision a été **revue à la hausse** (en rouge, l'épisode se confirme "
+        "ou s'intensifie), **à la baisse** (en bleu, il se dégonfle) ou si elle est "
+        "**stable** (en blanc, prévision mûre, plus fiable).")
     trend = trend_daily_medians(sig)  # `today` déjà défini plus haut (KPI)
     tend = tendance_recente(trend)
     tend = tend[tend["target"] >= today] if not tend.empty else tend
@@ -266,20 +266,20 @@ def page_grand_public(runs, sig):
         # (seuil plus bas que par jour : une dérive d'ensemble se voit sur la moyenne).
         d_moy = float(tend["delta"].mean())
         if d_moy >= 0.3:
-            st.markdown("📈 **Tendance récente : vers plus chaud** — les derniers calculs "
+            st.markdown("**Tendance récente : vers plus chaud** — les derniers calculs "
                         "renforcent globalement la chaleur prévue.")
         elif d_moy <= -0.3:
-            st.markdown("📉 **Tendance récente : vers moins chaud** — les derniers calculs "
+            st.markdown("**Tendance récente : vers moins chaud** — les derniers calculs "
                         "revoient globalement la chaleur à la baisse.")
         else:
-            st.markdown("➡️ **Tendance récente : stable** — les derniers calculs confirment "
+            st.markdown("**Tendance récente : stable** — les derniers calculs confirment "
                         "globalement la prévision.")
         st.plotly_chart(tendance_heatmap(tend), width="stretch")
         st.caption("Pour l'analyse détaillée run par run (avec les valeurs), voir la page "
                    "*Révisions & convergence*.")
 
     # ── Confiance : la médiane n'est pas une certitude (vulgarisé) ───────────
-    st.subheader("🎯 Quelle confiance accorder à ces chiffres ?")
+    st.subheader("Quelle confiance accorder à ces chiffres ?")
     st.markdown(
         "**La médiane n'est pas une promesse.** C'est simplement le scénario du milieu : "
         "un scénario sur deux est plus chaud, un sur deux plus froid. La vraie information "
@@ -292,8 +292,9 @@ def page_grand_public(runs, sig):
     if daily is None or daily.empty:
         st.info("Fourchettes journalières non calculables.")
     else:
-        st.caption("Couleur de la barre = accord des scénarios : 🟢 groupés (bonne "
-                   "confiance) · 🟡 partagés · 🟠 très dispersés (chiffre indicatif). "
+        st.caption("Couleur de la barre = accord des scénarios : vert = groupés (bonne "
+                   "confiance) · jaune = partagés · orange = très dispersés (chiffre "
+                   "indicatif). "
                    "Trait foncé = scénario médian.")
         st.plotly_chart(confiance_chart(daily, seuil_chaleur, seuil_canicule),
                         width="stretch")
@@ -320,5 +321,5 @@ def page_grand_public(runs, sig):
         notes = ([n for _, n in sorted(chauds, reverse=True)[:2]]
                  + [n for _, n in sorted(froids, reverse=True)[:2]])[:3]
         if notes:
-            st.markdown("**⚖️ À ne pas manquer derrière la médiane** *(recalculé à chaque "
+            st.markdown("**À ne pas manquer derrière la médiane** *(recalculé à chaque "
                         "mise à jour)* **:**\n" + "\n".join(f"- {n}" for n in notes))

@@ -19,7 +19,7 @@ from app.ui.theme import _ink, _plotly_template, _rgba
 
 
 def page_convergence(runs, sig):
-    st.title("🔄 Révisions & convergence des prévisions")
+    st.title("Révisions & convergence des prévisions")
     st.caption(
         "Chaque nouveau calcul (run) corrige le précédent. Cette page montre **comment la "
         "prévision d'une même date a évolué d'un run à l'autre** : si elle se stabilise, "
@@ -100,7 +100,7 @@ def page_convergence(runs, sig):
                 notes.append(f"manque {', '.join(manquants[run_dt])}")
             parts.append(f"{label_par_dt[run_dt]} ({' ; '.join(notes)})")
         st.warning(
-            "⚠️ Certains runs affichés ont un modèle principal **absent** : son dernier run "
+            "Certains runs affichés ont un modèle principal **absent** : son dernier run "
             "disponible est repris à sa place (jusqu'à n-3, soit ~1 jour) pour comparer des "
             "super-ensembles à nombre de modèles équivalent. Les modèles d'appoint (ex. GEM) "
             "ne sont jamais ainsi repris — ils n'apparaissent qu'à leurs propres cycles réels "
@@ -108,7 +108,7 @@ def page_convergence(runs, sig):
             + " · ".join(parts))
 
     # ── 1. Révisions vs runs précédents ──
-    st.subheader("📐 Révisions de la médiane vs runs précédents")
+    st.subheader("Révisions de la médiane vs runs précédents")
     st.caption("Chaque barre = écart de la médiane de ce run vs un run antérieur, "
                "pour une même date. Rouge = hausse, bleu = baisse.")
     idx = st.selectbox("Run de référence", runs.index,
@@ -139,7 +139,7 @@ def page_convergence(runs, sig):
     st.markdown("---")
 
     # ── 2. Convergence par date cible ──
-    st.subheader("📈 Comment la prévision a évolué au fil des jours")
+    st.subheader("Comment la prévision a évolué au fil des jours")
     st.caption(
         "**Un panneau = une date cible.** Dans chacun, la courbe montre comment la médiane "
         "prévue a évolué selon l'ancienneté du run ; la bande = l'incertitude P10–P90. "
@@ -198,7 +198,7 @@ def page_convergence(runs, sig):
     st.markdown("---")
 
     # ── 3. Heatmap des révisions run-à-run ──
-    st.subheader("🗺️ Carte des révisions run-à-run")
+    st.subheader("Carte des révisions run-à-run")
     st.caption(
         "Rouge = le run a **revu à la hausse** la prévision vs le run précédent. "
         "Bleu = révision à la baisse. Blanc = pas de changement = prévision stable et fiable.")

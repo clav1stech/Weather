@@ -185,7 +185,7 @@ def _revisions_table(piv):
 
 
 def page_convergence(runs, sig):
-    st.title("🔁 Convergence des runs — Megève")
+    st.title("Convergence des runs — Megève")
     st.caption("Moyennes d'ensemble successives (flux mean, rétention longue) : "
                "plus les traits récents se superposent, plus le scénario est "
                "acquis. Les écarts inter-runs ci-dessous alimenteront le bilan "
@@ -241,7 +241,7 @@ def page_convergence(runs, sig):
         st.dataframe(table, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("🗺️ Heatmap des révisions successives")
+    st.subheader("Heatmap des révisions successives")
     st.caption("Chaque cellule compare un run au précédent pour la même "
                "échéance : rouge = révision à la hausse, bleu = baisse, blanc "
                "= stabilité. La grille est agrégée par pas de 6 h pour garder "

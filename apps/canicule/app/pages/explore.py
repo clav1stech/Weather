@@ -20,7 +20,7 @@ from app.ui.components import complete_runs_caption
 
 
 def page_explore(runs, sig):
-    st.title("📊 Explorer une prévision (run)")
+    st.title("Explorer une prévision (run)")
     st.caption(
         "Vue détaillée d'un run sous plusieurs angles : panache de dispersion, "
         "scénarios individuels, comparaison des modèles, divergence, incertitude et "
@@ -35,7 +35,7 @@ def page_explore(runs, sig):
     LATEST = -1
     idx = st.selectbox(
         "Choisir un run", [LATEST] + list(runs.index),
-        format_func=lambda i: ("🕐 Dernier run (le plus récent de chaque modèle, "
+        format_func=lambda i: ("Dernier run (le plus récent de chaque modèle, "
                                "tous cycles)" if i == LATEST else runs.loc[i, "label"]))
     if idx == LATEST:
         sub, sources = latest_run_sub(sig)
@@ -57,12 +57,12 @@ def page_explore(runs, sig):
     cutoff = multimodel_cutoff(sub)
 
     if manquants:
-        st.warning(f"⚠️ Modèle(s) principal(aux) absent(s) : **{', '.join(manquants)}**. "
+        st.warning(f"Modèle(s) principal(aux) absent(s) : **{', '.join(manquants)}**. "
                    "Super-ensemble appauvri (dispersion possiblement sous-estimée).")
 
     tab_fan, tab_spag, tab_cmp, tab_unc, tab_z500, tab_tbl = st.tabs(
-        ["📈 Panache", "🍝 Spaghetti", "⚖️ Modèles", "📉 Incertitude", "🌀 Z500",
-         "🧾 Tableaux"])
+        ["Panache", "Spaghetti", "Modèles", "Incertitude", "Z500",
+         "Tableaux"])
 
     with tab_fan:
         if syn is not None and not syn.empty:
@@ -150,7 +150,7 @@ def page_explore(runs, sig):
                       .format(precision=1)
                       if len(num_cols) else raw)
             st.dataframe(styler, width="stretch", height=520)
-            st.download_button("⬇️ Télécharger (CSV)",
+            st.download_button("Télécharger (CSV)",
                                raw.to_csv(index=False).encode("utf-8-sig"),
                                file_name=f"run_{file_tag}_{choice[:20]}.csv",
                                mime="text/csv")

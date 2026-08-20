@@ -44,7 +44,7 @@ from core.version import SHARED_VERSION
 APP_VERSION = SHARED_VERSION
 
 st.set_page_config(page_title="Dashboard Météo — Ensembles Paris",
-                   page_icon="🌡️", layout="wide")
+                   layout="wide")
 st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 # Pages transverses, après les domaines. « Lancer le pipeline » est visible
@@ -70,7 +70,7 @@ def main():
 
     renderers = dict(DOMAIN_PAGES + CORE_PAGES)
 
-    st.sidebar.title("🌦️ Navigation")
+    st.sidebar.title("Navigation")
     page = st.sidebar.radio("Aller à", list(renderers))
     st.sidebar.markdown("---")
     # Bloc fraîcheur : l'essentiel seulement — dernier run, heure de collecte,
@@ -80,12 +80,12 @@ def main():
         st.sidebar.caption(f"Dernière : {runs.iloc[0]['label']}")
         refreshed_at, complete, missing = latest_refresh_status(runs, sig)
         if refreshed_at is not None:
-            st.sidebar.caption(f"🕐 Rafraîchi le {refreshed_at.strftime('%d/%m/%Y à %Hh%M')}")
+            st.sidebar.caption(f"Rafraîchi le {refreshed_at.strftime('%d/%m/%Y à %Hh%M')}")
         if complete:
-            st.sidebar.caption("✅ Tous les modèles attendus à ce run présents")
+            st.sidebar.caption("Tous les modèles attendus à ce run présents")
         else:
-            st.sidebar.caption(f"⚠️ Données partielles — manque : {', '.join(missing)}")
-    if st.sidebar.button("🔄 Rafraîchir"):
+            st.sidebar.caption(f"Données partielles — manque : {', '.join(missing)}")
+    if st.sidebar.button("Rafraîchir"):
         # Les trois caches, dans cet ordre : le magasin externe (métadonnées du
         # release, mémoïsées avec un TTL taillé pour le rythme automatique), les
         # calculs (cache_data) et la base elle-même (cache_resource, que
@@ -96,7 +96,7 @@ def main():
         st.cache_resource.clear()
         st.rerun()
     st.sidebar.markdown("---")
-    st.sidebar.markdown("<small>🕐 **Mise à jour automatique** 4×/jour via "
+    st.sidebar.markdown("<small>**Mise à jour automatique** 4×/jour via "
                         "Open-Meteo — runs 0Z/6Z/12Z/18Z (GEM : 0Z/12Z)<br>"
                         "Données : ECMWF · NOAA · ECCC<br>"
                         f"Version {APP_VERSION}</small>",

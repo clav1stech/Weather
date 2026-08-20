@@ -122,16 +122,16 @@ def _conditions_generales(row_ref_h, row_ref_6m, row_ref_live):
     pmer, _ = _champ_frais("pression_mer", row_ref_h, row_ref_6m, row_ref_live)
     détails = []
     if pd.notna(hum):
-        détails.append(("💧 Humidité", f"{hum:.0f} %"))
+        détails.append(("Humidité", f"{hum:.0f} %"))
     if pd.notna(ff):
         vent = f"{ff * 3.6:.0f} km/h"
         if pd.notna(dd):
             vent += f" ({dd:.0f}°)"
-        détails.append(("🌬️ Vent", vent))
+        détails.append(("Vent", vent))
     if pd.notna(pr1):
-        détails.append(("🌧️ Précipitations", f"{pr1:.1f} mm/1h"))
+        détails.append(("Précipitations", f"{pr1:.1f} mm/1h"))
     if pd.notna(pmer):
-        détails.append(("🔽 Pression", f"{pmer:.0f} hPa"))
+        détails.append(("Pression", f"{pmer:.0f} hPa"))
     if not détails:
         return
     st.caption("Conditions générales sur Paris (mesurées à Montsouris)")
@@ -160,10 +160,10 @@ def _bouton_rafraichissement():
     ok, remaining = cooldown.can(C.OBS_LIVE_REFRESH_STATE_PATH,
                                   C.OBS_LIVE_REFRESH_COOLDOWN_S)
     if not ok:
-        st.button("🔄 Voir un aperçu instantané", disabled=True,
+        st.button("Voir un aperçu instantané", disabled=True,
                   help=f"Réessayez dans ~{int(remaining) + 1} s.")
         return
-    if not st.button("🔄 Voir un aperçu instantané",
+    if not st.button("Voir un aperçu instantané",
                       help="Interroge l'API Météo-France en direct : les "
                            "cartes ci-dessus affichent aussitôt ce relevé à "
                            "la place des valeurs stockées — non enregistré "
@@ -192,7 +192,7 @@ def _section_convergence_prevision():
     (6 min) vs prévisions émises à divers reculs (vintages). Lecture seule des
     deux flux via leurs couches data ; dégradation silencieuse tant que
     l'historique de vintages est trop court pour comparer les reculs."""
-    st.subheader("🔭 Convergence de la prévision — Montsouris")
+    st.subheader("Convergence de la prévision — Montsouris")
     st.caption("Pour chaque heure, la température **observée** à Montsouris "
                "(trait bleu épais) et les prévisions qui la visaient, émises à "
                "divers reculs — la dernière en date, puis 6, 12, 18 et 24 h plus "
@@ -264,7 +264,7 @@ def _section_convergence_prevision():
 
 
 def page_observations(runs, sig):
-    st.title("🏙️ Observations en direct")
+    st.title("Observations en direct")
     obs_sig = obs_signature()
     base = load_obs(obs_sig)
 
@@ -273,7 +273,7 @@ def page_observations(runs, sig):
                "données d'observation officielles (API DPObs). La température "
                "est rafraîchie **toutes les quelques minutes** (flux 6 min).")
 
-    with st.expander("❓ Pourquoi ces 4 stations"):
+    with st.expander("Pourquoi ces 4 stations"):
         lignes = "\n".join(
             f"- **{s['nom']}** ({s['reseau']}, alt. {s['alt']} m) — {s['profil']}."
             for s in C.OBS_STATIONS)
@@ -302,7 +302,7 @@ def page_observations(runs, sig):
     now_local = pd.Timestamp(datetime.now(LOCAL_TZ)).tz_localize(None)
 
     # ── Bloc 1 : temps réel ──────────────────────────────────────────────────
-    st.subheader("📍 Dernières observations")
+    st.subheader("Dernières observations")
     latest = latest_obs(obs_sig)
     by_nom = {r["station_nom"]: r for _, r in latest.iterrows()}
     # Fraîcheur infra-horaire 6 min (les 4 stations, instrumentation inégale —
@@ -339,7 +339,7 @@ def page_observations(runs, sig):
     _bouton_rafraichissement()
 
     # ── Bloc 2 : comparaison inter-stations (ICU) ────────────────────────────
-    st.subheader("🌃 L'écart ville / verdure, heure par heure")
+    st.subheader("L'écart ville / verdure, heure par heure")
     fenetre_h = st.radio("Fenêtre", [24, 48], format_func=lambda h: f"{h} h",
                          horizontal=True, label_visibility="collapsed")
     dfw = obs_window(obs_sig, fenetre_h)

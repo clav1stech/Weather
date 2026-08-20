@@ -87,37 +87,37 @@ def _render_remote_launcher():
 
     autorise, restant = github_dispatch.can_trigger()
     if not autorise:
-        st.info(f"⏳ Déclenchement possible dans {int(restant // 60)} min "
+        st.info(f"Déclenchement possible dans {int(restant // 60)} min "
                 f"{int(restant % 60)} s (limite anti-abus partagée).")
         return
 
-    if st.button(f"🚀 Lancer — {label}", type="primary"):
+    if st.button(f"Lancer — {label}", type="primary"):
         with st.spinner("Demande envoyée à l'intégration continue…"):
             ok, msg = github_dispatch.trigger_workflow(target)
         if ok:
             github_dispatch.record_trigger()  # jamais avant : un échec ne consomme pas
-            st.success(f"✅ {msg} Le job tourne côté CI ; rafraîchissez dans "
+            st.success(f"{msg} Le job tourne côté CI ; rafraîchissez dans "
                        "une à deux minutes.")
         else:
-            st.error(f"❌ {msg}")
+            st.error(msg)
 
 
 def page_run(runs, sig):
-    st.title("🚀 Lancer le pipeline neige")
+    st.title("Lancer le pipeline neige")
     if not IS_LOCAL:
         _render_remote_launcher()
         return
 
-    st.success("💻 Exécution locale détectée — les boutons lancent les scripts "
+    st.success("Exécution locale détectée — les boutons lancent les scripts "
                "dans des sous-processus Python locaux.")
     st.caption("Chaque flux conserve son stockage dédié. Le lancement complet "
                "enchaîne les sept collectes actives sans fusion opaque entre modèles.")
     allowed, remaining = cooldown.can(COOLDOWN_PATH, COOLDOWN_S)
     if not allowed:
-        st.caption(f"⏳ Nouveau lancement disponible dans {remaining:.0f} s.")
+        st.caption(f"Nouveau lancement disponible dans {remaining:.0f} s.")
 
     sections = [
-        ("🏔️ Très courte échéance et maille fine", [
+        ("Très courte échéance et maille fine", [
             ("AROME-PI", "Météo-France PNT · horaire H+1 à H+6 · "
              "pluie/neige directe aux sites village et sommet.", 3),
             ("AROME-IFS", "Météo-France PNT · horaire H+1 à H+45 · "
@@ -125,13 +125,13 @@ def page_run(runs, sig):
             ("AROME HD + ICON-D2", "Open-Meteo · maille fine horaire jusqu'à "
              "48 h · comparaison/repli sans double comptage.", 5),
         ]),
-        ("🎯 Ensembles régionaux", [
+        ("Ensembles régionaux", [
             ("PE-AROME", "Météo-France PNT · 25 membres · cumuls pluie/"
              "neige H+24 et H+48.", 1),
             ("PE-ARPEGE", "Météo-France PNT · 35 membres · relais "
              "journalier jusqu'à H+96.", 2),
         ]),
-        ("🌍 Grande échelle et observations", [
+        ("Grande échelle et observations", [
             ("ECMWF ENS · AIFS · GEFS", "Open-Meteo · membres bruts, "
              "moyenne et dispersion · masse d'air jusqu'à J+15.", 0),
             ("Stations Alpes du Nord", "API observations Météo-France · "
@@ -152,7 +152,7 @@ def page_run(runs, sig):
                     _launch([ACTIVE_FETCH_ENTRIES[entry_index]])
             card_pos += 1
 
-    if st.button("▶️ Lancer les 7 collectes actives", type="primary",
+    if st.button("Lancer les 7 collectes actives", type="primary",
                  disabled=not allowed, key="snow_pipeline_fetch_all"):
         _launch(ACTIVE_FETCH_ENTRIES)
 
@@ -163,11 +163,11 @@ def page_run(runs, sig):
         render_execution_results(results)
 
     st.markdown("---")
-    st.subheader("🧊 Diagnostic de l'archivage hot/cold")
+    st.subheader("Diagnostic de l'archivage hot/cold")
     st.caption("`rollover.py` est appelé en **dry-run uniquement** depuis cette "
                "page. Aucun bouton ni argument `--execute` n'est exposé dans "
                "l'interface ; l'archivage réel reste réservé au workflow dédié.")
-    if st.button("🔎 Simuler rollover.py (aucune écriture)", type="secondary",
+    if st.button("Simuler rollover.py (aucune écriture)", type="secondary",
                  disabled=not allowed, key="snow_pipeline_rollover_dry_run"):
         _launch(ROLLOVER_ENTRY)
 

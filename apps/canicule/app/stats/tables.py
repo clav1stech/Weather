@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tables d'export de l'onglet 🧾 (Explorer un run) — volontairement LARGES,
+"""Tables d'export de l'onglet Tableaux (Explorer un run) — volontairement LARGES,
 pensées pour l'export vers une analyse externe (IA), pas pour la lecture à
 l'écran : ne pas les « alléger » pour la lisibilité (invariant CLAUDE.md)."""
 

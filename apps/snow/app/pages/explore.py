@@ -8,7 +8,7 @@ que le canicule, ne pas les confondre) :
   • « Dernier run à horizon plein » : celui des vues combinées.
 S'y ajoutent les cycles individuels (tous modèles présents à ce cycle).
 
-Les tableaux de l'onglet 🧾 sont VOLONTAIREMENT LARGES (export pour analyse
+Les tableaux de l'onglet « Tables d'export » sont VOLONTAIREMENT LARGES (export pour analyse
 par IA) : stats du super-ensemble + par modèle médiane, contrôle (member 0),
 nb de membres, Δ médiane vs run précédent DE CE MODÈLE — jamais un cycle
 global partagé."""
@@ -84,7 +84,7 @@ def _export_table(sub_site, prev_site, var):
 
 
 def page_explore(runs, sig):
-    st.title("🔍 Explorer un run — Megève")
+    st.title("Explorer un run — Megève")
     if runs.empty:
         st.info("Aucun run en base pour l'instant.")
         return
@@ -116,7 +116,7 @@ def page_explore(runs, sig):
         "Variable", range(len(var_options)),
         format_func=lambda i: var_options[i][1])]
 
-    tab_graph, tab_tables = st.tabs(["📈 Graphiques", "🧾 Tables d'export"])
+    tab_graph, tab_tables = st.tabs(["Graphiques", "Tables d'export"])
     with tab_graph:
         fig = fan_chart(sub_site, col, f"{label} — super-ensemble", unit)
         if fig is not None:

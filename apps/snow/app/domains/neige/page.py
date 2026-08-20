@@ -22,6 +22,7 @@ from . import logic, weather_type
 from .charts import (daily_snow_chart, lpn_chart,
                      hourly_vertical_weather_chart, weather_type_chart,
                      weather_type_strip_chart)
+from core.ui.components import kpi_card
 
 
 def _kpi_prochaine_chute(daily):
@@ -61,12 +62,12 @@ def _tuile_prochaine_neige(daily_sommet):
     chute = _kpi_prochaine_chute(daily_sommet)
     if chute is not None:
         palier = logic.palier_neige(chute["attendu"])
-        st.metric("Prochaine neige (sommet)", f"{chute['date']:%a %d %b}",
-                  f"{palier} · ~{chute['attendu']:.0f} cm · "
-                  f"{chute['prob'] * 100:.0f} %", delta_color="off")
+        kpi_card("Prochaine neige (sommet)", f"{chute['date']:%a %d %b}",
+                 sub=f"{palier} · ~{chute['attendu']:.0f} cm · "
+                     f"{chute['prob'] * 100:.0f} %")
     else:
-        st.metric("Prochaine neige (sommet)", "aucune",
-                  "sur l'horizon visible", delta_color="off")
+        kpi_card("Prochaine neige (sommet)", "aucune",
+                 sub="sur l'horizon visible")
 
 
 def _tuile_lpn(lpn):
@@ -78,11 +79,10 @@ def _tuile_lpn(lpn):
         au_sommet = logic.neige_au_site(val, "sommet")
         detail = ("neige jusqu'en vallée" if au_village
                   else "neige au sommet" if au_sommet else "pluie aux deux points")
-        st.metric("Limite pluie-neige (48 h)", f"{val:.0f} m", detail,
-                  delta_color="off")
+        kpi_card("Limite pluie-neige (48 h)", f"{val:.0f}", unite="m", sub=detail)
     else:
-        st.metric("Limite pluie-neige (48 h)", "n/d",
-                  "iso 0° absent du pool", delta_color="off")
+        kpi_card("Limite pluie-neige (48 h)", "n/d",
+                 sub="iso 0° absent du pool")
 
 
 def _tuile_changement_temps(weather, bascule):
@@ -91,13 +91,12 @@ def _tuile_changement_temps(weather, bascule):
     daily = weather.daily if weather.available else None
     regime = weather_type.regime_meteo(daily, bascule=bascule is not None)
     if regime is None:
-        st.metric("Changement de temps", "n/d",
-                  "signal insuffisant", delta_color="off")
+        kpi_card("Changement de temps", "n/d", sub="signal insuffisant")
         return
     detail = regime.detail
     if regime.key == "perturbe" and bascule is not None:
         detail = f"{regime.detail} · dès {bascule:%a %d}"
-    st.metric("Changement de temps", regime.label, detail, delta_color="off")
+    kpi_card("Changement de temps", regime.label, sub=detail)
 
 
 def page_neige(runs, sig):

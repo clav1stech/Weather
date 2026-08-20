@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Composants Streamlit réutilisables (multi-pages) : carte KPI HTML, légende
-des runs retenus."""
+"""Composants propres au canicule : adaptateur de la carte KPI partagée (il y
+lie la climatologie de config.py) et légende des runs retenus. Tout le rendu
+vit dans core/ui/components.py, commun aux deux apps."""
 
 import pandas as pd
 
 import config as C
 from app.data.db import run_label_text
 from app.stats.climato import clim_normal
+from core.ui.components import kpi_html
 
 
 def complete_runs_caption(sources):
@@ -17,29 +19,25 @@ def complete_runs_caption(sources):
 
 
 def _kpi_card(label, value, help_txt="", value_point=None, valid_time=None, sub=""):
-    """Carte KPI ; si value_point + valid_time fournis, affiche l'anomalie vs la
-    normale climatique saisonnière (cosinus) à cette date. `sub` : ligne de
-    détail visible sous la valeur (date, probabilité…) — contrairement à
-    help_txt qui n'apparaît qu'au survol."""
-    anomalie_html = ""
+    """ADAPTATEUR de la carte KPI partagée (core/ui/components.kpi_html) : ne
+    reste ici que ce qui dépend de la config canicule — l'anomalie vs la normale
+    climatique saisonnière (cosinus) à l'échéance affichée, quand value_point et
+    valid_time sont fournis. `sub` : ligne de détail visible sous la valeur,
+    contrairement à help_txt qui n'apparaît qu'au survol.
+
+    Signature historique conservée (contrat des pages et du harnais de rendu) :
+    la fonction retourne du HTML, l'appelant l'affiche dans sa colonne."""
+    delta = delta_niveau = None
     if value_point is not None and valid_time is not None:
-        delta = value_point - float(clim_normal(pd.Timestamp(valid_time)))
-        if delta >= 0.05:
-            couleur, signe = "#C0392B", "+"
-        elif delta <= -0.05:
-            couleur, signe = "#2980B9", "−"
+        ecart = value_point - float(clim_normal(pd.Timestamp(valid_time)))
+        # Bande morte ±0,05 °C : un écart non significatif s'affiche « ± » et
+        # reste neutre, il ne doit pas colorer la carte comme une anomalie.
+        if ecart >= 0.05:
+            delta_niveau, signe = "warm", "+"
+        elif ecart <= -0.05:
+            delta_niveau, signe = "cold", "−"
         else:
-            couleur, signe = "#7F8C8D", "±"
-        anomalie_html = (f"<span style='color:{couleur};font-size:0.95rem;font-weight:600;"
-                         f"margin-left:8px;white-space:nowrap;'>"
-                         f"({signe}{abs(delta):.1f} °C norm.)</span>")
-    title_attr = f' title="{help_txt}"' if help_txt else ""
-    sub_html = (f"<div style='font-size:0.78rem;opacity:0.65;margin-top:2px;"
-                f"overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{sub}</div>"
-                if sub else "")
-    return (f"<div{title_attr} style='background:rgba(128,138,157,0.10);"
-            "border:1px solid rgba(128,138,157,0.25);"
-            "border-radius:12px;padding:12px 16px;height:100%;'>"
-            f"<div style='font-size:0.8rem;opacity:0.7;'>{label}</div>"
-            f"<div style='font-size:1.85rem;font-weight:600;color:inherit;line-height:1.3;'>"
-            f"{value}{anomalie_html}</div>{sub_html}</div>")
+            delta_niveau, signe = "neutral", "±"
+        delta = f"({signe}{abs(ecart):.1f} °C norm.)"
+    return kpi_html(label, value, delta=delta, delta_niveau=delta_niveau or "neutral",
+                    sub=sub or None, aide=help_txt or None)

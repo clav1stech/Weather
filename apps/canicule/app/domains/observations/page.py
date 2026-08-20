@@ -31,6 +31,7 @@ from app.domains.observations.charts import (
 from app.domains.observations.logic import (
     OBS_CARTE_ALERTE_H, ecart_icu_series, obs_est_perimee,
     tableau_ecarts_convergence, verdict_icu_nocturne, vintage_comparison_series)
+from core.ui.components import empty_state, kpi_card
 
 
 def _cols_cartes():
@@ -73,36 +74,33 @@ def _carte_station(col, station, row_h, row_6m, row_live, now_local, txtn=None):
     homogènes à cette échelle) — les afficher dans son rectangle donnerait à
     tort l'impression d'une donnée propre à cette seule station, cf.
     `_conditions_generales`."""
-    with col, st.container(border=True):
-        st.markdown(f"**{station['nom']}**")
-        if row_h is None and row_6m is None and row_live is None:
-            st.info("Pas encore d'observation en base.")
-            return
-        t, t_time = _champ_frais("t", row_h, row_6m, row_live)
-        # Température absente à ce poll : on horodate quand même avec l'obs la
-        # plus récente disponible (au moins une existe, cf. garde ci-dessus).
-        if t_time is None:
-            t_time = max(r["valid_time"] for r in (row_h, row_6m, row_live)
-                         if r is not None and pd.notna(r["valid_time"]))
-        t_txt = f"{t:.1f} °C" if pd.notna(t) else "—"
-        st.metric("Température", t_txt,
-                  help=f"Station {station['reseau']} · alt. {station['alt']} m")
-        # Min/max PROVISOIRES du jour civil en cours (depuis 00 h, flux horaire
-        # seul — cf. txtn_du_jour) : ligne présente sur TOUTES les cartes, « — »
-        # si donnée absente, pour garder hauteur et alignement identiques.
-        tn = txtn["tn"] if txtn is not None else float("nan")
-        tx = txtn["tx"] if txtn is not None else float("nan")
-        tn_txt = f"{tn:.1f}°" if pd.notna(tn) else "—"
-        tx_txt = f"{tx:.1f}°" if pd.notna(tx) else "—"
-        st.caption(f"Depuis 00 h : min {tn_txt} · max {tx_txt}")
-        heure = f"Le {t_time:%d/%m à %Hh%M}"
-        # Rouge si l'obs a plus d'OBS_CARTE_ALERTE_H (1 h) — seuil resserré vs
-        # OBS_PERIMEE_H (3 h) : avec le flux 6 min, une obs vieille d'1 h+ est
-        # déjà le signe d'un souci de collecte, pas juste un cron un peu lent.
-        if obs_est_perimee(t_time, now_local, seuil_h=OBS_CARTE_ALERTE_H):
-            st.markdown(f":red[{heure}]")
-        else:
-            st.caption(heure)
+    if row_h is None and row_6m is None and row_live is None:
+        empty_state(f"{station['nom']} — pas encore d'observation en base.", into=col)
+        return
+    t, t_time = _champ_frais("t", row_h, row_6m, row_live)
+    # Température absente à ce poll : on horodate quand même avec l'obs la
+    # plus récente disponible (au moins une existe, cf. garde ci-dessus).
+    if t_time is None:
+        t_time = max(r["valid_time"] for r in (row_h, row_6m, row_live)
+                     if r is not None and pd.notna(r["valid_time"]))
+    t_txt = f"{t:.1f}" if pd.notna(t) else "—"
+    # Min/max PROVISOIRES du jour civil en cours (depuis 00 h, flux horaire
+    # seul — cf. txtn_du_jour) : ligne présente sur TOUTES les cartes, « — »
+    # si donnée absente, pour garder hauteur et alignement identiques.
+    tn = txtn["tn"] if txtn is not None else float("nan")
+    tx = txtn["tx"] if txtn is not None else float("nan")
+    tn_txt = f"{tn:.1f}°" if pd.notna(tn) else "—"
+    tx_txt = f"{tx:.1f}°" if pd.notna(tx) else "—"
+    # Horodatage teinté « danger » si l'obs a plus d'OBS_CARTE_ALERTE_H (1 h) —
+    # seuil resserré vs OBS_PERIMEE_H (3 h) : avec le flux 6 min, une obs
+    # vieille d'1 h+ signale déjà un souci de collecte, pas un cron un peu lent.
+    perimee = obs_est_perimee(t_time, now_local, seuil_h=OBS_CARTE_ALERTE_H)
+    kpi_card(station["nom"], t_txt, unite="°C" if pd.notna(t) else None,
+             sub=f"Depuis 00 h : min {tn_txt} · max {tx_txt}",
+             note=f"Le {t_time:%d/%m à %Hh%M}",
+             note_niveau="danger" if perimee else None,
+             aide=f"Station {station['reseau']} · alt. {station['alt']} m",
+             into=col)
 
 
 def _conditions_generales(row_ref_h, row_ref_6m, row_ref_live):

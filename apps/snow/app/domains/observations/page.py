@@ -17,30 +17,30 @@ from ...data.observations import (daily_txtn_obs, latest_obs, obs_signature,
                                   obs_window)
 from . import logic
 from .charts import stations_chart
+from core.ui.components import kpi_card
 
 
 def _carte_station(col, station, obs):
     """Carte « temps réel » d'une station : température en valeur principale,
     complétée des seuls champs réellement mesurés (NaN structurel → omis)."""
-    with col:
-        t = obs.get("t")
-        valeur = f"{t:.1f} °C" if pd.notna(t) else "n/d"
-        extras = []
-        if pd.notna(obs.get("hneige")):
-            extras.append(f"{obs['hneige']:.0f} cm au sol")
-        if pd.notna(obs.get("raf")):
-            extras.append(f"raf {obs['raf'] * 3.6:.0f} km/h")
-        elif pd.notna(obs.get("vent_ff")):
-            extras.append(f"vent {obs['vent_ff'] * 3.6:.0f} km/h")
-        if pd.notna(obs.get("humidite")):
-            extras.append(f"{obs['humidite']:.0f} %")
-        horodatage = f"{obs['valid_time']:%H:%M}"
-        if logic.est_perimee(obs["valid_time"]):
-            horodatage = f"obs ancienne ({obs['valid_time']:%d %b %H:%M})"
-        st.metric(f"{station['nom']} · {station['alt']} m", valeur,
-                  " · ".join(extras) or horodatage, delta_color="off")
-        if extras:
-            st.caption(horodatage)
+    t = obs.get("t")
+    extras = []
+    if pd.notna(obs.get("hneige")):
+        extras.append(f"{obs['hneige']:.0f} cm au sol")
+    if pd.notna(obs.get("raf")):
+        extras.append(f"raf {obs['raf'] * 3.6:.0f} km/h")
+    elif pd.notna(obs.get("vent_ff")):
+        extras.append(f"vent {obs['vent_ff'] * 3.6:.0f} km/h")
+    if pd.notna(obs.get("humidite")):
+        extras.append(f"{obs['humidite']:.0f} %")
+    perimee = logic.est_perimee(obs["valid_time"])
+    horodatage = (f"obs ancienne ({obs['valid_time']:%d %b %H:%M})" if perimee
+                  else f"{obs['valid_time']:%H:%M}")
+    kpi_card(f"{station['nom']} · {station['alt']} m",
+             f"{t:.1f}" if pd.notna(t) else "n/d",
+             unite="°C" if pd.notna(t) else None,
+             sub=" · ".join(extras) or None, note=horodatage,
+             note_niveau="danger" if perimee else None, into=col)
 
 
 def page_observations(runs, sig):

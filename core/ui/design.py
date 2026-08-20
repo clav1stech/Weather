@@ -58,7 +58,7 @@ def stylesheet(dark=None):
       .wx-banner {{
           display: flex; align-items: center; gap: 0.9rem;
           background: var(--wx-surface); border: 1px solid var(--wx-border);
-          border-left: 5px solid var(--wx-accent);
+          border-left: 5px solid var(--wx-level, var(--wx-accent));
           border-radius: var(--wx-radius-md); padding: 0.85rem 1.1rem;
           margin-bottom: 1.1rem; box-shadow: var(--wx-shadow);}}
       .wx-banner .wx-banner-txt {{flex: 1; min-width: 0;}}
@@ -67,6 +67,7 @@ def stylesheet(dark=None):
       .wx-banner .wx-banner-sub {{font-size: 0.85rem; color: var(--wx-ink-soft); margin-top: 0.15rem;}}
       .wx-banner .wx-banner-dot {{
           width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto;
+          background: var(--wx-level, var(--wx-accent));
           box-shadow: 0 0 0 4px var(--wx-accent-soft);}}
 
       /* --- Carte KPI ------------------------------------------------------ */
@@ -84,6 +85,11 @@ def stylesheet(dark=None):
       .wx-kpi-delta {{font-size: 0.9rem; font-weight: 600; margin-left: 0.45rem; white-space: nowrap;}}
       .wx-kpi-sub {{
           font-size: 0.78rem; color: var(--wx-ink-soft); margin-top: 0.2rem;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}}
+      /* Seconde ligne de détail (horodatage, réserve) : même gabarit que la
+         première, en plus discret, et teintable quand elle porte un signal. */
+      .wx-kpi-note {{
+          font-size: 0.75rem; color: var(--wx-ink-faint); margin-top: 0.15rem;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}}
 
       /* --- Badge / pastille ----------------------------------------------- */

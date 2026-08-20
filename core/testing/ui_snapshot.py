@@ -46,8 +46,12 @@ from streamlit.testing.v1 import AppTest  # noqa: E402
 
 from core.testing.apptest_nav import aller_a  # noqa: E402
 
-# Registre des apps couvertes. `explore` = libellé de la page dont il faut
-# aussi rejouer le premier run archivé (exercer run_slice et les tableaux).
+# Registre des apps couvertes.
+#   explore        libellé de la page dont il faut aussi rejouer le run archivé
+#                  le plus récent (exercer run_slice et les tableaux) ;
+#   explore_rang   rang de ce run dans les options du sélecteur, les premières
+#                  étant des SENTINELLES (« dernier run », « horizon plein »),
+#                  dont le nombre diffère d'une app à l'autre.
 APPS = {
     "canicule": {
         "entry": "meteo_app.py",
@@ -56,6 +60,7 @@ APPS = {
                   "Vue d'ensemble", "Explorer un run", "Convergence des runs",
                   "Contrôle des runs", "Lancer le pipeline"],
         "explore": "Explorer un run",
+        "explore_rang": 1,
     },
     "neige": {
         "entry": "snow_app.py",
@@ -64,6 +69,7 @@ APPS = {
                   "Maille fine Météo-France", "Convergence des runs",
                   "Contrôle des runs", "Lancer le pipeline"],
         "explore": "Explorer un run",
+        "explore_rang": 2,
     },
 }
 DEFAUT = "canicule"
@@ -118,9 +124,12 @@ def snapshot_page(app, page):
     # Page Explorer : rejouer aussi avec le run archivé le plus récent (index 0),
     # pas seulement la sentinelle « Dernier run » — exercer run_slice + tableaux.
     if page == conf.get("explore") and at.selectbox:
+        rang = conf.get("explore_rang", 1)
         opts = at.selectbox[0].options
-        if len(opts) > 1:
-            at.selectbox[0].set_value(0).run()
+        if len(opts) > rang:
+            # Les options portent des valeurs propres à chaque app (indices de
+            # run côté canicule, libellés côté neige) : on rejoue par RANG.
+            at.selectbox[0].set_value(at.selectbox[0].options[rang]).run()
             assert not at.exception, f"Exception (run 0) : {at.exception[0].value}"
             snap["run0"] = {
                 "markdown": _texts(at.markdown), "caption": _texts(at.caption),

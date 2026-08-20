@@ -2,10 +2,12 @@
 """Wrapper canicule du harnais de non-régression du RENDU (AppTest), mutualisé
 dans core/testing/ui_snapshot.py — la commande documentée reste inchangée :
 
-    python tools/ui_snapshot.py capture   # fige la référence
-    python tools/ui_snapshot.py check     # compare à la référence
+    python tools/ui_snapshot.py capture         # canicule (défaut)
+    python tools/ui_snapshot.py check
+    python tools/ui_snapshot.py capture neige   # dashboard neige
+    python tools/ui_snapshot.py check neige
 
-Les références restent dans tools/golden/ (non versionnées)."""
+Les références restent dans tools/golden/ (non versionnées), une par app."""
 
 import os
 import sys

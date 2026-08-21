@@ -53,7 +53,11 @@ def _all_models_pivots(sub, site, col):
     s = sub[(sub["site"] == site) & sub[col].notna()]
     if s.empty:
         return None, None, None, []
-    present = s.groupby("run_date")["model"].agg(set)
+    # `model` est catégoriel dans la base (compacité mémoire) : pandas tente
+    # de recaster le résultat d'une agrégation pointwise dans le dtype
+    # d'origine, ce qu'un set ne permet pas — d'où le retour explicite en
+    # chaînes ici.
+    present = s["model"].astype(str).groupby(s["run_date"]).agg(set)
     common = sorted(set.intersection(*present.tolist())) if len(present) else []
     if len(common) < 2:
         return None, None, None, common

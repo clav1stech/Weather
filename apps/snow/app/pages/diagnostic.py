@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from apps.snow import snow_config as SC
-from apps.snow.app.data.db import load_db
+from apps.snow.app.data.db import mean_spread_db, members_db
 from apps.snow.app.data.quality import quality_report
 from apps.snow.app.ui.theme import _plotly_template
 
@@ -47,7 +47,11 @@ def page_diagnostic(runs, sig):
                "Les calculs emploient les mêmes fonctions et seuils que le "
                "pipeline de persistance.")
 
-    summary, history, anomalies = quality_report(load_db(sig))
+    # Les deux flux sont passés tels quels, sans recollement : chaque modèle
+    # n'existe que dans l'un des deux, et concaténer la base entière pour un
+    # simple diagnostic en doublerait l'empreinte le temps du rendu.
+    summary, history, anomalies = quality_report(
+        (members_db(sig), mean_spread_db(sig)))
     if summary.empty:
         st.warning("Aucun run neige exploitable dans le parquet ensemble.")
         return

@@ -17,65 +17,87 @@ canicule (CLAUDE.md § Vues combinées), adaptés au schéma à colonne `kind` :
 """
 
 import pandas as pd
+import streamlit as st
 
 from apps.snow import snow_config as SC
 from .db import list_runs, mean_db, members_db
 
 
-def _reach_h(group):
-    """Portée réelle (h) d'un run stocké : max valid_time − run_date sur les
-    lignes ayant AU MOINS une variable valide (how="all" — une variable
-    secondaire à couverture moindre ne raccourcit pas la portée)."""
-    valid = group.dropna(subset=SC.ENS_VAR_COLS, how="all")
-    if valid.empty:
-        return None
-    run_date = pd.Timestamp(group["run_date"].iloc[0])
-    return (valid["valid_time"].max() - run_date) / pd.Timedelta(hours=1)
+@st.cache_resource(show_spinner=False, max_entries=1)
+def _portees(sig):
+    """Index (modèle, run_date) → portée réelle en heures, pour TOUS les runs
+    membres en base. Table de quelques dizaines de lignes, calculée une fois.
+
+    Portée réelle d'un run : max valid_time − run_date sur les lignes ayant AU
+    MOINS une variable valide (how="all" — une variable secondaire à couverture
+    moindre ne raccourcit pas la portée) ; un run sans aucune ligne valide n'y
+    figure pas, ce qui vaut « portée indéfinie ».
+
+    Passer par cet index plutôt que par des découpes successives du DataFrame
+    est ce qui rend les politiques de pool peu coûteuses : chaque `df[df[…]]`
+    intermédiaire recopiait une fraction de la base rien que pour en mesurer
+    la portée, avant de la jeter."""
+    df = members_db(sig)
+    if df.empty:
+        return pd.DataFrame(columns=["model", "run_date", "reach_h"])
+    valides = df[SC.ENS_VAR_COLS].notna().any(axis=1)
+    cols = df.loc[valides, ["model", "run_date", "valid_time"]]
+    out = (cols.groupby(["model", "run_date"], as_index=False, observed=True)
+               .agg(fin=("valid_time", "max")))
+    out["reach_h"] = (out["fin"] - out["run_date"]) / pd.Timedelta(hours=1)
+    return out.drop(columns="fin")
 
 
-def _latest_by_policy(df, labels, require_full):
+def _run_choisi(portees, label, require_full):
+    """(run_date retenu, repli ?) pour un modèle : dernier run à horizon plein
+    si require_full, sinon dernier run non vide. Aucun run plein → repli sur le
+    dernier non vide, signalé. Aucun run du tout → (None, False)."""
+    sub = portees[portees["model"] == label].sort_values("run_date",
+                                                         ascending=False)
+    if sub.empty:
+        return None, False
+    horizon = SC.HORIZON_BY_LABEL.get(label)
+    if require_full and horizon is not None:
+        pleins = sub[sub["reach_h"] >= horizon - SC.FULL_HORIZON_TOLERANCE_H]
+        if not pleins.empty:
+            return pleins.iloc[0]["run_date"], False
+        return sub.iloc[0]["run_date"], True
+    return sub.iloc[0]["run_date"], False
+
+
+def _latest_by_policy(sig, labels, require_full):
     """Pool « dernier run par modèle » : dernier run à horizon plein si
     require_full (repli dernier non vide, signalé), sinon dernier non vide."""
-    parts, flags = [], {}
+    df = members_db(sig)
+    portees = _portees(sig)
+    choix, flags = {}, {}
     for label in labels:
-        sub = df[df["model"] == label]
-        if sub.empty:
+        run_date, repli = _run_choisi(portees, label, require_full)
+        if run_date is None:
             continue
-        chosen = None
-        horizon = SC.HORIZON_BY_LABEL.get(label)
-        for run_date in sorted(sub["run_date"].unique(), reverse=True):
-            g = sub[sub["run_date"] == run_date]
-            reach = _reach_h(g)
-            if reach is None:
-                continue
-            if not require_full or horizon is None \
-                    or reach >= horizon - SC.FULL_HORIZON_TOLERANCE_H:
-                chosen = g
-                break
-        if chosen is None:
-            # Aucun run plein : repli sur le dernier non vide, signalé.
-            for run_date in sorted(sub["run_date"].unique(), reverse=True):
-                g = sub[sub["run_date"] == run_date]
-                if _reach_h(g) is not None:
-                    chosen, flags[label] = g, "horizon réduit"
-                    break
-        if chosen is not None:
-            parts.append(chosen)
-    if not parts:
+        choix[label] = run_date
+        if repli:
+            flags[label] = "horizon réduit"
+    if not choix:
         return df.iloc[0:0], flags
+    # Une seule découpe, sur les seuls (modèle, run) retenus — les lignes
+    # restent dans l'ordre des `labels`, comme lorsque chaque modèle était
+    # extrait puis concaténé.
+    parts = [df[(df["model"] == label) & (df["run_date"] == run_date)]
+             for label, run_date in choix.items()]
     return pd.concat(parts, ignore_index=True), flags
 
 
 def latest_complete_run_sub(sig):
     """Vues combinées : dernier run à horizon plein de chaque modèle membres.
     Renvoie (sub, flags) — flags[label]="horizon réduit" en cas de repli."""
-    return _latest_by_policy(members_db(sig), SC.ENS_LABELS, require_full=True)
+    return _latest_by_policy(sig, SC.ENS_LABELS, require_full=True)
 
 
 def latest_run_sub(sig):
     """Option « Dernier run » : dernier run non vide de chaque modèle membres,
     sans exigence d'horizon (fraîcheur maximale, même partielle — voulu)."""
-    sub, _ = _latest_by_policy(members_db(sig), SC.ENS_LABELS, require_full=False)
+    sub, _ = _latest_by_policy(sig, SC.ENS_LABELS, require_full=False)
     return sub
 
 
@@ -84,13 +106,18 @@ def previous_runs_sub(sig, sub):
     antérieur (dernier run de CE modèle avant celui affiché) — support des
     colonnes Δ. Vide si aucun modèle n'a de run antérieur."""
     df = members_db(sig)
+    portees = _portees(sig)
     parts = []
     for label in sub["model"].unique():
         current = sub.loc[sub["model"] == label, "run_date"].max()
-        prior = df[(df["model"] == label) & (df["run_date"] < current)]
-        if prior.empty:
+        # Le run précédent se cherche dans l'index des runs, pas en découpant
+        # la base : seul le run finalement retenu en est extrait.
+        anterieurs = portees[(portees["model"] == label)
+                             & (portees["run_date"] < current)]
+        if anterieurs.empty:
             continue
-        parts.append(prior[prior["run_date"] == prior["run_date"].max()])
+        run_date = anterieurs["run_date"].max()
+        parts.append(df[(df["model"] == label) & (df["run_date"] == run_date)])
     if not parts:
         return df.iloc[0:0]
     return pd.concat(parts, ignore_index=True)

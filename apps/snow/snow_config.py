@@ -431,6 +431,26 @@ OBS_JOUR_COMPLET_MIN_H = 20  # heures min pour juger un Tx/Tn journalier fiable
 HOT_RETENTION_DAYS = 45
 
 # --------------------------------------------------------------------------- #
+#  Fenêtre de lecture des membres par le DASHBOARD (empreinte mémoire)
+# --------------------------------------------------------------------------- #
+# Les lignes MEMBRES sont à elles seules ~97 % du flux ensemble (~25 Mo de RAM
+# par jour collecté) : chargées en entier, elles font croître sans borne
+# l'empreinte du dashboard jusqu'à ce que l'hébergeur tue le process — la
+# sortie de git a supprimé le rollover qui bornait autrefois ce parquet
+# (« rollover implicite » : les partitions mensuelles ne sont plus jamais
+# retaillées). Le dashboard ne lit donc que les membres des runs récents ;
+# le magasin, lui, conserve TOUT (aucune donnée n'est perdue ni tronquée).
+#
+# 10 j couvre les usages réels des membres : pools « dernier run » des vues
+# combinées et d'Explorer, colonnes Δ vs run précédent, et les 7 j de
+# RUN_QUALITY_LOOKBACK_DAYS du contrôle des runs (plus la marge de
+# PUBLICATION_LAG_HOURS). La convergence, elle, ne dépend pas des membres :
+# elle s'appuie sur le flux _MEAN, chargé lui SANS fenêtre (rétention API
+# longue, ~1 % du volume). La fenêtre est relative au DERNIER run stocké, pas
+# à l'horloge : une base qui date de la veille reste entièrement lisible.
+ENS_MEMBERS_WINDOW_DAYS = 10
+
+# --------------------------------------------------------------------------- #
 #  Stockage
 # --------------------------------------------------------------------------- #
 SNOW_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -466,9 +486,10 @@ STORE_CACHE_DIR = os.path.join(tempfile.gettempdir(), "weather_store_cache")
 # Registre des flux neige sortis de git : (chemin parquet, colonne temporelle
 # de partition). Les parquets HOT et leur ARCHIVE (cold) figurent séparément :
 # chacun a son propre préfixe d'asset, ce qui préserve EXACTEMENT la
-# sémantique hot/cold du dashboard (load_db lit le hot, load_cold l'archive)
-# sans arbitrer entre les deux — le rollover continue de fonctionner comme
-# avant, il déplace simplement des lignes d'un flux du magasin vers l'autre.
+# sémantique hot/cold du dashboard (les membres viennent du hot, les mean/spread
+# du hot ET de l'archive) sans arbitrer entre les deux — le rollover continue de
+# fonctionner comme avant, il déplace simplement des lignes d'un flux du magasin
+# vers l'autre.
 STORE_FLUX = [
     (DB_ENS_PATH, "run_date"),
     (DB_ENS_COLD_PATH, "run_date"),

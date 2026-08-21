@@ -11,4 +11,4 @@ Un suffixe de pré-version (`-rc.1`) est admis : il marque une branche de
 chantier publiée en release candidate, chaque branche affichant sa version
 exacte. Il disparaît au bump de la version définitive."""
 
-SHARED_VERSION = "3.2.0-rc.1"
+SHARED_VERSION = "3.2.0-rc.2"

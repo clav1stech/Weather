@@ -19,6 +19,8 @@ import os
 import re
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import streamlit as st
 
 from apps.snow import snow_config as SC
@@ -26,7 +28,6 @@ from apps.snow.app.runtime import IS_LOCAL
 from core.store import (
     GitHubReleaseStore,
     LocalDirStore,
-    concat_partitions,
     parse_partition_name,
 )
 from core.store.github_http import (
@@ -113,19 +114,67 @@ def _cache_path(asset):
     return os.path.join(SC.STORE_CACHE_DIR, f"{safe}__{asset.name}")
 
 
-def load_store_df(prefix, store=None) -> pd.DataFrame:
-    """Concatène toutes les partitions d'un flux en un DataFrame brut (schéma
-    parquet). Téléchargement mis en cache par etag. Aucune écriture ailleurs
-    que dans le cache."""
+def _lire_table(path, filters=None, columns=None, categories=None):
+    """Un fichier parquet → table Arrow, filtres et colonnes poussés DANS la
+    lecture (pyarrow n'ouvre alors que les groupes de lignes et les colonnes
+    retenus).
+
+    `categories` sont lues en DICTIONNAIRE Arrow, c'est-à-dire déjà encodées
+    comme des catégories : un libellé répété n'est jamais matérialisé ligne à
+    ligne, ni côté Arrow ni côté pandas — recaster après coup construirait au
+    contraire un second exemplaire de la table. Une colonne absente du fichier
+    (schéma progressif) est simplement ignorée."""
+    lues = None
+    if categories:
+        presentes = set(pq.ParquetFile(path).schema_arrow.names)
+        lues = [c for c in categories if c in presentes] or None
+    return pq.read_table(path, filters=filters, columns=columns,
+                         read_dictionary=lues)
+
+
+def _tables_partitions(prefix, store=None, filters=None, columns=None,
+                       categories=None):
+    """Tables Arrow des partitions d'un flux, téléchargées à la demande (cache
+    disque clé par etag). `filters` (DNF pyarrow) et `columns` sont poussés
+    DANS la lecture parquet, jamais appliqués après coup : pyarrow n'ouvre
+    alors que les groupes de lignes et les colonnes retenus, là où un filtrage
+    a posteriori aurait d'abord matérialisé la partition entière — précisément
+    le pic qui fait tuer le process de l'hébergeur."""
     store = store or get_store()
     os.makedirs(SC.STORE_CACHE_DIR, exist_ok=True)
-    frames = []
+    tables = []
     for a in _partition_assets(store, prefix):
         local = _cache_path(a)
         if not os.path.exists(local):
             store.download(a.name, local)
-        frames.append(pd.read_parquet(local))
-    return concat_partitions(frames)
+        tables.append(_lire_table(local, filters, columns, categories))
+    return tables
+
+
+def _vers_pandas(tables):
+    """Tables Arrow → un seul DataFrame. Aucune table → DataFrame vide.
+
+    La concaténation a lieu AU NIVEAU ARROW (zéro copie), avant une conversion
+    unique : convertir chaque partition puis concaténer côté pandas
+    matérialiserait la base deux fois. `self_destruct` libère les tampons Arrow
+    au fil de la conversion ; les colonnes lues en dictionnaire (cf.
+    _lire_table) deviennent directement des catégories pandas."""
+    tables = [t for t in tables if t is not None and t.num_rows]
+    if not tables:
+        return pd.DataFrame()
+    table = (tables[0] if len(tables) == 1
+             else pa.concat_tables(tables, promote_options="permissive"))
+    del tables
+    return table.to_pandas(split_blocks=True, self_destruct=True)
+
+
+def load_store_df(prefix, store=None, filters=None, columns=None,
+                  categories=None) -> pd.DataFrame:
+    """Concatène toutes les partitions d'un flux en un DataFrame brut (schéma
+    parquet). Téléchargement mis en cache par etag. Aucune écriture ailleurs
+    que dans le cache."""
+    return _vers_pandas(_tables_partitions(prefix, store, filters, columns,
+                                          categories))
 
 
 def flux_signature(db_path):
@@ -146,26 +195,72 @@ def flux_signature(db_path):
         return None
 
 
-def read_flux(db_path):
-    """DataFrame BRUT d'un flux (aucune conversion, aucun filtre — l'appelant
-    garde son propre post-traitement) : magasin PRIMAIRE si actif, repli
-    automatique sur le parquet git en BACKUP au moindre échec ou résultat vide.
-    Rien d'exploitable des deux côtés → None, l'appelant se dégradant
-    silencieusement comme sans ce flux (invariant du dashboard neige)."""
+def _lecteurs(db_path):
+    """Sources de lecture d'un flux, par ordre de priorité : magasin externe si
+    actif, puis parquet git en BACKUP. Chaque source est une fonction
+    `(filters, columns) -> liste de tables Arrow`.
+
+    Exposer les sources plutôt qu'un seul DataFrame permet aux lectures en
+    deux passes (cf. read_flux_fenetre) de rester sur UNE MÊME source : une
+    fenêtre temporelle calculée sur le magasin ne doit jamais être appliquée à
+    un parquet git figé, qui n'aurait alors plus une seule ligne à renvoyer."""
     if store_active():
+        def _magasin(filters=None, columns=None, categories=None):
+            return _tables_partitions(flux_prefix(db_path), filters=filters,
+                                      columns=columns, categories=categories)
+        yield _magasin
+
+    def _git(filters=None, columns=None, categories=None):
+        if not os.path.exists(db_path):
+            return []
+        return [_lire_table(db_path, filters, columns, categories)]
+    yield _git
+
+
+def read_flux(db_path, filters=None, columns=None, categories=None):
+    """DataFrame BRUT d'un flux (aucune conversion, aucun filtre métier —
+    l'appelant garde son propre post-traitement) : magasin PRIMAIRE si actif,
+    repli automatique sur le parquet git en BACKUP au moindre échec ou
+    résultat vide. Rien d'exploitable des deux côtés → None, l'appelant se
+    dégradant silencieusement comme sans ce flux (invariant du dashboard
+    neige).
+
+    `filters`/`columns`/`categories` sont transmis tels quels à la lecture
+    (cf. _vers_pandas) — une source qui ne renvoie rien SOUS CES FILTRES est
+    traitée comme vide, donc suivie du repli."""
+    for lire in _lecteurs(db_path):
         try:
-            df = load_store_df(flux_prefix(db_path))
-            if df is not None and not df.empty:
-                return df
-        except Exception:  # noqa: BLE001 — magasin injoignable, repli sur git
-            pass
-    try:
-        if os.path.exists(db_path):
-            df = pd.read_parquet(db_path)
-            if df is not None and not df.empty:
-                return df
-    except Exception:  # noqa: BLE001 — parquet corrompu, dégradation silencieuse
-        pass
+            df = _vers_pandas(lire(filters=filters, columns=columns,
+                                   categories=categories))
+        except Exception:  # noqa: BLE001 — source injoignable ou parquet corrompu
+            continue
+        if not df.empty:
+            return df
+    return None
+
+
+def read_flux_fenetre(db_path, colonnes_sonde, filtres_depuis, categories=None):
+    """Lecture en DEUX PASSES sur la MÊME source, pour ne charger qu'une
+    fenêtre récente d'un flux volumineux.
+
+    Passe 1 : lecture des seules `colonnes_sonde` (quelques Mo) ; passe 2 :
+    relecture de la MÊME source avec les filtres pyarrow que `filtres_depuis`
+    en déduit (None → aucun filtre, tout le flux). Les deux passes restent
+    liées à une seule source pour que la fenêtre soit toujours calculée sur
+    les données effectivement lues ; l'échec ou le vide de l'une des deux fait
+    passer à la source suivante, comme dans read_flux."""
+    for lire in _lecteurs(db_path):
+        try:
+            sonde = _vers_pandas(lire(columns=list(colonnes_sonde)))
+            if sonde.empty:
+                continue
+            filtres = filtres_depuis(sonde)
+            del sonde
+            df = _vers_pandas(lire(filters=filtres, categories=categories))
+        except Exception:  # noqa: BLE001 — source injoignable ou parquet corrompu
+            continue
+        if not df.empty:
+            return df
     return None
 
 

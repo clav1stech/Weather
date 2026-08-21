@@ -133,6 +133,16 @@ bouge pas :
   assets immuables.
 - **Streamlit Cloud** : lit désormais les assets au runtime (repo public → sans token).
   Cold start = re-download borné ; optimisation cache disque possible plus tard.
+- **Empreinte mémoire (contrepartie du rollover implicite, §5)** : un flux sorti de git
+  n'est plus jamais retaillé, donc ce que le dashboard charge croît sans borne s'il
+  charge tout. Côté neige, les lignes MEMBRES du flux ensemble sont ~97 % du volume et
+  ne servent qu'aux runs récents : elles sont lues sur une FENÊTRE
+  (`snow_config.ENS_MEMBERS_WINDOW_DAYS`), tandis que le flux mean/spread — support de
+  la convergence, ~1 % du volume — reste lu sur tout l'historique. La fenêtre s'applique
+  DANS la lecture parquet (filtres pyarrow poussés jusqu'aux groupes de lignes), jamais
+  après coup : un filtrage a posteriori aurait déjà matérialisé la base entière.
+  Les bases sont partagées via `@st.cache_resource` et non `@st.cache_data`, qui en
+  désérialise une copie complète par appelant.
 
 ## 8. Transition en phases (preuve de non-régression à chaque étape)
 

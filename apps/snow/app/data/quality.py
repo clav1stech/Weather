@@ -75,15 +75,43 @@ def expected_cycles(now_utc=None, lookback_days=None):
     return pd.DataFrame(rows, columns=["model", "cycle_utc"])
 
 
-def quality_report(df, now_utc=None, lookback_days=None):
-    """Renvoie ``(synthèse modèles, historique runs, anomalies cycles)``."""
+def _frames(sources):
+    """`sources` = un DataFrame ou plusieurs (un par flux) → liste non vide de
+    DataFrames non vides. Accepter plusieurs flux évite au seul appelant réel
+    d'en construire d'abord le recollement : les membres pèsent des centaines
+    de Mo, et chaque modèle n'est de toute façon lu que dans le flux qui le
+    porte."""
+    if sources is None:
+        return []
+    if isinstance(sources, pd.DataFrame):
+        sources = [sources]
+    return [f for f in sources if f is not None and not f.empty]
+
+
+def _model_rows(frames, label):
+    """Lignes d'un modèle, cherchées dans chaque flux fourni. Un modèle
+    n'existe que dans un seul d'entre eux (membres OU mean/spread), mais rien
+    n'en dépend : le recollement est fait par modèle, jamais sur toute la base."""
+    parts = [f[f["model"] == label] for f in frames]
+    parts = [p for p in parts if not p.empty]
+    if not parts:
+        return frames[0].iloc[0:0]
+    return parts[0] if len(parts) == 1 else pd.concat(parts, ignore_index=True)
+
+
+def quality_report(sources, now_utc=None, lookback_days=None):
+    """Renvoie ``(synthèse modèles, historique runs, anomalies cycles)``.
+
+    ``sources`` est un DataFrame au schéma ensemble, ou plusieurs (un par
+    flux)."""
     summary_cols = ["Modèle", "Flux", "Dernier run UTC", "Âge (h)",
                     "Portée (h)", "Complétude", "Fraîcheur empirique",
                     "Dernier cycle attendu UTC", "Publication"]
     history_cols = ["model", "stream", "run_date", "run_utc", "reach_h",
                     "horizon_h", "complete"]
     anomaly_cols = ["Modèle", "Flux", "Cycle UTC", "Type", "Détail"]
-    if df is None or df.empty:
+    frames = _frames(sources)
+    if not frames:
         return (pd.DataFrame(columns=summary_cols),
                 pd.DataFrame(columns=history_cols),
                 pd.DataFrame(columns=anomaly_cols))
@@ -97,7 +125,7 @@ def quality_report(df, now_utc=None, lookback_days=None):
     for spec in _model_specs():
         label = spec["label"]
         stream = _stream_name(label)
-        model_df = df[df["model"] == label]
+        model_df = _model_rows(frames, label)
         exp = expected[expected["model"] == label]
         latest_expected = exp["cycle_utc"].max() if not exp.empty else pd.NaT
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## [3.2.0-rc.2] - 2026-08-21
+Dashboard neige : empreinte mémoire bornée, plus de redémarrage forcé.
+
+Le dashboard neige était tué à intervalles réguliers par l'hébergeur, faute de
+mémoire. Depuis la sortie de git, le flux ensemble n'est plus jamais retaillé :
+ses lignes membres, 97 % du volume et 25 Mo de RAM par jour collecté,
+s'accumulaient sans borne dans la base chargée. Le dashboard ne lit désormais
+les membres que sur une fenêtre de dix jours, relative au dernier run stocké et
+non à l'horloge ; le flux mean/spread, support de la convergence, reste lu sur
+tout l'historique. Le magasin conserve tout : seule la lecture est bornée.
+
+Les filtres descendent dans la lecture parquet, jusqu'aux groupes de lignes, au
+lieu de s'appliquer sur une base déjà matérialisée, et les colonnes de libellés
+sont lues en dictionnaire Arrow plutôt que recastées après coup. Les bases
+volumineuses passent en `cache_resource`, qui partage une instance, là où
+`cache_data` en désérialisait une copie complète par appelant ; membres et
+mean/spread sont cachés séparément, un recollement caché tenant les membres
+deux fois en mémoire. Les pools de runs se choisissent enfin sur un index de
+portées plutôt qu'en découpant la base modèle par modèle, et le contrôle des
+runs lit les deux flux tels quels.
+
+Base tenue en mémoire ramenée de 805 à 372 Mo et désormais bornée ; pic mesuré
+sur le rendu des cinq pages de 3,0 à 2,0 Go. Sorties strictement identiques
+sur des données que la fenêtre ne coupe pas, flux mean/spread inchangé au bit
+près, 174 tests au vert.
+
 ## [3.2.0-rc.1] - 2026-08-20
 Refonte de l'interface : design system partagé, navigation en barre du haut.
 

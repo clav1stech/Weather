@@ -9,19 +9,19 @@ on:
     - cron: '15 10 * * *'   # 0Z
     - cron: '15 22 * * *'   # 12Z
     # Tx/Tn haute résolution (API Forecast, flux annexe) : toutes les 2h,
-    # décalé de 30 min du fetch-api pour ne pas faire la queue au push.
+    # décalé de 30 min du fetch-api (créneaux distincts, aucun lien de push
+    # depuis la coupure des commits de parquet — écriture magasin seule).
     - cron: '45 */2 * * *'
     # Observations Météo-France (DPObs, flux annexe) : toutes les heures —
     # cadence VOLONTAIREMENT indépendante des autres jobs (l'API publie une
     # obs horaire par station ; 4 requêtes/h, quota 100 req/min très loin).
-    # Décalé à :20 pour ne pas faire la queue au push avec :15 et :45.
     - cron: '20 * * * *'
     # Prévision Montsouris « vintages » 15 min (API Forecast minutely_15, flux
     # annexe) : toutes les heures. Chaque poll fige un vintage supplémentaire de
     # chaque échéance (historique des révisions conservé, cf.
     # fetch_montsouris_vintages.py) — une cadence horaire suffit à capturer la
-    # convergence de la prévision sans gonfler la charge de push git. Créneau :50
-    # libre (évite :05/:10/:15/:20/:25/:35/:40/:45/:55).
+    # convergence de la prévision. Créneau :50 libre (évite
+    # :05/:10/:15/:20/:25/:35/:40/:45/:55).
     - cron: '50 * * * *'
     # Observations infra-horaires 6 min (DPPaquetObs /paquet/infrahoraire-6m,
     # flux annexe) : toutes les 15 min — c'est la FRAÎCHEUR temps réel des
@@ -64,9 +64,6 @@ jobs:
       (github.event.inputs.target == 'both' || github.event.inputs.target == 'api' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '15 */2 * * *'
     runs-on: ubuntu-latest
-    concurrency:
-      group: weather-data-push
-      cancel-in-progress: false
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -79,57 +76,30 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch and Push Database
+      - name: Fetch Database
         env:
-          # Double écriture « sortie de git » (docs/DESIGN_sortie_git.md, Phase 1) :
-          # Forecast.py mirrore les partitions du mois vers le release data-store
-          # APRÈS avoir écrit git (source de vérité) — best-effort, jamais bloquant.
-          # gh utilise GH_TOKEN (mêmes droits contents:write que le push git).
+          # Magasin = source de vérité (Phase 3, docs/DESIGN_sortie_git.md §8) :
+          # la CI ne committe plus data/database_paris.parquet, qui reste FIGÉ
+          # dans git à son dernier état — simple repli de lecture local, comme
+          # la neige (CLAUDE.md § Magasin de données externe). gh utilise
+          # GH_TOKEN (mêmes droits contents:write qu'avant pour le release
+          # data-store). Lecture de l'existant BLOQUANTE : un magasin
+          # injoignable fait échouer le run, jamais de repli disque.
           WEATHER_STORE_WRITE: "1"
-          # Existant lu dans le magasin (et non sur le disque) : étape de
-          # validation avant le débranchement des commits de parquet — le
-          # fichier du clone deviendra alors une copie gelée. Bloquant : un
-          # magasin injoignable fait échouer le run, jamais de repli disque.
           WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action Pipeline"
-          shopt -s nullglob
-          # Les parquets sont binaires : un `git pull --rebase` ne sait pas
-          # fusionner deux écritures concurrentes (conflit non auto-résoluble,
-          # contrairement à du texte) — on ne tente donc jamais ce merge côté
-          # git. En cas d'échec de push, on repart de l'état distant à jour et
-          # on relance la collecte : Forecast.py recalcule la fusion via
-          # persist() (dédup par (run_date, modèle), anti-régression) sur
-          # cette base fraîche, ce qui est toujours correct.
-          n=0
-          while true; do
-            python Forecast.py
-            git add data/*.parquet
-            git diff-index --quiet HEAD && break
-            git commit -m "Pipeline: base Open-Meteo synchronisée"
-            git push && break
-            n=$((n + 1))
-            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
-            sleep $((RANDOM % 10 + 5))
-            git fetch origin "${GITHUB_REF_NAME}"
-            git reset --hard "origin/${GITHUB_REF_NAME}"
-          done
+        run: python Forecast.py
 
   fetch-t2m-hd:
     # Flux ANNEXE Tx/Tn haute résolution (forecast_t2m_hd.py → parquet séparé
-    # data/database_paris_t2m.parquet). Fichier distinct des autres jobs, mais
-    # le PUSH git, lui, est partagé : même concurrency.group pour sérialiser
-    # (le cron 2h croise fatalement fetch-api ; sans groupe commun, courses de
-    # push malgré le pull --rebase). Cron décalé de 30 min pour limiter la file.
+    # data/database_paris_t2m.parquet). Écrit uniquement dans le magasin
+    # (Phase 3) : plus de push git, donc plus de concurrency.group à
+    # sérialiser. Cron décalé de 30 min de fetch-api par simple lisibilité des
+    # logs (aucune contention à éviter).
     if: |
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 't2m' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '45 */2 * * *'
     runs-on: ubuntu-latest
-    concurrency:
-      group: weather-data-push
-      cancel-in-progress: false
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -142,56 +112,28 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch and Push T2m Database
+      - name: Fetch T2m Database
         env:
-          # Double écriture « sortie de git » : miroir best-effort vers data-store
-          # après l'écriture git (source de vérité). gh via GH_TOKEN.
+          # Magasin = source de vérité (Phase 3, docs/DESIGN_sortie_git.md §8) :
+          # la CI ne committe plus data/database_paris_t2m.parquet, qui reste
+          # FIGÉ dans git à son dernier état — simple repli de lecture local,
+          # comme la neige. Lecture de l'existant BLOQUANTE : un magasin
+          # injoignable fait échouer le run, jamais de repli disque.
           WEATHER_STORE_WRITE: "1"
-          # Existant lu dans le magasin (et non sur le disque) : étape de
-          # validation avant le débranchement des commits de parquet — le
-          # fichier du clone deviendra alors une copie gelée. Bloquant : un
-          # magasin injoignable fait échouer le run, jamais de repli disque.
           WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action Pipeline"
-          # Le parquet est binaire : un `git pull --rebase` ne sait pas fusionner
-          # deux écritures concurrentes — on ne tente donc jamais ce merge côté
-          # git. En cas d'échec de push, on repart de l'état distant à jour et on
-          # relance la collecte : forecast_t2m_hd.py recalcule la fusion via
-          # persist() sur cette base fraîche, ce qui est toujours correct.
-          n=0
-          while true; do
-            python forecast_t2m_hd.py
-            # Le fichier peut ne pas exister au tout premier run si l'API n'a rien
-            # renvoyé d'exploitable (le script sort alors sans écrire).
-            if [ -f data/database_paris_t2m.parquet ]; then
-              git add data/database_paris_t2m.parquet
-            fi
-            git diff-index --quiet HEAD && break
-            git commit -m "Pipeline: base Tx/Tn HD synchronisée"
-            git push && break
-            n=$((n + 1))
-            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
-            sleep $((RANDOM % 10 + 5))
-            git fetch origin "${GITHUB_REF_NAME}"
-            git reset --hard "origin/${GITHUB_REF_NAME}"
-          done
+        run: python forecast_t2m_hd.py
 
   fetch-observations:
     # Flux ANNEXE observations Météo-France (fetch_observations.py → parquet
     # séparé data/database_paris_observations.parquet). La clé API vit dans le
     # secret METEOFRANCE_API_KEY — jamais dans le code ni les logs (le script
-    # ne l'affiche jamais, même partiellement). Même concurrency.group que les
-    # autres jobs : la contention est sur le PUSH git du repo, pas les fichiers.
+    # ne l'affiche jamais, même partiellement). Écrit uniquement dans le
+    # magasin (Phase 3) : plus de push git, donc plus de concurrency.group.
     if: |
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'obs' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '20 * * * *'
     runs-on: ubuntu-latest
-    concurrency:
-      group: weather-data-push
-      cancel-in-progress: false
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -204,56 +146,29 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch and Push Observations Database
+      - name: Fetch Observations Database
         env:
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
-          # Double écriture « sortie de git » vers data-store (best-effort).
-          WEATHER_STORE_WRITE: "1"
-          # Existant lu dans le magasin (et non sur le disque) : étape de
-          # validation avant le débranchement des commits de parquet — le
-          # fichier du clone deviendra alors une copie gelée. Bloquant : un
+          # Magasin = source de vérité (Phase 3, docs/DESIGN_sortie_git.md §8) :
+          # la CI ne committe plus data/database_paris_observations.parquet,
+          # qui reste FIGÉ dans git à son dernier état — simple repli de
+          # lecture local, comme la neige. Lecture de l'existant BLOQUANTE : un
           # magasin injoignable fait échouer le run, jamais de repli disque.
+          WEATHER_STORE_WRITE: "1"
           WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action Pipeline"
-          # Le parquet est binaire : un `git pull --rebase` ne sait pas fusionner
-          # deux écritures concurrentes — on ne tente donc jamais ce merge côté
-          # git. En cas d'échec de push, on repart de l'état distant à jour et on
-          # relance la collecte : fetch_observations.py recalcule la fusion via
-          # persist() (dédup par (station_id, valid_time)) sur cette base
-          # fraîche, ce qui est toujours correct (paquet en fenêtre glissante).
-          n=0
-          while true; do
-            python fetch_observations.py
-            # Le fichier peut ne pas exister au tout premier run si aucune
-            # station n'a répondu (le script sort alors sans écrire).
-            if [ -f data/database_paris_observations.parquet ]; then
-              git add data/database_paris_observations.parquet
-            fi
-            git diff-index --quiet HEAD && break
-            git commit -m "Pipeline: observations Météo-France synchronisées"
-            git push && break
-            n=$((n + 1))
-            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
-            sleep $((RANDOM % 10 + 5))
-            git fetch origin "${GITHUB_REF_NAME}"
-            git reset --hard "origin/${GITHUB_REF_NAME}"
-          done
+        run: python fetch_observations.py
 
   fetch-observations-6m:
     # Flux ANNEXE observations 6 min (fetch_observations_6m.py → parquet séparé
-    # data/database_paris_observations_6m.parquet). Même clé/secret et même
-    # concurrency.group que les autres jobs (contention sur le PUSH git, pas les
-    # fichiers). Cadence 15 min : c'est la fraîcheur temps réel des cartes station.
+    # data/database_paris_observations_6m.parquet). Même clé/secret que
+    # fetch-observations. Écrit uniquement dans le magasin (Phase 3) : plus de
+    # push git, donc plus de concurrency.group. Cadence 15 min : c'est la
+    # fraîcheur temps réel des cartes station.
     if: |
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'obs6m' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '10,25,40,55 * * * *'
     runs-on: ubuntu-latest
-    concurrency:
-      group: weather-data-push
-      cancel-in-progress: false
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -266,63 +181,31 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch and Push Observations 6 min Database
+      - name: Fetch Observations 6 min Database
         env:
           METEOFRANCE_API_KEY: ${{ secrets.METEOFRANCE_API_KEY }}
-          # Double écriture « sortie de git » vers data-store (best-effort).
-          WEATHER_STORE_WRITE: "1"
-          # Existant lu dans le magasin (et non sur le disque) : étape de
-          # validation avant le débranchement des commits de parquet — le
-          # fichier du clone deviendra alors une copie gelée. Bloquant : un
+          # Magasin = source de vérité (Phase 3, docs/DESIGN_sortie_git.md §8) :
+          # la CI ne committe plus data/database_paris_observations_6m.parquet,
+          # qui reste FIGÉ dans git à son dernier état — simple repli de
+          # lecture local, comme la neige. Lecture de l'existant BLOQUANTE : un
           # magasin injoignable fait échouer le run, jamais de repli disque.
+          WEATHER_STORE_WRITE: "1"
           WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action Pipeline"
-          # Cadence la plus rapprochée des 6 jobs (15 min) : la plus exposée à
-          # une collision de push malgré le concurrency.group partagé (file
-          # d'attente GitHub non garantie, cf. note du job fetch-api). Le
-          # parquet étant binaire, un `git pull --rebase` ne sait pas fusionner
-          # deux écritures concurrentes (conflit non auto-résoluble, contrairement
-          # à du texte) — on ne tente donc jamais ce merge côté git. En cas
-          # d'échec de push, on repart de l'état distant à jour et on relance la
-          # collecte : fetch_observations_6m.py recalcule la fusion via
-          # persist() (dédup par clé (station_id, valid_time)) sur cette base
-          # fraîche, ce qui est toujours correct (fenêtre glissante de l'API).
-          n=0
-          while true; do
-            python fetch_observations_6m.py
-            # Le fichier peut ne pas exister au tout premier run si aucune
-            # station n'a répondu (le script sort alors sans écrire).
-            if [ -f data/database_paris_observations_6m.parquet ]; then
-              git add data/database_paris_observations_6m.parquet
-            fi
-            git diff-index --quiet HEAD && break
-            git commit -m "Pipeline: observations 6 min synchronisées"
-            git push && break
-            n=$((n + 1))
-            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
-            sleep $((RANDOM % 10 + 5))
-            git fetch origin "${GITHUB_REF_NAME}"
-            git reset --hard "origin/${GITHUB_REF_NAME}"
-          done
+        run: python fetch_observations_6m.py
 
   fetch-vintages:
     # Flux ANNEXE prévision Montsouris « vintages » 15 min
     # (fetch_montsouris_vintages.py → parquet séparé
     # data/database_paris_montsouris_vintages.parquet). Aucune clé requise (API
-    # Open-Meteo publique). Même concurrency.group que les autres jobs : la
-    # contention est sur le PUSH git du repo, pas les fichiers. Le backfill
-    # past_days est géré par le script (large au 1er run, modeste ensuite) ; la
-    # compaction borne la table à chaque run.
+    # Open-Meteo publique). Écrit uniquement dans le magasin (Phase 3) : plus
+    # de push git, donc plus de concurrency.group. Le backfill past_days est
+    # géré par le script (large au 1er run, modeste ensuite) ; la compaction
+    # borne la table à chaque run.
     if: |
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'vintages' || github.event.inputs.target == 'all')) ||
       github.event.schedule == '50 * * * *'
     runs-on: ubuntu-latest
-    concurrency:
-      group: weather-data-push
-      cancel-in-progress: false
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -335,42 +218,18 @@ jobs:
       - name: Install Dependencies
         run: pip install requests pandas pyarrow
 
-      - name: Fetch and Push Vintages Database
+      - name: Fetch Vintages Database
         env:
-          # Double écriture « sortie de git » vers data-store (best-effort).
+          # Magasin = source de vérité (Phase 3, docs/DESIGN_sortie_git.md §8) :
+          # la CI ne committe plus
+          # data/database_paris_montsouris_vintages.parquet, qui reste FIGÉ
+          # dans git à son dernier état — simple repli de lecture local, comme
+          # la neige. Lecture de l'existant BLOQUANTE : un magasin injoignable
+          # fait échouer le run, jamais de repli disque.
           WEATHER_STORE_WRITE: "1"
-          # Existant lu dans le magasin (et non sur le disque) : étape de
-          # validation avant le débranchement des commits de parquet — le
-          # fichier du clone deviendra alors une copie gelée. Bloquant : un
-          # magasin injoignable fait échouer le run, jamais de repli disque.
           WEATHER_STORE_SOURCE: "1"
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action Pipeline"
-          # Le parquet est binaire : un `git pull --rebase` ne sait pas fusionner
-          # deux écritures concurrentes — on ne tente donc jamais ce merge côté
-          # git. En cas d'échec de push, on repart de l'état distant à jour et on
-          # relance la collecte : fetch_montsouris_vintages.py recalcule la
-          # fusion via persist() (append + compaction, fonctions pures) sur
-          # cette base fraîche, ce qui est toujours correct.
-          n=0
-          while true; do
-            python fetch_montsouris_vintages.py
-            # Le fichier peut ne pas exister si l'API n'a rien renvoyé
-            # d'exploitable (le script sort alors sans écrire).
-            if [ -f data/database_paris_montsouris_vintages.parquet ]; then
-              git add data/database_paris_montsouris_vintages.parquet
-            fi
-            git diff-index --quiet HEAD && break
-            git commit -m "Pipeline: prévision Montsouris vintages 15 min synchronisée"
-            git push && break
-            n=$((n + 1))
-            [ "$n" -ge 5 ] && { echo "Échec du push après $n tentatives" >&2; exit 1; }
-            sleep $((RANDOM % 10 + 5))
-            git fetch origin "${GITHUB_REF_NAME}"
-            git reset --hard "origin/${GITHUB_REF_NAME}"
-          done
+        run: python fetch_montsouris_vintages.py
 
   fetch-snow:
     # Pipeline NEIGE Megève (apps/snow/pipeline/ → magasin de données externe,

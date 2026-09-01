@@ -170,25 +170,35 @@ la suit à l'identique.** On ne coupe git qu'après cette preuve.
     `tools/ui_snapshot.py` (rendu AppTest) en `capture` (lecture disque) puis `check`
     (lecture store) — **100 % identique** attendu (même base, même heure ronde).
 
-- **Phase 3 — Coupure de git.**
+- **Phase 3 — Coupure de git.** *(faite, 2026-09-01, cinq flux canicule)*
   - **Prérequis, fait** : le pipeline lit l'existant DANS LE MAGASIN
     (`WEATHER_STORE_SOURCE=1` dans les cinq jobs canicule, branché au niveau de
-    `load_existing()`). Sans cela, couper les commits ferait repartir chaque run
-    de la copie gelée du clone, puis réécrirait le magasin depuis cet historique
-    tronqué. À valider sur quelques cycles CI **avant** de couper : git reste
-    committé pendant cette fenêtre, donc réversible en retirant une ligne.
-  - Pipeline : cesse `git add data/*.parquet` + commit ; **uploade seulement**.
-  - `git rm --cached data/database_paris.parquet` + ajout à `.gitignore` (fichier retiré
-    du suivi, copie de travail conservée). L'historique reste **gelé** (décision §2).
-  - Dashboard : lit le store par défaut en ligne (`store_active()` = `not IS_LOCAL`,
-    `WEATHER_STORE` ne servant qu'à forcer l'un ou l'autre). Le flag se lit dans
-    `st.secrets` puis dans l'environnement — un flag lu du seul `os.environ` reste
-    inactif sur Streamlit Cloud, qui n'expose pas de variables d'environnement.
-  - Re-`check` non-régression : identique.
+    `load_existing()`). Validé sur ~44 h de cycles CI verts avant la coupure.
+  - Pipeline : les cinq jobs (`fetch-api`, `fetch-t2m-hd`, `fetch-observations`,
+    `fetch-observations-6m`, `fetch-vintages`) ont cessé `git add data/*.parquet`
+    + commit + push ; ils **uploadent seulement** (`WEATHER_STORE_WRITE`, déjà
+    actif). Retrait au passage de leur `concurrency.group`/boucle de retry sur
+    le push, devenus sans objet.
+  - **Écart assumé au plan initial** : les cinq parquets **restent trackés dans
+    git** (pas de `git rm --cached` ni d'entrée `.gitignore`) — précédent réel de
+    la neige (§8 Phase 4, ci-dessous), qui n'a jamais fait ce retrait non plus.
+    Ils restent simplement **FIGÉS** (plus aucun commit ne les touche), ce qui
+    préserve le repli local/dev (`store_active()` = git par défaut en local,
+    `dev`/tests/harnais n'ont jamais besoin du réseau) sans rien casser — un
+    `git rm --cached` aurait privé tout nouveau clone local du fichier.
+    L'historique reste **gelé** (décision §2) dans les deux cas.
+  - Dashboard : inchangé, lit déjà le store par défaut en ligne (`store_active()`
+    = `not IS_LOCAL`, `WEATHER_STORE` ne servant qu'à forcer l'un ou l'autre).
+  - **Preuve de non-régression, faite avant la coupure** : `tools/check_non_regression.py`
+    et `tools/ui_snapshot.py` en `capture` (lecture disque git) puis `check`
+    (lecture store, `WEATHER_STORE=1`) — 100 % identique (35 sorties de calcul,
+    rendu des 7 pages).
 
-- **Phase 4 — Nettoyage & généralisation.** *(neige faite)*
-  - Canicule : les cinq flux sont en double écriture, dashboard en lecture
-    magasin avec repli git. Reste la coupure de git (Phase 3) après validation.
+- **Phase 4 — Nettoyage & généralisation.** *(neige faite ; canicule faite, cf. Phase 3)*
+  - **Canicule : les cinq flux écrivent désormais uniquement dans le magasin**
+    (Phase 3 ci-dessus faite), dashboard en lecture magasin avec repli git sur
+    les parquets figés. `rollover-canicule` et `scrape-legacy` (xlsx/csv, texte
+    mergeable) ne sont pas concernés, ils committent toujours normalement.
   - **Neige : passée directement en magasin seul** (pas de double écriture — le
     mécanisme était déjà éprouvé côté canicule, et l'app est hors production).
     La CI ne committe plus aucun parquet neige ; les fichiers restés dans git
@@ -210,8 +220,9 @@ les xlsx legacy. Garanties, en plus des invariants du §3 :
 - **Assets mensuels immuables** = backstop ; **xlsx legacy** = assurance-vie ultime,
   intouchés.
 - **Rollback par phase** : Phase 0-1 = supprimer les assets, rien d'autre ; Phase 2 =
-  éteindre le flag ; Phase 3 = ré-ajouter les fichiers au suivi git (ils sont toujours sur
-  disque et dans le store). Aucun point de non-retour avant d'avoir la preuve à l'identique.
+  éteindre le flag ; Phase 3 = ré-ajouter les étapes `git add`/commit/push dans les jobs
+  workflow (les fichiers sont restés trackés, jamais retirés du suivi — cf. Phase 3
+  révisée). Aucun point de non-retour avant d'avoir la preuve à l'identique.
 - **Branche & CI** : `dev/data-store` ne committe **aucune modification** des
   `data/*.parquet` existants (règle CLAUDE.md) — les jobs CI ne poussent que sur `main`.
   Pour travailler avec de la donnée fraîche en local sans risquer de la committer :
